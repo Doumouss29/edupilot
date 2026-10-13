@@ -14,7 +14,7 @@ from flask import send_file
 
 ROOT = Path(__file__).parent
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY') or ('demo-local-only-secret' if os.getenv('EDUPILOT_DEMO', 'true') == 'true' else secrets.token_hex(32))
+app.secret_key = os.getenv('SECRET_KEY') or ('demo-local-only-secret' if os.getenv('EDUPILOT_DEMO', 'false').lower() == 'true' else secrets.token_hex(32))
 app.config['MAX_CONTENT_LENGTH'] = 12 * 1024 * 1024
 DB = os.getenv('DATABASE_PATH', '/tmp/edupilot.db')
 UPLOAD_DIR = Path(os.getenv('UPLOAD_DIR', '/tmp/edupilot_uploads'))
@@ -123,7 +123,8 @@ with db() as c:
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_name','LMurbs')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_phone','+2250711124359')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('powered_by','Propulsé par LMurbs')")
-seed()
+if os.getenv('EDUPILOT_DEMO','false').lower()=='true':
+    seed()
 
 def setting(key,default=''):
     row=one('SELECT value FROM settings WHERE key=?',(key,))
