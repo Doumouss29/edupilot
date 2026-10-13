@@ -27,7 +27,7 @@ class EduPilotSmoke(unittest.TestCase):
             return sess["csrf"]
 
     def test_all_templates_compile(self):
-        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","school_new.html","school_accounts.html","change_password.html"):
+        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","school_new.html","school_accounts.html","change_password.html"):
             project.app.jinja_env.get_template(template)
 
     def test_health(self):
@@ -107,7 +107,7 @@ class EduPilotSmoke(unittest.TestCase):
         self.login("admin1@demo.edupilot.test")
         cl=project.one("SELECT id,year_id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
         email="manual.student.demo@example.test"
-        response=self.client.post("/people",data={"csrf":self.token(),"role":"etudiant","name":"Etudiant Manuel","email":email,"class_id":cl["id"]})
+        response=self.client.post("/people",data={"csrf":self.token(),"role":"etudiant","name":"Etudiant Manuel","email":email,"class_id":cl["id"],"password":"Temporary2026Secret!"})
         self.assertEqual(response.status_code,302)
         student=project.one("SELECT id FROM users WHERE email=?",(email,))
         self.assertIsNotNone(student)
@@ -140,28 +140,56 @@ class EduPilotSmoke(unittest.TestCase):
         ids=[]
         for name in ("SVT test","Physique test"):
             ids.append(project.execute("INSERT INTO courses(school_id,class_id,name,code,planned_minutes) VALUES (?,?,?,?,?)",(1,cl["id"],name,"TST",600)))
-        response=self.client.post("/people",data={"csrf":self.token(),"role":"enseignant","name":"Enseignant Multi","email":"multi.teacher@example.test","course_ids":[str(x) for x in ids]})
+        response=self.client.post("/people",data={"csrf":self.token(),"role":"enseignant","name":"Enseignant Multi","email":"multi.teacher@example.test","course_ids":[str(x) for x in ids],"password":"Temporary2026Secret!"})
         self.assertEqual(response.status_code,302)
         teacher=project.one("SELECT id FROM users WHERE email='multi.teacher@example.test'")
         self.assertIsNotNone(teacher)
         for cid in ids:
             self.assertEqual(project.one("SELECT teacher_id FROM courses WHERE id=?",(cid,))["teacher_id"],teacher["id"])
 
-    def test_planning_requires_matching_class(self):
+
+    def test_planning_single_30_minutes_and_recurrence(self):
         self.login("admin1@demo.edupilot.test")
-        own=project.one("SELECT c.id,c.class_id FROM courses c WHERE c.school_id=1 ORDER BY id LIMIT 1")
+        own=project.one("SELECT id,class_id FROM courses WHERE school_id=1 ORDER BY id LIMIT 1")
         other=project.one("SELECT id FROM classes WHERE school_id=2 ORDER BY id LIMIT 1")
-        response=self.client.post("/planning",data={"csrf":self.token(),"course_id":own["id"],"class_id":other["id"],"starts_at":"2026-11-02T08:00","ends_at":"2026-11-02T10:00","room":"A101"})
-        self.assertEqual(response.status_code,403)
-        result=self.client.post("/planning",data={"csrf":self.token(),"course_id":own["id"],"class_id":own["class_id"],"starts_at":"2026-11-02T08:00","ends_at":"2026-11-02T10:00","room":"A101"})
+        bad=self.client.post("/planning",data={"csrf":self.token(),"course_id":own["id"],"class_id":other["id"],"lesson_date":"2026-11-02","start_time":"08:00","duration_hours":"0.5","mode":"unique"})
+        self.assertEqual(bad.status_code,302)
+        self.assertIsNone(project.one("SELECT id FROM lessons WHERE starts_at='2026-11-02T08:00' AND school_id=1"))
+        result=self.client.post("/planning",data={"csrf":self.token(),"course_id":own["id"],"class_id":own["class_id"],"lesson_date":"2026-11-02","start_time":"08:00","duration_hours":"0.5","mode":"unique"})
         self.assertEqual(result.status_code,302)
-        self.assertIsNotNone(project.one("SELECT id FROM lessons WHERE course_id=? AND starts_at='2026-11-02T08:00'",(own["id"],)))
+        lesson=project.one("SELECT starts_at,ends_at FROM lessons WHERE course_id=? AND starts_at='2026-11-02T08:00'",(own["id"],))
+        self.assertIsNotNone(lesson)
+        self.assertEqual(lesson["ends_at"],"2026-11-02T08:30")
+        recurring=self.client.post("/planning",data={"csrf":self.token(),"course_id":own["id"],"class_id":own["class_id"],"lesson_date":"2026-11-09","start_time":"10:00","duration_hours":"1.5","mode":"hebdomadaire","repeat_until":"2026-11-23"})
+        self.assertEqual(recurring.status_code,302)
+        self.assertEqual(project.one("SELECT COUNT(*) n FROM lessons WHERE course_id=? AND starts_at LIKE '2026-11-%T10:00'",(own["id"],))["n"],3)
+        clash=self.client.post("/planning",data={"csrf":self.token(),"course_id":own["id"],"class_id":own["class_id"],"lesson_date":"2026-11-09","start_time":"10:00","duration_hours":"1.5","mode":"hebdomadaire","repeat_until":"2026-11-23"},follow_redirects=True)
+        self.assertEqual(clash.status_code,200)
+        self.assertIn("Conflit".encode(),clash.data)
+
+    def test_class_course_edits_and_user_suspension(self):
+        self.login("admin1@demo.edupilot.test")
+        cl=project.one("SELECT id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
+        response=self.client.post(f"/classes/{cl['id']}/edit",data={"csrf":self.token(),"name":"Classe rénovée","cycle":"semestre"})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(project.one("SELECT name FROM classes WHERE id=?",(cl["id"],))["name"],"Classe rénovée")
+        course=project.one("SELECT id,class_id,code FROM courses WHERE school_id=1 ORDER BY id LIMIT 1")
+        r=self.client.post(f"/courses/{course['id']}/edit",data={"csrf":self.token(),"name":"SIG renouvelé","code":"SIG202","class_id":course["class_id"],"hours":"24","teacher_id":""})
+        self.assertEqual(r.status_code,302)
+        self.assertEqual(project.one("SELECT name FROM courses WHERE id=?",(course["id"],))["name"],"SIG renouvelé")
+        target=project.one("SELECT id FROM users WHERE school_id=1 AND email='parent1@demo.edupilot.test'")
+        r=self.client.post("/people/bulk",data={"csrf":self.token(),"action":"suspend","user_ids":[str(target["id"])]})
+        self.assertEqual(r.status_code,302)
+        self.assertEqual(project.one("SELECT active FROM users WHERE id=?",(target["id"],))["active"],0)
+        r=self.client.post("/people/bulk",data={"csrf":self.token(),"action":"activate","user_ids":[str(target["id"])]})
+        self.assertEqual(r.status_code,302)
+        self.assertEqual(project.one("SELECT active FROM users WHERE id=?",(target["id"],))["active"],1)
 
     def test_school_lifecycle_logo_and_deletion(self):
         self.login("superadmin@demo.edupilot.test")
         token = self.token()
         slug = "demo_lifecycle_tests"
-        img = b"\\x89PNG\\r\\n\\x1a\\n" + b"fictitiousimage"
+        img = bytes([137,80,78,71,13,10,26,10]) + b"fictitiousimage"
         r=self.client.post("/schools/new",data={
             "csrf":token,"name":"Demo Lifecycle Tests","plan":"premium",
             "subscription_end":"2027-12-31",
