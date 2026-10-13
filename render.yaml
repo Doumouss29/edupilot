@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: edupilot-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4
+    healthCheckPath: /health
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: EDUPILOT_DEMO
+        value: "true"
+      - key: DATABASE_PATH
+        value: /tmp/edupilot.db
