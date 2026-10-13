@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.env.*
+!.env.vps.example
+data/
+*.db
+*.sqlite*
+__pycache__/
+*.pyc
+uploads/
+.venv/
+tests/
+*.zip
+*.log
