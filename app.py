@@ -1367,6 +1367,8 @@ def grades():
         if u['role']=='parent':enrolls=[v for v in enrolls if v['parents_enabled']]
         selected=next((v for v in enrolls if str(v['id'])==request.args.get('class_id','')),enrolls[0] if enrolls else None)
         report=compile_class_report(selected['id'],student_ids=[student_id]) if selected else None
+        if u['role']=='parent' and report and (not report['rows'] or not report['rows'][0]['published']):
+            report=None  # Parents only see officially published results.
         return render_template('student_grades.html',enrollments=enrolls,selected=selected,report=report,
                                children=children,selected_student=child)
     class_rows=allrows("""SELECT cl.id,cl.name,y.label,y.id year_id FROM classes cl JOIN years y ON y.id=cl.year_id
