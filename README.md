@@ -1,3 +1,11 @@
+## V0.6 — Fiches de classes et tableau de bord étudiant
+
+- La liste des classes propose **Détails** en plus de **Modifier**.
+- La fiche `/classes/<id>/details` réunit les étudiants inscrits pour l'année académique associée, les enseignants affectés et les cours (avec volumes et enseignants). Accessible aux Admin/Administratif et aux enseignants affectés à la classe, jamais aux étudiants ; les identifiants d'une autre école sont rejetés.
+- L'accueil **Étudiant** est désormais spécifique : suppression des statistiques globales, semaine du calendrier affichée avec les jours du lundi au dimanche, cours/horaire/salle/statut, boutons semaine précédente/suivante et raccourci vers le calendrier intégral.
+- Le chargement du planning étudiant vérifie `school_id` et ses inscriptions ; aucun cours extérieur à ses classes n'est affiché.
+- La version Render Free reste une démonstration SQLite sans persistance garantie des données.
+
 ## V0.5 — Correction planning, édition et comptes
 
 - **Calendrier / Planification** : séance unique ou répétition hebdomadaire jusqu'à une date définie. Renseigner classe, cours, date, heure de début, durée (0,5 à 12 h, pas de 30 minutes), salle éventuelle. L'heure de fin est calculée automatiquement : une séance ne peut pas franchir minuit.
