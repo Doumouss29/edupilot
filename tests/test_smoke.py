@@ -34,7 +34,7 @@ class EduPilotSmoke(unittest.TestCase):
             return sess["csrf"]
 
     def test_all_templates_compile(self):
-        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","class_details.html","dashboard_student.html","school_new.html","school_accounts.html","school_account_edit.html","change_password.html","students.html","grade_entry.html","grade_global.html","class_grade_summary.html","courses_manage.html","assessment_edit.html","staff_grades.html","student_grades.html","school_bulletins.html","print_bulletins.html"):
+        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","class_details.html","dashboard_student.html","school_new.html","school_accounts.html","school_account_edit.html","change_password.html","students.html","grade_entry.html","grade_global.html","class_grade_summary.html","courses_manage.html","lesson_edit.html","assessment_edit.html","staff_grades.html","student_grades.html","school_bulletins.html","print_bulletins.html"):
             project.app.jinja_env.get_template(template)
 
     def test_health(self):
@@ -415,6 +415,52 @@ class EduPilotSmoke(unittest.TestCase):
         res=self.client.post("/courses/bulk",data={"csrf":self.token(),"action":"delete","course_ids":[str(course["id"])]})
         self.assertEqual(res.status_code,302)
         self.assertIsNotNone(project.one("SELECT id FROM courses WHERE id=?",(course["id"],)))
+
+
+    def test_admin_edit_session_and_bulk_changes(self):
+        self.login("admin1@demo.edupilot.test")
+        school=project.one("SELECT id FROM schools WHERE slug='groupe_scolaire_excellence'")
+        course=project.one("SELECT id,teacher_id FROM courses WHERE school_id=? AND teacher_id IS NOT NULL LIMIT 1",(school["id"],))
+        first=project.execute("INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)",
+            (school["id"],course["id"],course["teacher_id"],"2028-03-02T08:00","2028-03-02T09:00","Salle A"))
+        second=project.execute("INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)",
+            (school["id"],course["id"],course["teacher_id"],"2028-03-09T08:00","2028-03-09T09:00","Salle A"))
+        self.assertEqual(self.client.get(f"/lessons/{first}/edit").status_code,200)
+        changed=self.client.post(f"/lessons/{first}/edit",data={"csrf":self.token(),"course_id":str(course["id"]),"lesson_date":"2028-03-02","start_time":"10:00","duration_hours":"1.5","room":"Salle B"})
+        self.assertEqual(changed.status_code,302)
+        self.assertEqual(project.one("SELECT ends_at FROM lessons WHERE id=?",(first,))["ends_at"],"2028-03-02T11:30")
+        moved=self.client.post("/lessons/bulk",data={"csrf":self.token(),"action":"modify",
+            "lesson_ids":[str(first),str(second)],"day_offset":"0","minute_offset":"30","change_room":"1","room":"Salle C"})
+        self.assertEqual(moved.status_code,302)
+        self.assertEqual(project.one("SELECT starts_at FROM lessons WHERE id=?",(first,))["starts_at"],"2028-03-02T10:30")
+        self.assertEqual(project.one("SELECT room FROM lessons WHERE id=?",(second,))["room"],"Salle C")
+
+    def test_admin_bulk_delete_protects_completed_sessions_and_tenant(self):
+        self.login("admin1@demo.edupilot.test")
+        school=project.one("SELECT id FROM schools WHERE slug='groupe_scolaire_excellence'")
+        course=project.one("SELECT id,teacher_id FROM courses WHERE school_id=? AND teacher_id IS NOT NULL LIMIT 1",(school["id"],))
+        allowed=project.execute("INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at) VALUES (?,?,?,?,?)",
+            (school["id"],course["id"],course["teacher_id"],"2028-04-02T08:00","2028-04-02T09:00"))
+        protected=project.execute("INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,status,actual_minutes) VALUES (?,?,?,?,?,?,?)",
+            (school["id"],course["id"],course["teacher_id"],"2028-04-09T08:00","2028-04-09T09:00","realisee",60))
+        failed=self.client.post("/lessons/bulk",data={"csrf":self.token(),"action":"delete","lesson_ids":[str(allowed),str(protected)]})
+        self.assertEqual(failed.status_code,302)
+        self.assertIsNotNone(project.one("SELECT id FROM lessons WHERE id=?",(allowed,)))
+        other=project.one("SELECT id FROM lessons WHERE school_id<>? LIMIT 1",(school["id"],))
+        if other:
+            attack=self.client.post("/lessons/bulk",data={"csrf":self.token(),"action":"delete","lesson_ids":[str(other["id"])]})
+            self.assertEqual(attack.status_code,403)
+        deleted=self.client.post("/lessons/bulk",data={"csrf":self.token(),"action":"delete","lesson_ids":[str(allowed)]})
+        self.assertEqual(deleted.status_code,302)
+        self.assertIsNone(project.one("SELECT id FROM lessons WHERE id=?",(allowed,)))
+        self.assertIsNotNone(project.one("SELECT id FROM lessons WHERE id=?",(protected,)))
+
+    def test_teacher_cannot_use_admin_session_editor(self):
+        self.login("enseignant1@demo.edupilot.test")
+        lesson=project.one("SELECT id FROM lessons WHERE school_id=1 LIMIT 1")
+        self.assertEqual(self.client.get(f"/lessons/{lesson['id']}/edit").status_code,403)
+        response=self.client.post("/lessons/bulk",data={"csrf":self.token(),"action":"delete","lesson_ids":[str(lesson["id"])]})
+        self.assertEqual(response.status_code,403)
 
     def test_school_lifecycle_logo_and_deletion(self):
         self.login("superadmin@demo.edupilot.test")
