@@ -3,12 +3,7 @@
 Run: docker compose -f docker-compose.vps.yml exec edupilot python scripts/bootstrap_superadmin.py
 """
 import getpass
-import os
 import re
-import sqlite3
-
-if os.getenv("EDUPILOT_DEMO", "false").lower() == "true":
-    raise SystemExit("Refus : désactiver EDUPILOT_DEMO pour la production.")
 
 from werkzeug.security import generate_password_hash
 import sys
