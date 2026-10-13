@@ -1038,7 +1038,10 @@ def planning():
 def declare(lid):
     u=current_user();les=one('SELECT * FROM lessons WHERE id=? AND school_id=?',(lid,school_id()))
     if not les or (u['role']=='enseignant' and les['teacher_id']!=u['id']):abort(403)
-    if les['ends_at']>datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'):abort(400,'Séance future')
+    # A teacher may confirm a session starting 30 minutes before its planned end, never earlier.
+    window_start=datetime.datetime.fromisoformat(les['ends_at'])-datetime.timedelta(minutes=30)
+    if datetime.datetime.now()<window_start:abort(400,'Validation disponible 30 minutes avant la fin')
+    if les['status'] in ('annulee','reportee'):abort(400,'Séance annulée ou reportée')
     status=request.form.get('status')
     if status not in ('realisee','partielle','non_effectuee'):abort(400)
     mins=int(request.form.get('actual_minutes','0')) if status!='non_effectuee' else 0
@@ -1047,6 +1050,22 @@ def declare(lid):
     execute('UPDATE lessons SET status=?,actual_minutes=?,comment=? WHERE id=?',(status,mins,request.form.get('comment',''),lid))
     audit('lesson.declared',str(lid)+':'+status)
     flash('Séance déclarée.','success');return redirect(url_for('planning'))
+
+@app.post('/lessons/<int:lid>/cancel')
+@roles('enseignant','admin','administratif')
+def cancel_lesson(lid):
+    u=current_user()
+    lesson=one('SELECT * FROM lessons WHERE id=? AND school_id=?',(lid,school_id()))
+    if not lesson or (u['role']=='enseignant' and lesson['teacher_id']!=u['id']):abort(403)
+    reason=request.form.get('reason','').strip()
+    if not reason or len(reason)>1500:abort(400,'Motif d’annulation obligatoire')
+    if lesson['status'] in ('realisee','partielle'):abort(400,'Impossible d’annuler une séance déjà déclarée')
+    execute("UPDATE lessons SET status='annulee',actual_minutes=0,comment=? WHERE id=? AND school_id=?",(reason,lid,school_id()))
+    members=classmates(lesson['course_id'])
+    notify(members+[lesson['teacher_id']],'Séance annulée : '+lesson['starts_at']+' — '+reason,'/planning')
+    audit('lesson.cancelled',f'{lid}:{reason}')
+    flash('Séance annulée. Les étudiants ont été notifiés.','success')
+    return redirect(url_for('planning'))
 
 @app.get('/assessments/<int:aid>/attachment')
 @login_required
@@ -1402,7 +1421,7 @@ def planning_json():
     if u['role']=='enseignant':sql+=' AND l.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND e.class_id=c.class_id AND p.active=1 AND cl.parents_enabled=1)';args.append(u['id'])
-    return jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':x['starts_at'],'end':x['ends_at'],'extendedProps':{'status':x['status'],'room':x['room'],'teacher':x['teacher_name']}} for x in allrows(sql,args)])
+    return jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':x['starts_at'],'end':x['ends_at'],'extendedProps':{'status':x['status'],'room':x['room'],'teacher':x['teacher_name'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
 
 @app.errorhandler(403)
 def denied(e):return render_template('error.html',message='Accès non autorisé.'),403
