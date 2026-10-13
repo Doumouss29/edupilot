@@ -1,6 +1,4 @@
-"""EduPilot - application de demonstration multi-etablissements avec SQLite.
-IMPORTANT: demo seulement, stockage Render Free ephemere.
-"""
+"""EduPilot — plateforme de gestion scolaire multi-établissements."""
 import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib, csv, io
 from openpyxl import load_workbook
 from flask import Response
@@ -15,7 +13,7 @@ from flask import send_file
 
 ROOT = Path(__file__).parent
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY') or ('demo-local-only-secret' if os.getenv('EDUPILOT_DEMO', 'false').lower() == 'true' else secrets.token_hex(32))
+app.secret_key = os.getenv('SECRET_KEY') or secrets.token_hex(32)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
@@ -84,34 +82,6 @@ def execute(sql,args=()):
         cur=c.execute(sql,args)
         return cur.lastrowid
 
-def seed():
-    if one('SELECT id FROM schools LIMIT 1'): return
-    with db() as c:
-        for name,slug,plan in [('Groupe Scolaire Excellence','groupe_scolaire_excellence','premium'),('Université de Bouaké Démo','universite_de_bouake','standard')]:
-            school=c.execute('INSERT INTO schools(name,slug,plan) VALUES (?,?,?)',(name,slug,plan)).lastrowid
-            campus=c.execute('INSERT INTO campuses(school_id,name) VALUES (?,?)',(school,'Campus principal')).lastrowid
-            year=c.execute('INSERT INTO years(school_id,label) VALUES (?,?)',(school,'2026-2027')).lastrowid
-            cls=c.execute('INSERT INTO classes(school_id,year_id,campus_id,name,cycle,parents_enabled) VALUES (?,?,?,?,?,?)',(school,year,campus,'Terminale D' if school==1 else 'Master 1 Géomatique','trimestre' if school==1 else 'semestre',1)).lastrowid
-            def u(name,email,role):
-                return c.execute('INSERT INTO users(school_id,name,email,password_hash,role) VALUES (?,?,?,?,?)',(school,name,email,generate_password_hash('Demo2026!'),role)).lastrowid
-            admin=u('Admin établissement',f'admin{school}@demo.edupilot.test','admin')
-            staff=u('Secrétariat',f'scolarite{school}@demo.edupilot.test','administratif')
-            teacher=u('Enseignant démo',f'enseignant{school}@demo.edupilot.test','enseignant')
-            students=[u(f'Élève {i}',f'eleve{school}_{i}@demo.edupilot.test','etudiant') for i in range(1,9)]
-            parent=u('Parent démo',f'parent{school}@demo.edupilot.test','parent')
-            c.execute('INSERT INTO parent_links(school_id,student_id,parent_id) VALUES (?,?,?)',(school,students[0],parent))
-            for st in students: c.execute('INSERT INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school,st,cls,year))
-            course=c.execute('INSERT INTO courses(school_id,class_id,name,code,planned_minutes,teacher_id) VALUES (?,?,?,?,?,?)',(school,cls,'Mathématiques' if school==1 else 'SIG avancé','MAT101' if school==1 else 'SIG101',2400,teacher)).lastrowid
-            c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(course,teacher,'2026-09-01'))
-            for day in range(1,6):
-                start=f'2026-10-{12+day-1:02d}T08:00'
-                end=f'2026-10-{12+day-1:02d}T10:00'
-                c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room,status,actual_minutes) VALUES (?,?,?,?,?,?,?,?)',(school,course,teacher,start,end,'A12','realisee' if day<3 else 'programmee',120 if day<3 else 0))
-            assessment=c.execute('INSERT INTO assessments(school_id,course_id,title,kind,due_date,description) VALUES (?,?,?,?,?,?)',(school,course,'Devoir n° 1','Devoir','2026-10-23','Déposer votre travail avant la date limite.')).lastrowid
-            c.execute('INSERT INTO periods(school_id,class_id,name) VALUES (?,?,?)',(school,cls,'Trimestre 1' if school==1 else 'Semestre 1'))
-            for i,st in enumerate(students):c.execute('INSERT INTO grades(assessment_id,student_id,value) VALUES (?,?,?)',(assessment,st,10+i))
-        c.execute('INSERT INTO users(school_id,name,email,password_hash,role) VALUES (NULL,?,?,?,?)',('Éditeur EduPilot','superadmin@demo.edupilot.test',generate_password_hash('Demo2026!'),'superadmin'))
-
 Path(DB).parent.mkdir(parents=True,exist_ok=True)
 with db() as c:
     c.executescript(SCHEMA)
@@ -130,9 +100,6 @@ with db() as c:
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_name','LMurbs')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_phone','+2250711124359')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('powered_by','Propulsé par LMurbs')")
-if os.getenv('EDUPILOT_DEMO','false').lower()=='true':
-    seed()
-
 def setting(key,default=''):
     row=one('SELECT value FROM settings WHERE key=?',(key,))
     return row['value'] if row else default
