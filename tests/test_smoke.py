@@ -3,6 +3,7 @@ import io
 import os
 import tempfile
 import unittest
+import uuid
 
 TEMP = tempfile.TemporaryDirectory()
 os.environ["DATABASE_PATH"] = os.path.join(TEMP.name, "edupilot-test.db")
@@ -11,6 +12,12 @@ import app as project
 
 class EduPilotSmoke(unittest.TestCase):
     def setUp(self):
+        # Fresh database for each test: prevents role, password, course and period
+        # mutations from making unrelated test cases order-dependent.
+        project.DB = os.path.join(TEMP.name, "test-" + uuid.uuid4().hex + ".db")
+        with project.db() as c:
+            c.executescript(project.SCHEMA)
+        project.seed()
         self.client = project.app.test_client()
 
     def csrf(self):
@@ -27,7 +34,7 @@ class EduPilotSmoke(unittest.TestCase):
             return sess["csrf"]
 
     def test_all_templates_compile(self):
-        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","class_details.html","dashboard_student.html","school_new.html","school_accounts.html","school_account_edit.html","change_password.html","students.html","grade_entry.html","grade_global.html","class_grade_summary.html"):
+        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","class_details.html","dashboard_student.html","school_new.html","school_accounts.html","school_account_edit.html","change_password.html","students.html","grade_entry.html","grade_global.html","class_grade_summary.html","courses_manage.html","assessment_edit.html","staff_grades.html","student_grades.html","school_bulletins.html","print_bulletins.html"):
             project.app.jinja_env.get_template(template)
 
     def test_health(self):
