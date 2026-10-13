@@ -10,7 +10,7 @@
 <label>Code<input name="code" value="{{item.code}}"></label>
 <label>Classe<select name="class_id" required>{% for c in classes %}<option value="{{c.id}}" {% if item.class_id==c.id %}selected{% endif %}>{{c.name}}</option>{% endfor %}</select></label>
 <label>Enseignant<select name="teacher_id"><option value="">Non affecté</option>{% for t in teachers %}<option value="{{t.id}}" {% if item.teacher_id==t.id %}selected{% endif %}>{{t.name}}</option>{% endfor %}</select></label>
-<label>Volume horaire total (heures)<input name="hours" type="number" step="0.5" min="0.5" value="{{item.planned_minutes/60}}" required></label>
+<label>Volume horaire total (heures)<input name="hours" type="number" step="0.5" min="0.5" value="{{item.planned_minutes/60}}" required></label><label>Coefficient matière<input name="coefficient" type="number" step="0.1" min="0.1" max="100" value="{{item.coefficient}}" required></label>
 {% endif %}
 <div class="form-actions"><a class="btn outline" href="{{url_for('classes' if kind=='class' else 'courses')}}">Annuler</a><button class="btn primary">Enregistrer les modifications</button></div></form></section>
 {% endblock %}
