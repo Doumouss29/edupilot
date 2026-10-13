@@ -1,6 +1,7 @@
 import os, sqlite3, secrets, datetime, functools, re, unicodedata
 from pathlib import Path
 from flask import Flask, request, session, redirect, abort, render_template_string, flash
+from markupsafe import escape
 from werkzeug.security import generate_password_hash, check_password_hash
 app=Flask(__name__)
 app.secret_key=os.environ.get("SECRET_KEY",secrets.token_hex(32))
@@ -84,10 +85,10 @@ def home():
  school=query("SELECT name FROM schools WHERE id=?",(sid,),True)
  if u["role"]=="superadmin":
   schools=query("SELECT * FROM schools")
-  return page("Console Super Admin","<div class='grid'>"+"".join(f"<div class='card'><b>{s['name']}</b><p>/{s['slug']}</p><p>{s['plan']}</p></div>" for s in schools)+"</div>"+form("/school","<input name='name' placeholder='Nouvel établissement' required><select name='plan'><option>standard</option><option>premium</option></select>","Créer un établissement"))
+  return page("Console Super Admin","<div class='grid'>"+"".join(f"<div class='card'><b>{escape(s['name'])}</b><p>/{escape(s['slug'])}</p><p>{escape(s['plan'])}</p></div>" for s in schools)+"</div>"+form("/school","<input name='name' placeholder='Nouvel établissement' required><select name='plan'><option>standard</option><option>premium</option></select>","Créer un établissement"))
  classes=query("SELECT * FROM classes WHERE school_id=?",(sid,))
  courses=query("SELECT * FROM courses WHERE school_id=?",(sid,))
- return page("Tableau de bord — "+(school["name"] if school else ""),f"<div class='grid'><div class='card'><b>Profil</b><p>{u['role']}</p></div><div class='card'><b>Classes</b><p>{len(classes)}</p></div><div class='card'><b>Cours</b><p>{len(courses)}</p></div></div><div class='card'>Bienvenue {u['name']}. Utilisez les menus pour explorer la démonstration.</div>")
+ return page("Tableau de bord — "+(school["name"] if school else ""),f"<div class='grid'><div class='card'><b>Profil</b><p>{u['role']}</p></div><div class='card'><b>Classes</b><p>{len(classes)}</p></div><div class='card'><b>Cours</b><p>{len(courses)}</p></div></div><div class='card'>Bienvenue {escape(u['name'])}. Utilisez les menus pour explorer la démonstration.</div>")
 @app.post("/school")
 def school():
  require("superadmin")
@@ -109,7 +110,7 @@ def planning():
   cell+=f"<div class='cell'>{hour:02d} h</div>"
   for weekday in range(5):
    subset=[r for r in rows if datetime.datetime.fromisoformat(r["starts"]).weekday()==weekday and datetime.datetime.fromisoformat(r["starts"]).hour==hour]
-   cell+="<div class='cell'>"+"".join(f"<div class='event'>{r['title']}<br>{r['classe']}<br>{r['status']}</div>" for r in subset)+"</div>"
+   cell+="<div class='cell'>"+"".join(f"<div class='event'>{escape(r['title'])}<br>{escape(r['classe'])}<br>{escape(r['status'])}</div>" for r in subset)+"</div>"
  cell+="</div>"
  return page("Emploi du temps — vue "+mode,"<p><a href='?vue=jour'>Jour</a> · <a href='?vue=semaine'>Semaine</a> · <a href='?vue=mois'>Mois</a></p>"+cell+"<p class='muted'>Démo V0.1 : la grille représente la semaine des séances fictives. Les modes Jour/Mois complets restent à intégrer.</p>")
 @app.get("/cours")
@@ -120,7 +121,7 @@ def courses():
  html="<table><tr><th>Cours</th><th>Classe</th><th>Enseignant</th><th>Volume prévu</th><th>Réalisé</th></tr>"
  for c in courses:
   r=query("SELECT COALESCE(SUM(actual_minutes),0) done FROM lessons WHERE course_id=? AND status='realisee'",(c["id"],),True)
-  html+=f"<tr><td>{c['title']}</td><td>{c['classe']}</td><td>{c['enseignant']}</td><td>{c['minutes']/60:.0f} h</td><td>{r['done']/60:.1f} h</td></tr>"
+  html+=f"<tr><td>{escape(c['title'])}</td><td>{escape(c['classe'])}</td><td>{escape(c['enseignant'])}</td><td>{c['minutes']/60:.0f} h</td><td>{r['done']/60:.1f} h</td></tr>"
  return page("Gestion des cours",html+"</table>"+("<h2>Déclarer une séance</h2>"+form("/realiser","<input type='number' name='lesson_id' min='1' placeholder='ID séance' required><input type='number' name='minutes' min='1' max='600' placeholder='Minutes réelles' required>","Confirmer séance") if u["role"] in ("admin","administratif","enseignant") else ""))
 @app.post("/realiser")
 def realize():
@@ -136,12 +137,13 @@ def realize():
 def notes():
  u=require()
  sid=u["school_id"]
- rows=query("""SELECT e.title evaluation,g.note,st.name eleve,cl.name classe,p.published FROM grades g JOIN evaluations e ON g.evaluation_id=e.id JOIN courses c ON c.id=e.course_id JOIN classes cl ON c.class_id=cl.id JOIN users st ON g.student_id=st.id LEFT JOIN periods p ON p.class_id=cl.id WHERE c.school_id=?""",(sid,)) if sid else []
+ rows=query("""SELECT e.title evaluation,g.note,st.id student_id,st.name eleve,cl.name classe,p.published FROM grades g JOIN evaluations e ON g.evaluation_id=e.id JOIN courses c ON c.id=e.course_id JOIN classes cl ON c.class_id=cl.id JOIN users st ON g.student_id=st.id LEFT JOIN periods p ON p.class_id=cl.id WHERE c.school_id=?""",(sid,)) if sid else []
  html="<table><tr><th>Élève</th><th>Classe</th><th>Évaluation</th><th>Note</th></tr>"
  for r in rows:
-  if u["role"]=="etudiant" and r["eleve"]!=u["name"]:continue
+  if u["role"]=="etudiant" and r["student_id"]!=u["id"]:continue
+  if u["role"]=="parent" and not query("SELECT id FROM parent_links WHERE student_id=? AND parent_id=?",(r["student_id"],u["id"]),True):continue
   if u["role"] in ("etudiant","parent") and not r["published"]:continue
-  html+=f"<tr><td>{r['eleve']}</td><td>{r['classe']}</td><td>{r['evaluation']}</td><td>{r['note']}/20</td></tr>"
+  html+=f"<tr><td>{escape(r['eleve'])}</td><td>{escape(r['classe'])}</td><td>{escape(r['evaluation'])}</td><td>{r['note']}/20</td></tr>"
  return page("Notes et évaluations",html+"</table><p class='muted'>Les résultats ne deviennent visibles aux élèves et parents qu'après publication administrative.</p>")
 @app.get("/rapports")
 def reports():
@@ -150,6 +152,6 @@ def reports():
  body="<table><tr><th>Cours</th><th>Prévu</th><th>Réalisé</th><th>Séances</th><th>Avancement</th></tr>"
  for c in data:
   pct=round(c["done"]/c["minutes"]*100) if c["minutes"] else 0
-  body+=f"<tr><td>{c['title']}</td><td>{c['minutes']/60:.1f} h</td><td>{c['done']/60:.1f} h</td><td>{c['sessions']}</td><td>{pct}%<div class='bar'><div style='width:{min(100,pct)}%'></div></div></td></tr>"
+  body+=f"<tr><td>{escape(c['title'])}</td><td>{c['minutes']/60:.1f} h</td><td>{c['done']/60:.1f} h</td><td>{c['sessions']}</td><td>{pct}%<div class='bar'><div style='width:{min(100,pct)}%'></div></div></td></tr>"
  return page("Rapports pédagogiques",body+"</table>")
 if __name__=="__main__":app.run(host="0.0.0.0",port=int(os.environ.get("PORT",5000)))
