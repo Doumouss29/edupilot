@@ -2,15 +2,6 @@
 {% block heading %}Gérer les établissements{% endblock %}
 {% block content %}
 <div class="section-intro"><span class="eyebrow">GESTION DES ABONNEMENTS</span><h2>Votre portefeuille d'établissements</h2><p>Créez des espaces, suivez les échéances, gérez les accès et les identités visuelles.</p></div>
-<section style="display:none"><div class="panel-title"><h3>Créer un établissement</h3><span class="tag">SaaS multi-établissements</span></div>
-<form action="{{url_for('schools')}}" method="post" enctype="multipart/form-data" class="modern-form">
-<input type="hidden" name="csrf" value="{{csrf}}">
-<label>Nom de l'établissement<input name="name" required placeholder="Ex. Groupe Scolaire Excellence" maxlength="180"></label>
-<label>Formule<select name="plan"><option value="essentiel">Essentiel</option><option value="standard" selected>Standard</option><option value="premium">Premium</option></select></label>
-<label>Fin de l'abonnement<input name="subscription_end" type="date" required></label>
-<label>Logo de l'établissement <small>PNG, JPG ou WEBP — 1 Mo max</small><input type="file" name="logo" accept="image/png,image/jpeg,image/webp"></label>
-<div class="form-actions"><button class="btn primary" type="submit">+ Créer l'établissement</button></div>
-</form></section>
 <div class="page-actions"><a class="btn primary" href="{{url_for('school_new')}}">+ Créer un établissement</a></div>
 <section class="panel"><div class="panel-title"><h3>Établissements enregistrés</h3><span class="muted">{{schools|length}} établissement(s)</span></div>
 <div class="school-grid">{% for s in schools %}
