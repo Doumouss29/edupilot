@@ -242,7 +242,7 @@ def dashboard():
     u=current_user()
     if u['role']=='superadmin':
         schools=allrows('SELECT s.*, (SELECT COUNT(*) FROM users u WHERE u.school_id=s.id) members FROM schools s')
-        return render_template('dashboard.html',schools=schools,stats=None,classes=[],events=[])
+        return render_template('dashboard.html',schools=schools,stats=None,classes=[],events=[],today=datetime.date.today().isoformat())
     if u['role'] in ('etudiant','parent'):
         return render_template('dashboard.html',stats={'classes':0,'courses':0,'lessons':0,'total':0,'actual':0,'percent':0},classes=[],events=[],courses=[],schools=[])
     sid=school_id()
