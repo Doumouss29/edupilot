@@ -1,3 +1,20 @@
+## Mise à jour V0.3 — interface et création des accès (13 octobre 2026)
+
+- Palette **orange, blanc**, touches de bleu marine et de vert, sans habillage national marqué.
+- Super Admin : deux actions distinctes « **Créer un établissement** » (`/schools/new`) et « **Gérer les établissements** » (`/schools`).
+- Après avoir créé une école, ouverture automatique de l'écran `/schools/<id>/accounts`.
+- Comptes de direction créés par le Super Admin : prénom, nom, e-mail unique, contact téléphonique, profil `admin` ou `administratif`, et mot de passe temporaire.
+- Générateur local de mot de passe avec `crypto.getRandomValues` et bouton copier. Le mot de passe n'est pas enregistré en clair et n'est plus visible après la création.
+- Changement obligatoire du mot de passe à la première connexion : nouveau mot de passe d'au moins 12 caractères, avec lettres et chiffres. Les pages métiers sont bloquées tant que le changement n'est pas terminé.
+- Lien d'accès par établissement : `https://edupilot-tfee.onrender.com/<slug>/login`. Ce lien affiche le nom de l'école et **refuse les identifiants appartenant à une autre école**. Le Super Admin conserve `/login`.
+- L'Admin ou l'Administratif créé peut ensuite utiliser les modules existants de gestion des élèves, enseignants, classes, cours et scolarité.
+- Démo sur **Render Free + SQLite éphémère** : nouveaux comptes, logos et établissements peuvent disparaître lorsque Render réinitialise le service.
+- Les e-mails d'envoi du mot de passe temporaire **ne sont pas encore activés** : la communication manuelle est prévue pour cette étape de démo, par un moyen sécurisé.
+
+### Tests
+
+`python -m unittest discover -s tests -v` ; le pipeline GitHub Actions doit confirmer les résultats. Ces changements sont destinés à la **démo**, pas à une commercialisation en production sans revue de sécurité et tests de bout en bout.
+
 # EduPilot — Démo SQLite / Render Free
 
 ## Nouveautés de l'administration SaaS (13 octobre 2026)
