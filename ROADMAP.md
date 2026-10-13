@@ -34,4 +34,4 @@
 - UI dédiée aux étudiants et parents (le tableau de bord actuel est une vue minimale).
 - Vérifications sécurité et tests E2E avant usage réel ; base PostgreSQL et stockage objet pérenne.
 
-**Cette version est un socle de démonstration, pas une version commercialisable.**
+**Avant toute exploitation avec des données scolaires réelles : réaliser les tests de recette, un audit de sécurité et de conformité et mettre en place des sauvegardes externes automatisées.**
