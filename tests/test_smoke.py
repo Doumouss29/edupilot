@@ -379,6 +379,43 @@ class EduPilotSmoke(unittest.TestCase):
         result=self.client.post(f"/lessons/{lesson}/declare",data={"csrf":self.token(),"status":"realisee","actual_minutes":"70"})
         self.assertEqual(result.status_code,302)
 
+
+    def test_selected_bulletin_publication_is_student_scoped(self):
+        self.login("admin1@demo.edupilot.test")
+        school=project.one("SELECT id FROM schools WHERE slug='groupe_scolaire_excellence'")
+        clazz=project.one("SELECT id FROM classes WHERE school_id=? LIMIT 1",(school["id"],))
+        pupils=project.allrows("SELECT DISTINCT u.id,u.email FROM users u JOIN enrollments e ON e.student_id=u.id WHERE e.school_id=? AND e.class_id=? ORDER BY u.id LIMIT 2",(school["id"],clazz["id"]))
+        self.assertEqual(len(pupils),2)
+        publish=self.client.post("/grades/bulletins/publish",data={"csrf":self.token(),"class_id":clazz["id"],"student_ids":[str(pupils[0]["id"])]})
+        self.assertEqual(publish.status_code,302)
+        self.assertEqual(project.one("SELECT COUNT(*) n FROM bulletin_publications WHERE class_id=?",(clazz["id"],))["n"],1)
+        self.assertEqual(project.one("SELECT published FROM periods WHERE class_id=? ORDER BY id DESC LIMIT 1",(clazz["id"],))["published"],0)
+        self.client.post("/logout",data={"csrf":self.token()})
+        self.login(pupils[0]["email"])
+        self.assertEqual(self.client.get(f"/grades/my-bulletin/{clazz['id']}").status_code,200)
+        self.client.post("/logout",data={"csrf":self.token()})
+        self.login(pupils[1]["email"])
+        self.assertEqual(self.client.get(f"/grades/my-bulletin/{clazz['id']}").status_code,403)
+
+    def test_teacher_can_edit_assessment_before_lock(self):
+        self.login("enseignant1@demo.edupilot.test")
+        teacher=project.one("SELECT id,school_id FROM users WHERE email='enseignant1@demo.edupilot.test'")
+        course=project.one("SELECT id FROM courses WHERE school_id=? AND teacher_id=? LIMIT 1",(teacher["school_id"],teacher["id"]))
+        assessment=project.one("SELECT id FROM assessments WHERE school_id=? AND course_id=? LIMIT 1",(teacher["school_id"],course["id"]))
+        page=self.client.get(f"/assessments/{assessment['id']}/edit")
+        self.assertEqual(page.status_code,200)
+        update=self.client.post(f"/assessments/{assessment['id']}/edit",data={"csrf":self.token(),"title":"Devoir corrigé","kind":"Devoir","coefficient":"3","description":"Consigne actualisée"})
+        self.assertEqual(update.status_code,302)
+        self.assertEqual(project.one("SELECT coefficient FROM assessments WHERE id=?",(assessment["id"],))["coefficient"],3)
+
+    def test_existing_course_with_assessment_cannot_be_deleted(self):
+        self.login("admin1@demo.edupilot.test")
+        school=project.one("SELECT id FROM schools WHERE slug='groupe_scolaire_excellence'")
+        course=project.one("SELECT id FROM courses WHERE school_id=? AND id IN (SELECT course_id FROM assessments) LIMIT 1",(school["id"],))
+        res=self.client.post("/courses/bulk",data={"csrf":self.token(),"action":"delete","course_ids":[str(course["id"])]})
+        self.assertEqual(res.status_code,302)
+        self.assertIsNotNone(project.one("SELECT id FROM courses WHERE id=?",(course["id"],)))
+
     def test_school_lifecycle_logo_and_deletion(self):
         self.login("superadmin@demo.edupilot.test")
         token = self.token()
