@@ -45,7 +45,7 @@ La clé SSH du VPS doit disposer d'un accès en lecture au dépôt GitHub privé
 ```bash
 mkdir -p data/uploads
 sudo chown -R 10001:10001 data
-chmod 750 data
+sudo chmod 750 data
 cp .env.vps.example .env
 SECRET="$(openssl rand -hex 32)"
 sed -i "s/^SECRET_KEY=.*/SECRET_KEY=$SECRET/" .env
