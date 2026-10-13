@@ -290,6 +290,24 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertEqual(self.client.get(f"/grades/global?course_id={course}").status_code,200)
         self.assertEqual(self.client.get(f"/grades/class-summary?class_id={destination}").status_code,200)
 
+
+    def test_teacher_validates_only_finished_sessions(self):
+        self.login("enseignant1@demo.edupilot.test")
+        teacher=project.one("SELECT id,school_id FROM users WHERE email='enseignant1@demo.edupilot.test'")
+        course=project.one("SELECT id FROM courses WHERE school_id=? AND teacher_id=? LIMIT 1",(teacher["school_id"],teacher["id"]))
+        self.assertIsNotNone(course)
+        old=project.execute("INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)",
+            (teacher["school_id"],course["id"],teacher["id"],"2020-01-05T08:00","2020-01-05T09:30","A12"))
+        confirmed=self.client.post(f"/lessons/{old}/declare",data={"csrf":self.token(),"status":"realisee","actual_minutes":"90","comment":"Cours effectué"})
+        self.assertEqual(confirmed.status_code,302)
+        row=project.one("SELECT status,actual_minutes FROM lessons WHERE id=?",(old,))
+        self.assertEqual(row["status"],"realisee")
+        self.assertEqual(row["actual_minutes"],90)
+        future=project.execute("INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)",
+            (teacher["school_id"],course["id"],teacher["id"],"2030-01-05T08:00","2030-01-05T09:30","A12"))
+        early=self.client.post(f"/lessons/{future}/declare",data={"csrf":self.token(),"status":"realisee","actual_minutes":"90"})
+        self.assertEqual(early.status_code,400)
+
     def test_school_lifecycle_logo_and_deletion(self):
         self.login("superadmin@demo.edupilot.test")
         token = self.token()
