@@ -831,10 +831,39 @@ def class_details(cid):
 @roles('admin','administratif')
 def enroll():
     student=request.form.get('student_id');cl=request.form.get('class_id')
-    if not has_school('classes',cl) or not one('SELECT id FROM users WHERE id=? AND school_id=? AND role=?',(student,school_id(),'etudiant')):abort(403)
-    clazz=one('SELECT * FROM classes WHERE id=?',(cl,))
+    if not has_school('classes',cl) or not one("SELECT id FROM users WHERE id=? AND school_id=? AND role='etudiant'",(student,school_id())):abort(403)
+    clazz=one('SELECT * FROM classes WHERE id=? AND school_id=?',(cl,school_id()))
     execute('INSERT OR IGNORE INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school_id(),student,cl,clazz['year_id']))
-    audit('student.enrolled',f'{student}:{cl}');flash('Inscription enregistrée sans effacer le parcours précédent.','success')
+    audit('student.enrolled',f'{student}:{cl}');flash('Inscription enregistrée.','success')
+    return redirect(url_for('students'))
+
+@app.post('/students/transfer')
+@roles('admin','administratif')
+def students_transfer():
+    ids=request.form.getlist('enrollment_ids')
+    class_id=request.form.get('class_id')
+    dest=one('SELECT id,year_id FROM classes WHERE id=? AND school_id=?',(class_id,school_id()))
+    if not dest or not ids or len(ids)>300 or any(not x.isdigit() for x in ids):abort(400)
+    ids=list(dict.fromkeys(map(int,ids)))
+    now=datetime.datetime.now(datetime.timezone.utc).isoformat()
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        q=','.join('?'*len(ids))
+        rows=c.execute(f'SELECT id,student_id,class_id,year_id FROM enrollments WHERE school_id=? AND id IN ({q})',(school_id(),*ids)).fetchall()
+        if len(rows)!=len(ids):abort(403)
+        # Keep all historical enrollments for past years. Move only records in same academic year.
+        if any(r['year_id']!=dest['year_id'] for r in rows):
+            flash('Transfert annulé : choisissez une classe de la même année académique. Pour une nouvelle année, utilisez la promotion.','error')
+            return redirect(url_for('students'))
+        for row in rows:
+            if row['class_id']==dest['id']:continue
+            duplicate=c.execute('SELECT id FROM enrollments WHERE school_id=? AND student_id=? AND class_id=? AND year_id=?',(school_id(),row['student_id'],dest['id'],dest['year_id'])).fetchone()
+            if duplicate:
+                c.execute('DELETE FROM enrollments WHERE id=?',(row['id'],))
+            else:
+                c.execute('UPDATE enrollments SET class_id=? WHERE id=?',(dest['id'],row['id']))
+            c.execute('INSERT INTO audit(school_id,user_id,action,details) VALUES (?,?,?,?)',(school_id(),current_user()['id'],'enrollment.transferred',f"{row['student_id']}:{row['class_id']}->{dest['id']}:{now}"))
+    flash(f'{len(ids)} inscription(s) transférée(s).','success')
     return redirect(url_for('students'))
 
 @app.route('/students')
@@ -842,8 +871,27 @@ def enroll():
 def students():
     u=current_user()
     if u['role'] not in ('admin','administratif','enseignant'):abort(403)
-    rows=scoped('SELECT u.name,c.name class_name,y.label FROM enrollments e JOIN users u ON u.id=e.student_id JOIN classes c ON c.id=e.class_id JOIN years y ON y.id=e.year_id WHERE e.school_id=? ORDER BY u.name')
-    return render_template('list.html',title='Inscriptions & parcours',columns=['Étudiant','Classe','Année'],rows=[(x['name'],x['class_name'],x['label']) for x in rows],form='enroll' if u['role'] in ('admin','administratif') else None,students=scoped("SELECT * FROM users WHERE school_id=? AND role='etudiant'"),classes=scoped('SELECT * FROM classes WHERE school_id=?'))
+    sql="""SELECT e.id enrollment_id,u.name,c.name class_name,c.id class_id,y.id year_id,y.label
+           FROM enrollments e JOIN users u ON u.id=e.student_id
+           JOIN classes c ON c.id=e.class_id JOIN years y ON y.id=e.year_id
+           WHERE e.school_id=?"""
+    args=[school_id()]
+    if u['role']=='enseignant':
+        sql+=" AND EXISTS (SELECT 1 FROM courses co WHERE co.class_id=e.class_id AND co.school_id=e.school_id AND co.teacher_id=?)"
+        args.append(u['id'])
+    requested_class=request.args.get('class_id','')
+    requested_year=request.args.get('year_id','')
+    if requested_class and requested_class.isdigit():
+        sql+=' AND e.class_id=?';args.append(int(requested_class))
+    if requested_year and requested_year.isdigit():
+        sql+=' AND e.year_id=?';args.append(int(requested_year))
+    sql+=' ORDER BY y.label DESC,c.name,u.name'
+    entries=allrows(sql,args)
+    class_choices=scoped('SELECT id,name,year_id FROM classes WHERE school_id=? ORDER BY name')
+    year_choices=scoped('SELECT id,label FROM years WHERE school_id=? ORDER BY label DESC')
+    if u['role']=='enseignant':
+        class_choices=[c for c in class_choices if one('SELECT id FROM courses WHERE class_id=? AND school_id=? AND teacher_id=?',(c['id'],school_id(),u['id']))]
+    return render_template('students.html',enrollments=entries,classes=class_choices,years=year_choices,can_edit=u['role'] in ('admin','administratif'),chosen_class=requested_class,chosen_year=requested_year)
 
 @app.route('/courses',methods=['GET','POST'])
 @roles('admin','administratif')
