@@ -27,7 +27,7 @@ class EduPilotSmoke(unittest.TestCase):
             return sess["csrf"]
 
     def test_all_templates_compile(self):
-        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","class_details.html","dashboard_student.html","school_new.html","school_accounts.html","change_password.html"):
+        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","class_details.html","dashboard_student.html","school_new.html","school_accounts.html","school_account_edit.html","change_password.html"):
             project.app.jinja_env.get_template(template)
 
     def test_health(self):
@@ -210,6 +210,54 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertEqual(far.status_code,200)
         self.assertIn("Aucune séance programmée".encode(),far.data)
         self.assertEqual(self.client.get("/classes/1/details").status_code,403)
+
+
+    def test_superadmin_edit_and_bulk_school_accounts(self):
+        self.login("superadmin@demo.edupilot.test")
+        school=project.one("SELECT id FROM schools WHERE slug='groupe_scolaire_excellence'")
+        admin=project.one("SELECT id FROM users WHERE email='admin1@demo.edupilot.test'")
+        staff=project.one("SELECT id FROM users WHERE email='scolarite1@demo.edupilot.test'")
+        sid=school["id"]
+        self.assertEqual(self.client.get(f"/schools/{sid}/accounts/{admin['id']}/edit").status_code,200)
+        edit=self.client.post(f"/schools/{sid}/accounts/{admin['id']}/edit",data={
+            "csrf":self.token(),"first_name":"Adèle","last_name":"Direction",
+            "email":"admin1@demo.edupilot.test","phone":"+2250700001111",
+            "role":"administratif","temporary_password":"SafeTemporary2026!"
+        })
+        self.assertEqual(edit.status_code,302)
+        updated=project.one("SELECT name,phone,role,must_change_password,password_hash FROM users WHERE id=?",(admin["id"],))
+        self.assertEqual(updated["name"],"Adèle Direction")
+        self.assertEqual(updated["role"],"administratif")
+        self.assertEqual(updated["must_change_password"],1)
+        self.assertTrue(project.check_password_hash(updated["password_hash"],"SafeTemporary2026!"))
+        changed=self.client.post(f"/schools/{sid}/accounts/bulk",data={
+            "csrf":self.token(),"account_ids":[str(admin["id"]),str(staff["id"])],"action":"set_admin"
+        })
+        self.assertEqual(changed.status_code,302)
+        self.assertEqual(project.one("SELECT role FROM users WHERE id=?",(staff["id"],))["role"],"admin")
+        suspended=self.client.post(f"/schools/{sid}/accounts/bulk",data={
+            "csrf":self.token(),"account_ids":[str(admin["id"]),str(staff["id"])],"action":"suspend"
+        })
+        self.assertEqual(suspended.status_code,302)
+        self.assertEqual(project.one("SELECT active FROM users WHERE id=?",(admin["id"],))["active"],0)
+        restored=self.client.post(f"/schools/{sid}/accounts/bulk",data={
+            "csrf":self.token(),"account_ids":[str(admin["id"]),str(staff["id"])],"action":"activate"
+        })
+        self.assertEqual(restored.status_code,302)
+        self.assertEqual(project.one("SELECT active FROM users WHERE id=?",(admin["id"],))["active"],1)
+
+    def test_superadmin_bulk_delete_and_cross_tenant_guard(self):
+        self.login("superadmin@demo.edupilot.test")
+        school=project.one("SELECT id FROM schools WHERE slug='groupe_scolaire_excellence'")
+        other=project.one("SELECT id FROM users WHERE email='admin2@demo.edupilot.test'")
+        self.assertEqual(self.client.get(f"/schools/{school['id']}/accounts/{other['id']}/edit").status_code,404)
+        bad=self.client.post(f"/schools/{school['id']}/accounts/bulk",data={"csrf":self.token(),"action":"suspend","account_ids":[str(other["id"])]})
+        self.assertEqual(bad.status_code,403)
+        uid=project.execute("INSERT INTO users(school_id,name,email,phone,role,password_hash) VALUES (?,?,?,?,?,?)",
+            (school["id"],"Compte provisoire","deletion.account@example.test","+2250700000000","administratif",project.generate_password_hash("SomeLongPassword2026!")))
+        res=self.client.post(f"/schools/{school['id']}/accounts/bulk",data={"csrf":self.token(),"action":"delete","account_ids":[str(uid)]})
+        self.assertEqual(res.status_code,302)
+        self.assertIsNone(project.one("SELECT id FROM users WHERE id=?",(uid,)))
 
     def test_school_lifecycle_logo_and_deletion(self):
         self.login("superadmin@demo.edupilot.test")
