@@ -10,11 +10,18 @@ import requests
 from flask import Flask, request, redirect, url_for, render_template, flash, session, abort, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 from flask import send_file
 
 ROOT = Path(__file__).parent
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY') or ('demo-local-only-secret' if os.getenv('EDUPILOT_DEMO', 'false').lower() == 'true' else secrets.token_hex(32))
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.getenv('PUBLIC_BASE_URL','').startswith('https://'),
+)
 app.config['MAX_CONTENT_LENGTH'] = 12 * 1024 * 1024
 DB = os.getenv('DATABASE_PATH', '/tmp/edupilot.db')
 UPLOAD_DIR = Path(os.getenv('UPLOAD_DIR', '/tmp/edupilot_uploads'))
