@@ -389,8 +389,87 @@ def school_accounts(sid):
             execute('INSERT INTO users(school_id,name,first_name,last_name,email,phone,password_hash,role,must_change_password) VALUES (?,?,?,?,?,?,?,?,1)',(sid,first+' '+last,first,last,email,phone,generate_password_hash(password),role))
             flash('Compte créé. Transmettez le mot de passe temporaire au destinataire par un canal sécurisé.','success')
             return redirect(url_for('school_accounts',sid=sid))
-    accounts=allrows("SELECT id,name,email,phone,role,active,must_change_password FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
+    accounts=allrows("SELECT id,first_name,last_name,name,email,phone,role,active,must_change_password FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
     return render_template('school_accounts.html',school=school,accounts=accounts,base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
+
+@app.route('/schools/<int:sid>/accounts/<int:uid>/edit',methods=['GET','POST'])
+@roles('superadmin')
+def school_account_edit(sid,uid):
+    school=one('SELECT id,name,slug FROM schools WHERE id=?',(sid,))
+    account=one("SELECT * FROM users WHERE id=? AND school_id=? AND role IN ('admin','administratif')",(uid,sid))
+    if not school or not account:abort(404)
+    if request.method=='POST':
+        first=request.form.get('first_name','').strip()
+        last=request.form.get('last_name','').strip()
+        email=request.form.get('email','').strip().lower()
+        phone=request.form.get('phone','').strip()
+        role=request.form.get('role','')
+        if not first or not last or not phone or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400)
+        if len(first)>90 or len(last)>90 or len(phone)>40 or len(email)>254 or role not in ('admin','administratif'):abort(400)
+        duplicate=one('SELECT id FROM users WHERE email=? AND id<>?',(email,uid))
+        if duplicate:
+            flash('Adresse e-mail déjà utilisée.','error')
+            return redirect(url_for('school_account_edit',sid=sid,uid=uid))
+        reset=request.form.get('temporary_password','')
+        if reset and (len(reset)<12 or not any(ch.isalpha() for ch in reset) or not any(ch.isdigit() for ch in reset)):
+            flash('Le mot de passe temporaire doit avoir au moins 12 caractères, avec lettres et chiffres.','error')
+            return redirect(url_for('school_account_edit',sid=sid,uid=uid))
+        with db() as c:
+            c.execute('UPDATE users SET name=?,first_name=?,last_name=?,email=?,phone=?,role=? WHERE id=? AND school_id=?',
+                      (first+' '+last,first,last,email,phone,role,uid,sid))
+            if reset:
+                c.execute('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=? AND school_id=?',
+                          (generate_password_hash(reset),uid,sid))
+            c.execute('INSERT INTO audit(school_id,user_id,action,details) VALUES (?,?,?,?)',
+                      (sid,current_user()['id'],'account.updated',str(uid)))
+        flash('Compte modifié avec succès.','success')
+        return redirect(url_for('school_accounts',sid=sid))
+    return render_template('school_account_edit.html',school=school,account=account)
+
+@app.post('/schools/<int:sid>/accounts/bulk')
+@roles('superadmin')
+def school_accounts_bulk(sid):
+    school=one('SELECT id,name FROM schools WHERE id=?',(sid,))
+    if not school:abort(404)
+    values=request.form.getlist('account_ids')
+    action=request.form.get('action','')
+    if action not in ('suspend','activate','delete','set_admin','set_administratif') or not values or len(values)>100 or any(not v.isdigit() for v in values):
+        flash('Sélectionnez des comptes et une action.','error')
+        return redirect(url_for('school_accounts',sid=sid))
+    ids=list(dict.fromkeys(int(v) for v in values))
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        placeholders=','.join('?' for _ in ids)
+        accounts=c.execute(f"SELECT id FROM users WHERE school_id=? AND role IN ('admin','administratif') AND id IN ({placeholders})",(sid,*ids)).fetchall()
+        if len(accounts)!=len(ids):abort(403)
+        if action=='delete':
+            # Historical accounts must be suspended, not deleted: protect academic data and traceability.
+            dependencies=(
+                ('enrollments','student_id'),('parent_links','student_id'),('parent_links','parent_id'),
+                ('courses','teacher_id'),('lessons','teacher_id'),('teacher_history','teacher_id'),
+                ('grades','student_id'),('grade_history','actor_id'),
+                ('attendance','student_id'),('submissions','student_id'),('unlocks','teacher_id'),
+            )
+            for uid in ids:
+                for table,col in dependencies:
+                    if c.execute(f'SELECT 1 FROM {table} WHERE {col}=? LIMIT 1',(uid,)).fetchone():
+                        flash('Suppression refusée : certains comptes sont liés à des données scolaires. Vous pouvez les suspendre.','error')
+                        return redirect(url_for('school_accounts',sid=sid))
+            for uid in ids:
+                c.execute('DELETE FROM invites WHERE user_id=?',(uid,))
+                c.execute('DELETE FROM notifications WHERE user_id=?',(uid,))
+                c.execute('UPDATE audit SET user_id=NULL WHERE user_id=?',(uid,))
+            c.execute(f"DELETE FROM users WHERE school_id=? AND id IN ({placeholders})",(sid,*ids))
+        elif action in ('activate','suspend'):
+            c.execute(f"UPDATE users SET active=? WHERE school_id=? AND id IN ({placeholders})",
+                      (1 if action=='activate' else 0,sid,*ids))
+        else:
+            role='admin' if action=='set_admin' else 'administratif'
+            c.execute(f"UPDATE users SET role=? WHERE school_id=? AND id IN ({placeholders})",(role,sid,*ids))
+        c.execute('INSERT INTO audit(school_id,user_id,action,details) VALUES (?,?,?,?)',
+                  (sid,current_user()['id'],'accounts.'+action,','.join(str(v) for v in ids)))
+    flash(f'{len(ids)} compte(s) : modification enregistrée.','success')
+    return redirect(url_for('school_accounts',sid=sid))
 
 @app.post('/schools/<int:sid>/update')
 @roles('superadmin')
