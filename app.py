@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, school_id INTEG
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, school_id INTEGER, user_id INTEGER, action TEXT NOT NULL, details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id), student_id INTEGER NOT NULL REFERENCES users(id), filename TEXT NOT NULL, filepath TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(assessment_id,student_id));
 CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS assessment_files(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE, filename TEXT NOT NULL, mime TEXT NOT NULL, content BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 """
 
@@ -1040,6 +1041,24 @@ def assessment_attachment(aid):
     response.headers['X-Content-Type-Options']='nosniff'
     return response
 
+@app.get('/assessments/files/<int:fid>')
+@login_required
+def assessment_file(fid):
+    file=one("""SELECT af.filename,af.mime,af.content,a.id aid,c.class_id,c.teacher_id,cl.parents_enabled
+                FROM assessment_files af JOIN assessments a ON a.id=af.assessment_id
+                JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id
+                WHERE af.id=? AND a.school_id=?""",(fid,school_id()))
+    if not file:abort(404)
+    u=current_user()
+    if u['role']=='superadmin':abort(403)
+    if u['role']=='enseignant' and file['teacher_id']!=u['id']:abort(403)
+    if u['role']=='etudiant' and not one('SELECT id FROM enrollments WHERE school_id=? AND class_id=? AND student_id=?',(school_id(),file['class_id'],u['id'])):abort(403)
+    if u['role']=='parent' and (not file['parents_enabled'] or not one("""SELECT p.id FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id
+         WHERE p.school_id=? AND p.parent_id=? AND p.active=1 AND e.class_id=?""",(school_id(),u['id'],file['class_id']))):abort(403)
+    response=send_file(io.BytesIO(file['content']),download_name=file['filename'],mimetype=file['mime'],as_attachment=True)
+    response.headers['X-Content-Type-Options']='nosniff'
+    return response
+
 @app.route('/assessments',methods=['GET','POST'])
 @login_required
 def assessments():
@@ -1057,20 +1076,27 @@ def assessments():
             if not (0<coeff<=100):raise ValueError()
         except (ValueError,TypeError):abort(400,'Coefficient invalide')
         if not title or len(title)>200 or len(description)>10000:abort(400)
-        file=request.files.get('document')
-        data=None;mime=None;filename=None
-        if file and file.filename:
-            from werkzeug.utils import secure_filename
+        uploads=request.files.getlist('documents') or request.files.getlist('document')
+        uploads=[file for file in uploads if file and file.filename]
+        if len(uploads)>5:abort(400,'Maximum 5 documents')
+        prepared=[]
+        total_bytes=0
+        for file in uploads:
             filename=secure_filename(file.filename)
             data=file.read(3*1024*1024+1)
-            if not filename or len(data)>3*1024*1024:abort(400,'Fichier supérieur à 3 Mo')
+            total_bytes+=len(data)
+            if not filename or len(data)>3*1024*1024 or total_bytes>10*1024*1024:abort(400,'Limites : 3 Mo par document, 10 Mo au total')
             if data.startswith(b'%PDF-'):mime='application/pdf'
             elif data.startswith(bytes([137,80,78,71,13,10,26,10])):mime='image/png'
             elif data.startswith(bytes([255,216,255])):mime='image/jpeg'
             elif data.startswith(b'PK') and filename.lower().endswith('.docx'):mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            else:abort(400,'Format autorisé : PDF, DOCX, PNG et JPEG')
-        execute('''INSERT INTO assessments(school_id,course_id,title,kind,due_date,description,coefficient,attachment_name,attachment_blob,attachment_mime)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)''',(school_id(),course_id,title,request.form.get('kind','Devoir'),request.form.get('due_date') or None,description,coeff,filename,data,mime))
+            else:abort(400,'Formats autorisés : PDF, DOCX, PNG et JPEG')
+            prepared.append((filename,mime,data))
+        with db() as c:
+            aid=c.execute('''INSERT INTO assessments(school_id,course_id,title,kind,due_date,description,coefficient)
+                VALUES (?,?,?,?,?,?,?)''',(school_id(),course_id,title,request.form.get('kind','Devoir'),request.form.get('due_date') or None,description,coeff)).lastrowid
+            for filename,mime,data in prepared:
+                c.execute('INSERT INTO assessment_files(assessment_id,filename,mime,content) VALUES (?,?,?,?)',(aid,filename,mime,data))
         notify(classmates(course_id),'Nouvelle évaluation : '+title,'/assessments')
         audit('assessment.created',title);flash('Évaluation créée.','success')
         return redirect(url_for('assessments'))
@@ -1080,9 +1106,15 @@ def assessments():
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.class_id=c.class_id AND e.student_id=? AND e.school_id=a.school_id)';args.append(u['id'])
     elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     rows=allrows(sql,args)
+    file_rows=allrows("""SELECT af.id,af.assessment_id,af.filename FROM assessment_files af
+        JOIN assessments a ON a.id=af.assessment_id WHERE a.school_id=?""",(school_id(),))
+    attachments={}
+    permitted={row['id'] for row in rows}
+    for file in file_rows:
+        if file['assessment_id'] in permitted:attachments.setdefault(file['assessment_id'],[]).append(file)
     choices=scoped('SELECT * FROM courses WHERE school_id=?')
     if u['role']=='enseignant':choices=[x for x in choices if x['teacher_id']==u['id']]
-    return render_template('assessments.html',assessments=rows,courses=choices)
+    return render_template('assessments.html',assessments=rows,courses=choices,attachments=attachments)
 
 @app.route('/grades',methods=['GET','POST'])
 @login_required
