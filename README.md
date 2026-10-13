@@ -1,3 +1,25 @@
+# EduPilot — Démo SQLite / Render Free
+
+## Nouveautés de l'administration SaaS (13 octobre 2026)
+
+- Identité visuelle bleu marine / turquoise et nouveau formulaire de gestion des établissements.
+- Le Super Admin crée un établissement avec sa **date de fin d'abonnement**, sa formule et son logo PNG/JPEG/WEBP (1 Mo maximum).
+- La date de fin d'abonnement est **inclusive** : l'accès reste possible jusqu'à la fin de la date indiquée et est restreint le lendemain. Une désactivation manuelle est immédiate.
+- Les utilisateurs d'un établissement expiré ou suspendu sont redirigés vers une **page de restriction** depuis toutes les pages métiers, même via les routes API. Le Super Admin n'est pas bloqué.
+- Gestion des établissements : mise à jour de l'échéance, de la formule et du logo, désactivation/réactivation, suppression définitive après confirmation du slug.
+- **Attention : la suppression définitive efface également toutes les données scolaires, utilisateurs et documents référencés en base associés à l'établissement. Elle est irréversible.** Le stockage de fichiers externe nécessite une politique de purge distincte.
+- **Super Admin → Paramètres éditeur** : personnalisation du nom du support, numéro de téléphone et mention « Propulsé par LMurbs » (valeurs initiales : LMurbs / +2250711124359).
+- Les logos sont stockés dans SQLite. Sur Render Free, ils disparaissent donc aussi lorsque la base est réinitialisée.
+- Une suite de tests GitHub Actions compile l'application et vérifie la gestion des abonnements, logo, pages et permissions. Consulter l'onglet Actions pour le résultat effectif.
+
+## Déploiement / actualisation
+
+Render Web Service connecté à la branche `main`, commande build `pip install -r requirements.txt`, démarrage `gunicorn 'app:app' --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120`, health check `/health`.
+
+Variables : `SECRET_KEY` aléatoire fort et fixe, `EDUPILOT_DEMO=true`. SQLite : `DATABASE_PATH=/tmp/edupilot.db` (facultatif : valeur par défaut identique).
+
+En environnement **Render Free**, la base SQLite et les logos ne sont pas persistants. L'initialisation recrée les établissements fictifs si la base est vide. Pour conserver les changements d'abonnement et les logos, il faudra ensuite activer une base persistante.
+
 # EduPilot — démonstrateur fonctionnel V0.1
 
 Application SaaS scolaire et universitaire (Flask + SQLite + FullCalendar) conçue pour être déployée sur **Render Free** dans **un seul Web Service**.
