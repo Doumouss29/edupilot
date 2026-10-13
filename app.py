@@ -1024,6 +1024,22 @@ def declare(lid):
     audit('lesson.declared',str(lid)+':'+status)
     flash('Séance déclarée.','success');return redirect(url_for('planning'))
 
+@app.get('/assessments/<int:aid>/attachment')
+@login_required
+def assessment_attachment(aid):
+    a=one("""SELECT a.attachment_name,a.attachment_blob,a.attachment_mime,c.class_id,c.teacher_id,cl.parents_enabled
+           FROM assessments a JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id
+           WHERE a.id=? AND a.school_id=?""",(aid,school_id()))
+    if not a or not a['attachment_blob']:abort(404)
+    u=current_user()
+    if u['role']=='superadmin':abort(403)
+    if u['role']=='enseignant' and a['teacher_id']!=u['id']:abort(403)
+    if u['role']=='etudiant' and not one('SELECT id FROM enrollments WHERE school_id=? AND class_id=? AND student_id=?',(school_id(),a['class_id'],u['id'])):abort(403)
+    if u['role']=='parent' and (not a['parents_enabled'] or not one("""SELECT p.id FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.school_id=? AND p.parent_id=? AND p.active=1 AND e.class_id=?""",(school_id(),u['id'],a['class_id']))):abort(403)
+    response=send_file(io.BytesIO(a['attachment_blob']),download_name=a['attachment_name'],mimetype=a['attachment_mime'],as_attachment=True)
+    response.headers['X-Content-Type-Options']='nosniff'
+    return response
+
 @app.route('/assessments',methods=['GET','POST'])
 @login_required
 def assessments():
@@ -1035,13 +1051,33 @@ def assessments():
         course=one('SELECT * FROM courses WHERE id=? AND school_id=?',(course_id,school_id()))
         if not course or (u['role']=='enseignant' and course['teacher_id']!=u['id']):abort(403)
         title=request.form.get('title','').strip()
-        if not title:abort(400)
-        execute('INSERT INTO assessments(school_id,course_id,title,kind,due_date,description) VALUES (?,?,?,?,?,?)',(school_id(),course_id,title,request.form.get('kind','Devoir'),request.form.get('due_date') or None,request.form.get('description','')))
+        description=request.form.get('description','').strip()
+        try:
+            coeff=float(request.form.get('coefficient','1'))
+            if not (0<coeff<=100):raise ValueError()
+        except (ValueError,TypeError):abort(400,'Coefficient invalide')
+        if not title or len(title)>200 or len(description)>10000:abort(400)
+        file=request.files.get('document')
+        data=None;mime=None;filename=None
+        if file and file.filename:
+            from werkzeug.utils import secure_filename
+            filename=secure_filename(file.filename)
+            data=file.read(3*1024*1024+1)
+            if not filename or len(data)>3*1024*1024:abort(400,'Fichier supérieur à 3 Mo')
+            if data.startswith(b'%PDF-'):mime='application/pdf'
+            elif data.startswith(bytes([137,80,78,71,13,10,26,10])):mime='image/png'
+            elif data.startswith(bytes([255,216,255])):mime='image/jpeg'
+            elif data.startswith(b'PK') and filename.lower().endswith('.docx'):mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            else:abort(400,'Format autorisé : PDF, DOCX, PNG et JPEG')
+        execute('''INSERT INTO assessments(school_id,course_id,title,kind,due_date,description,coefficient,attachment_name,attachment_blob,attachment_mime)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)''',(school_id(),course_id,title,request.form.get('kind','Devoir'),request.form.get('due_date') or None,description,coeff,filename,data,mime))
         notify(classmates(course_id),'Nouvelle évaluation : '+title,'/assessments')
-        audit('assessment.created',title);return redirect(url_for('assessments'))
-    sql='''SELECT a.*,c.name course_name,cl.name class_name, c.teacher_id FROM assessments a JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id WHERE a.school_id=?'''; args=[school_id()]
+        audit('assessment.created',title);flash('Évaluation créée.','success')
+        return redirect(url_for('assessments'))
+    sql='''SELECT a.id,a.school_id,a.course_id,a.title,a.kind,a.due_date,a.coefficient,a.description,a.attachment_name,c.name course_name,cl.name class_name,c.teacher_id
+           FROM assessments a JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id WHERE a.school_id=?''';args=[school_id()]
     if u['role']=='enseignant':sql+=' AND c.teacher_id=?';args.append(u['id'])
-    elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.class_id=c.class_id AND e.student_id=?)';args.append(u['id'])
+    elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.class_id=c.class_id AND e.student_id=? AND e.school_id=a.school_id)';args.append(u['id'])
     elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     rows=allrows(sql,args)
     choices=scoped('SELECT * FROM courses WHERE school_id=?')
