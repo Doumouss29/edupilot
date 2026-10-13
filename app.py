@@ -854,11 +854,15 @@ def courses():
         if teacher and not one("SELECT id FROM users WHERE school_id=? AND id=? AND role='enseignant'",(school_id(),teacher)):abort(403)
         name=request.form.get('name','').strip()
         if not name:abort(400)
-        cid=execute('INSERT INTO courses(school_id,class_id,name,code,planned_minutes,teacher_id) VALUES (?,?,?,?,?,?)',(school_id(),cl,name,request.form.get('code',''),int(float(request.form.get('hours',20))*60),teacher))
+        try:
+            coefficient=float(request.form.get('coefficient','1'))
+            if not (0<coefficient<=100):raise ValueError()
+        except ValueError:abort(400,'Coefficient matière invalide')
+        cid=execute('INSERT INTO courses(school_id,class_id,name,code,planned_minutes,teacher_id,coefficient) VALUES (?,?,?,?,?,?,?)',(school_id(),cl,name,request.form.get('code',''),int(float(request.form.get('hours',20))*60),teacher,coefficient))
         if teacher:execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,datetime.date.today().isoformat()))
         audit('course.created',name);return redirect(url_for('courses'))
     rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
-    return render_template('list.html',title='Cours',columns=['Cours','Classe','Enseignant','Volume prévu','Modifier'],rows=[(x['name'],x['class_name'],x['teacher_name'] or 'Non affecté',f"{x['planned_minutes']/60:g} h",{'link':url_for('course_edit',cid=x['id']),'label':'Modifier'}) for x in rows],form='courses',classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant'"))
+    return render_template('list.html',title='Cours',columns=['Cours','Classe','Enseignant','Volume prévu','Coeff. matière','Modifier'],rows=[(x['name'],x['class_name'],x['teacher_name'] or 'Non affecté',f"{x['planned_minutes']/60:g} h",x["coefficient"],{'link':url_for('course_edit',cid=x['id']),'label':'Modifier'}) for x in rows],form='courses',classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant'"))
 
 @app.route('/courses/<int:cid>/edit',methods=['GET','POST'])
 @roles('admin','administratif')
@@ -873,6 +877,8 @@ def course_edit(cid):
         if teacher and not one("SELECT id FROM users WHERE id=? AND school_id=? AND role='enseignant' AND active=1",(teacher,school_id())):abort(403)
         try:
             minutes=int(round(float(request.form.get('hours',''))*60))
+            coefficient=float(request.form.get('coefficient','1'))
+            if not (0<coefficient<=100):raise ValueError()
             if minutes<30 or minutes>300000:raise ValueError()
         except (ValueError,TypeError):abort(400)
         if int(class_id)!=item['class_id'] and (one('SELECT id FROM lessons WHERE course_id=?',(cid,)) or one('SELECT id FROM assessments WHERE course_id=?',(cid,))):
@@ -884,7 +890,7 @@ def course_edit(cid):
             if changed_teacher:
                 c.execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,cid))
                 if teacher:c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,now))
-            c.execute('UPDATE courses SET name=?,code=?,class_id=?,teacher_id=?,planned_minutes=? WHERE id=? AND school_id=?',(name,request.form.get('code','').strip(),class_id,teacher,minutes,cid,school_id()))
+            c.execute('UPDATE courses SET name=?,code=?,class_id=?,teacher_id=?,planned_minutes=?,coefficient=? WHERE id=? AND school_id=?',(name,request.form.get('code','').strip(),class_id,teacher,minutes,coefficient,cid,school_id()))
         audit('course.updated',str(cid));flash('Cours mis à jour ; les séances existantes gardent leur enseignant initial.','success')
         return redirect(url_for('courses'))
     return render_template('edit_academic.html',kind='course',item=item,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant' AND active=1"))
