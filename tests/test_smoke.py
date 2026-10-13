@@ -27,7 +27,7 @@ class EduPilotSmoke(unittest.TestCase):
             return sess["csrf"]
 
     def test_all_templates_compile(self):
-        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html"):
+        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","school_new.html","school_accounts.html","change_password.html"):
             project.app.jinja_env.get_template(template)
 
     def test_health(self):
@@ -71,12 +71,43 @@ class EduPilotSmoke(unittest.TestCase):
         finally:
             project.execute("UPDATE schools SET subscription_end=NULL WHERE id=?", (school,))
 
+
+    def test_create_tenant_admin_force_password_change(self):
+        self.login("superadmin@demo.edupilot.test")
+        token=self.token()
+        resp=self.client.post("/schools/new",data={"csrf":token,"name":"Ecole des Tests","plan":"standard","subscription_end":"2027-12-31"})
+        self.assertEqual(resp.status_code,302)
+        school=project.one("SELECT id,slug FROM schools WHERE slug='ecole_des_tests'")
+        self.assertIsNotNone(school)
+        password="TemporaryTeacher2026!"
+        response=self.client.post(f"/schools/{school['id']}/accounts",data={"csrf":token,"first_name":"Alice","last_name":"Test","email":"alice.edupilot@example.test","phone":"+2250102030405","role":"admin","password":password})
+        self.assertEqual(response.status_code,302)
+        created=project.one("SELECT * FROM users WHERE email=?",("alice.edupilot@example.test",))
+        self.assertEqual(created['school_id'],school['id'])
+        self.assertEqual(created['must_change_password'],1)
+        self.client.post("/logout",data={"csrf":token})
+        # Ensure the scoped login does not accept another institution's admin.
+        csrf=self.csrf()
+        wrong=self.client.post(f"/{school['slug']}/login",data={"csrf":csrf,"email":"admin1@demo.edupilot.test","password":"Demo2026!"})
+        self.assertEqual(wrong.status_code,302)
+        with self.client.session_transaction() as sess:self.assertNotIn("uid",sess)
+        csrf=self.csrf()
+        login=self.client.post(f"/{school['slug']}/login",data={"csrf":csrf,"email":"alice.edupilot@example.test","password":password})
+        self.assertIn("/change-password",login.headers["Location"])
+        self.assertIn("/change-password",self.client.get("/classes").headers["Location"])
+        csrf=self.token()
+        result=self.client.post("/change-password",data={"csrf":csrf,"old_password":password,"new_password":"MyNewPass2026Safe!","confirm_password":"MyNewPass2026Safe!"})
+        self.assertEqual(result.status_code,302)
+        changed=project.one("SELECT must_change_password FROM users WHERE id=?",(created["id"],))
+        self.assertEqual(changed["must_change_password"],0)
+        self.assertTrue(project.check_password_hash(project.one("SELECT password_hash FROM users WHERE id=?",(created["id"],))["password_hash"],"MyNewPass2026Safe!"))
+
     def test_school_lifecycle_logo_and_deletion(self):
         self.login("superadmin@demo.edupilot.test")
         token = self.token()
         slug = "demo_lifecycle_tests"
         img = b"\\x89PNG\\r\\n\\x1a\\n" + b"fictitiousimage"
-        r=self.client.post("/schools",data={
+        r=self.client.post("/schools/new",data={
             "csrf":token,"name":"Demo Lifecycle Tests","plan":"premium",
             "subscription_end":"2027-12-31",
             "logo":(io.BytesIO(img),"test.png"),
