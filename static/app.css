@@ -130,3 +130,13 @@ a:not(.nav):hover{color:#dc722b}
 #transfer-form th{position:sticky;top:0;background:#f6f8fc;z-index:1}
 #transfer-form .page-actions select{min-width:240px;max-width:100%}
 @media(max-width:720px){.modern-form .full-row{grid-column:auto}.grade-comment{min-width:140px}}
+
+/* Séances, bulletins et écrans de résultats */
+[hidden]{display:none!important}
+#lesson-action-panel{border-top:4px solid #df7c29;scroll-margin-top:30px}
+#lesson-action-panel .inline-form{margin:13px 0;align-items:end}
+#lesson-action-details{color:#466176;line-height:1.6}
+#lesson-cancel-form{border-top:1px solid #e8edf1;padding-top:18px;margin-top:20px}
+#courses-bulk .table-scroll,#print-bulletins .table-scroll{max-height:640px;overflow:auto}
+#courses-bulk .page-actions,#print-bulletins .page-actions{align-items:flex-end}
+@media print{.sidebar,.topbar,.page-actions,.app-footer{display:none!important}body{background:white}.content{padding:0}.panel{box-shadow:none;border:none;break-inside:avoid}}
