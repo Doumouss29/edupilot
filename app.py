@@ -1091,7 +1091,9 @@ def grades():
     if u['role']=='superadmin':abort(403)
     if request.method=='POST':
         if u['role'] not in ('enseignant','admin','administratif'):abort(403)
-        aid=request.form.get('assessment_id');student=request.form.get('student_id');value=float(request.form.get('value','-1'))
+        aid=request.form.get('assessment_id');student=request.form.get('student_id')
+        try:value=float(request.form.get('value','-1'))
+        except (ValueError,TypeError):abort(400,'Note invalide')
         a=one('''SELECT a.*,c.class_id,c.teacher_id,cl.school_id FROM assessments a JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id WHERE a.id=? AND a.school_id=?''',(aid,school_id()))
         if not a or (u['role']=='enseignant' and a['teacher_id']!=u['id']) or not (0<=value<=a['max_score']):abort(403)
         if not one('SELECT id FROM enrollments WHERE student_id=? AND class_id=? AND school_id=?',(student,a['class_id'],school_id())):abort(403)
@@ -1101,16 +1103,18 @@ def grades():
             if not unlocked and u['role']=='enseignant':abort(403,'Période verrouillée')
         existing=one('SELECT * FROM grades WHERE assessment_id=? AND student_id=?',(aid,student))
         if existing:
-            execute('UPDATE grades SET value=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(value,existing['id']))
+            execute('UPDATE grades SET value=?,comment=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(value,request.form.get('comment','')[:2000],existing['id']))
             gid=existing['id']; old=existing['value']
         else:
-            gid=execute('INSERT INTO grades(assessment_id,student_id,value) VALUES (?,?,?)',(aid,student,value));old=None
+            gid=execute('INSERT INTO grades(assessment_id,student_id,value,comment) VALUES (?,?,?,?)',(aid,student,value,request.form.get('comment','')[:2000]));old=None
         execute('INSERT INTO grade_history(grade_id,old_value,new_value,actor_id) VALUES (?,?,?,?)',(gid,old,value,u['id']))
         audit('grade.saved',str(gid));flash('Note enregistrée.','success');return redirect(url_for('grades'))
     sql='''SELECT g.*,a.title,a.coefficient evaluation_coefficient,c.coefficient course_coefficient,c.name course_name,cl.name class_name,cl.parents_enabled,p.published,u.name student_name,u.id student_id FROM grades g JOIN assessments a ON a.id=g.assessment_id JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id JOIN users u ON u.id=g.student_id LEFT JOIN periods p ON p.class_id=cl.id WHERE a.school_id=?''';args=[school_id()]
     if u['role']=='enseignant':sql+=' AND c.teacher_id=?';args.append(u['id'])
     if u['role']=='etudiant':sql+=' AND u.id=? AND p.published=1';args.append(u['id'])
     if u['role']=='parent':sql+=' AND cl.parents_enabled=1 AND p.published=1 AND EXISTS (SELECT 1 FROM parent_links l WHERE l.student_id=u.id AND l.parent_id=? AND l.active=1)';args.append(u['id'])
+    selected_assessment=request.args.get('assessment_id','')
+    if selected_assessment and selected_assessment.isdigit():sql+=' AND a.id=?';args.append(int(selected_assessment))
     rows=allrows(sql,args)
     evals=scoped('SELECT a.*,c.name course_name,c.class_id,c.teacher_id FROM assessments a JOIN courses c ON c.id=a.course_id WHERE a.school_id=?')
     if u['role']=='enseignant':evals=[a for a in evals if a['teacher_id']==u['id']]
