@@ -1,3 +1,13 @@
+## V0.5 — Correction planning, édition et comptes
+
+- **Calendrier / Planification** : séance unique ou répétition hebdomadaire jusqu'à une date définie. Renseigner classe, cours, date, heure de début, durée (0,5 à 12 h, pas de 30 minutes), salle éventuelle. L'heure de fin est calculée automatiquement : une séance ne peut pas franchir minuit.
+- **Conflits** : rejet en cas de chevauchement avec une autre séance de la même classe, du même enseignant ou de la même salle. L'ajout d'une série est atomique : si une date est en conflit, aucune séance de cette série n'est créée.
+- **Classes → Modifier**, **Cours → Modifier** : changement des attributs et du professeur du cours, avec historisation. Changer la classe d'un cours déjà utilisé dans une séance ou une évaluation est interdit pour préserver les historiques.
+- **Utilisateurs** : cases à cocher permettant la suspension, la réactivation et la suppression de plusieurs comptes. Les suppressions sont interdites pour les utilisateurs qui portent des notes, cours, séances, présences ou autres données académiques historisées ; privilégier la suspension. On ne peut pas suspendre ou supprimer son propre compte depuis ce formulaire. Les comptes sont isolés par établissement.
+- **Création étudiant/enseignant** : mot de passe provisoire saisi ou généré et copiable, stocké uniquement sous forme de hachage ; changement obligatoire à la première connexion. Pas d'envoi automatique du mot de passe.
+- Les tests de régression incluent les nouvelles routes et workflows. Vérifier les résultats dans **GitHub → Actions** et les logs **Render** après déploiement.
+- **Render Free + SQLite** : la base reste éphémère ; ne pas utiliser de données réelles et ne pas considérer ce build comme prêt pour la production.
+
 ## Mise à jour V0.4 — étudiants, enseignants et planification (13 octobre 2026)
 
 - **Utilisateurs → Étudiant** : sélection d'une classe obligatoire lors de la création ; inscription liée à l'année scolaire associée à la classe. Un établissement ne peut inscrire un étudiant dans une classe d'un autre établissement.
