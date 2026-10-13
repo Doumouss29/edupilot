@@ -22,7 +22,7 @@ SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1, subscription_end TEXT, logo BLOB, logo_mime TEXT);
 CREATE TABLE IF NOT EXISTS campuses(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), name TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, first_name TEXT, last_name TEXT, phone TEXT, must_change_password INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS years(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), label TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS classes(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), year_id INTEGER NOT NULL REFERENCES years(id), campus_id INTEGER REFERENCES campuses(id), name TEXT NOT NULL, cycle TEXT NOT NULL DEFAULT 'semestre', parents_enabled INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS enrollments(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), student_id INTEGER NOT NULL REFERENCES users(id), class_id INTEGER NOT NULL REFERENCES classes(id), year_id INTEGER NOT NULL REFERENCES years(id), status TEXT NOT NULL DEFAULT 'inscrit', UNIQUE(student_id,class_id,year_id));
@@ -107,6 +107,9 @@ with db() as c:
     existing={r['name'] for r in c.execute('PRAGMA table_info(schools)').fetchall()}
     for name,definition in [('subscription_end','TEXT'),('logo','BLOB'),('logo_mime','TEXT')]:
         if name not in existing: c.execute(f'ALTER TABLE schools ADD COLUMN {name} {definition}')
+    columns={r['name'] for r in c.execute('PRAGMA table_info(users)').fetchall()}
+    for name,definition in [('first_name','TEXT'),('last_name','TEXT'),('phone','TEXT'),('must_change_password','INTEGER NOT NULL DEFAULT 0')]:
+        if name not in columns:c.execute(f'ALTER TABLE users ADD COLUMN {name} {definition}')
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_name','LMurbs')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_phone','+2250711124359')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('powered_by','Propulsé par LMurbs')")
@@ -153,6 +156,8 @@ def safety():
     u=current_user()
     if u and subscription_blocked(u) and request.endpoint not in ('restricted','logout','login','health','school_logo','static'):
         return redirect(url_for('restricted'))
+    if u and u['must_change_password'] and request.endpoint not in ('change_password','logout','restricted','health','school_logo','static'):
+        return redirect(url_for('change_password'))
 
 @app.context_processor
 def globals_template():
@@ -217,15 +222,59 @@ def slugify(s):
 @app.get('/health')
 def health():return {'status':'ok','application':'EduPilot'}
 
+@app.get('/<slug>')
+@app.get('/<slug>/login')
+def tenant_login(slug):
+    school=one('SELECT id,name,slug,logo_mime FROM schools WHERE slug=?',(slug,))
+    if not school:abort(404)
+    return render_template('login.html',login_school=school,login_action=url_for('tenant_signin',slug=slug))
+
+@app.post('/<slug>/login')
+def tenant_signin(slug):
+    school=one('SELECT id,name,slug,logo_mime FROM schools WHERE slug=?',(slug,))
+    if not school:abort(404)
+    return handle_login(school)
+
+def handle_login(school=None):
+    email=request.form.get('email','').strip().lower()
+    u=one('SELECT * FROM users WHERE email=? AND active=1',(email,))
+    if u and check_password_hash(u['password_hash'],request.form.get('password','')) and (school is None or (u['school_id']==school['id'] and u['role']!='superadmin')):
+        session.clear()
+        session['uid']=u['id']
+        session['csrf']=secrets.token_urlsafe(24)
+        if u['must_change_password']:return redirect(url_for('change_password'))
+        return redirect(url_for('dashboard'))
+    flash('Identifiants incorrects.','error')
+    if school:return redirect(url_for('tenant_login',slug=school['slug']))
+    return redirect(url_for('login'))
+
 @app.route('/login',methods=['GET','POST'])
 def login():
+    if request.method=='POST':return handle_login()
+    return render_template('login.html',login_school=None,login_action=url_for('login'))
+
+@app.route('/change-password',methods=['GET','POST'])
+@login_required
+def change_password():
+    u=current_user()
     if request.method=='POST':
-        u=one('SELECT * FROM users WHERE email=? AND active=1',(request.form.get('email','').strip().lower(),))
-        if u and check_password_hash(u['password_hash'],request.form.get('password','')):
-            session.clear();session['uid']=u['id'];session['csrf']=secrets.token_urlsafe(24)
-            return redirect(url_for('dashboard'))
-        flash('Identifiants incorrects.','error')
-    return render_template('login.html')
+        old=request.form.get('old_password','')
+        new=request.form.get('new_password','')
+        confirm=request.form.get('confirm_password','')
+        if not check_password_hash(u['password_hash'],old):
+            flash('Mot de passe temporaire incorrect.','error')
+        elif len(new)<12 or not any(x.isalpha() for x in new) or not any(x.isdigit() for x in new):
+            flash('Choisissez au moins 12 caractères, avec des lettres et des chiffres.','error')
+        elif new!=confirm:
+            flash('Les nouveaux mots de passe sont différents.','error')
+        elif new==old:
+            flash('Le nouveau mot de passe doit être différent.','error')
+        else:
+            execute('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?',(generate_password_hash(new),u['id']))
+            session.clear()
+            flash('Mot de passe modifié. Connectez-vous avec votre nouveau mot de passe.','success')
+            return redirect(url_for('login'))
+    return render_template('change_password.html')
 
 @app.get('/restricted')
 @login_required
@@ -242,7 +291,7 @@ def dashboard():
     u=current_user()
     if u['role']=='superadmin':
         schools=allrows('SELECT s.*, (SELECT COUNT(*) FROM users u WHERE u.school_id=s.id) members FROM schools s')
-        return render_template('dashboard.html',schools=schools,stats=None,classes=[],events=[],today=datetime.date.today().isoformat())
+        return render_template('dashboard.html',schools=schools,stats=None,classes=[],events=[],today=datetime.date.today().isoformat(),base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
     if u['role'] in ('etudiant','parent'):
         return render_template('dashboard.html',stats={'classes':0,'courses':0,'lessons':0,'total':0,'actual':0,'percent':0},classes=[],events=[],courses=[],schools=[])
     sid=school_id()
@@ -256,31 +305,65 @@ def dashboard():
     stats={'classes':len(classes),'courses':len(courses),'lessons':len(lessonlist),'total':total//60,'actual':round(actual/60,1),'percent':round(actual/total*100,1) if total else 0}
     return render_template('dashboard.html',stats=stats,classes=classes,events=lessonlist,schools=[],courses=courses)
 
-@app.route('/schools',methods=['GET','POST'])
+@app.get('/schools')
 @roles('superadmin')
 def schools():
-    if request.method=='POST':
-        name=request.form.get('name','').strip()
-        if not name:abort(400)
-        end=request.form.get('subscription_end','').strip() or None
-        if end:
-            try: datetime.date.fromisoformat(end)
-            except ValueError:abort(400)
-        plan=request.form.get('plan','standard')
-        if plan not in ('essentiel','standard','premium'):abort(400)
-        slug=slugify(name)
-        if not slug:abort(400)
-        n=2;unique=slug
-        while one('SELECT id FROM schools WHERE slug=?',(unique,)):
-            unique=slug+'_'+str(n);n+=1
-        logo,mime=read_logo(request.files.get('logo'))
-        sid=execute('INSERT INTO schools(name,slug,plan,subscription_end,logo,logo_mime) VALUES (?,?,?,?,?,?)',(name,unique,plan,end,logo,mime))
-        execute('INSERT INTO years(school_id,label) VALUES (?,?)',(sid,'2026-2027'))
-        execute('INSERT INTO campuses(school_id,name) VALUES (?,?)',(sid,'Campus principal'))
-        flash('Établissement créé : /'+unique,'success')
-        return redirect(url_for('schools'))
     records=allrows('SELECT id,name,slug,plan,active,subscription_end,logo_mime FROM schools ORDER BY id DESC')
-    return render_template('schools.html',schools=records,today=datetime.date.today().isoformat())
+    counts=allrows("SELECT school_id,COUNT(*) n FROM users WHERE role IN ('admin','administratif') GROUP BY school_id")
+    account_counts={r['school_id']:r['n'] for r in counts}
+    admins=allrows("SELECT school_id,first_name,last_name,name,email,phone,role,active,must_change_password FROM users WHERE role IN ('admin','administratif') ORDER BY id DESC")
+    return render_template('schools.html',schools=records,admin_accounts=admins,account_counts=account_counts,today=datetime.date.today().isoformat(),base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
+
+@app.route('/schools/new',methods=['GET','POST'])
+@roles('superadmin')
+def school_new():
+    if request.method=='GET':return render_template('school_new.html')
+    name=request.form.get('name','').strip()
+    if not name:abort(400)
+    end=request.form.get('subscription_end','').strip() or None
+    if end:
+        try:datetime.date.fromisoformat(end)
+        except ValueError:abort(400)
+    plan=request.form.get('plan','standard')
+    if plan not in ('essentiel','standard','premium'):abort(400)
+    slug=slugify(name)
+    if not slug:abort(400)
+    n=2;unique=slug
+    while one('SELECT id FROM schools WHERE slug=?',(unique,)):
+        unique=slug+'_'+str(n);n+=1
+    logo,mime=read_logo(request.files.get('logo'))
+    with db() as c:
+        sid=c.execute('INSERT INTO schools(name,slug,plan,subscription_end,logo,logo_mime) VALUES (?,?,?,?,?,?)',(name,unique,plan,end,logo,mime)).lastrowid
+        c.execute('INSERT INTO years(school_id,label) VALUES (?,?)',(sid,'2026-2027'))
+        c.execute('INSERT INTO campuses(school_id,name) VALUES (?,?)',(sid,'Campus principal'))
+    flash('Établissement créé. Créez maintenant ses comptes administrateurs.','success')
+    return redirect(url_for('school_accounts',sid=sid))
+
+@app.route('/schools/<int:sid>/accounts',methods=['GET','POST'])
+@roles('superadmin')
+def school_accounts(sid):
+    school=one('SELECT id,name,slug,logo_mime,plan,active,subscription_end FROM schools WHERE id=?',(sid,))
+    if not school:abort(404)
+    if request.method=='POST':
+        first=request.form.get('first_name','').strip()
+        last=request.form.get('last_name','').strip()
+        email=request.form.get('email','').strip().lower()
+        phone=request.form.get('phone','').strip()
+        role=request.form.get('role','')
+        password=request.form.get('password','')
+        if not first or not last or not phone or not email or not re.fullmatch(r'[^\\s@]+@[^\\s@]+\\.[^\\s@]+',email):abort(400,'Informations obligatoires manquantes')
+        if len(first)>90 or len(last)>90 or len(phone)>40 or len(email)>254:abort(400)
+        if role not in ('admin','administratif'):abort(400)
+        if len(password)<12 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
+            abort(400,'Mot de passe temporaire non conforme')
+        if one('SELECT id FROM users WHERE email=?',(email,)):
+            flash('Cette adresse e-mail est déjà utilisée.','error')
+        else:
+            execute('INSERT INTO users(school_id,name,first_name,last_name,email,phone,password_hash,role,must_change_password) VALUES (?,?,?,?,?,?,?,?,1)',(sid,first+' '+last,first,last,email,phone,generate_password_hash(password),role))
+            flash('Compte créé. Transmettez le mot de passe temporaire au destinataire par un canal sécurisé.','success')
+            return redirect(url_for('school_accounts',sid=sid))
+    accounts=allrows("SELECT id,name,email,phone,role,active,must_change_password FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
+    return render_template('school_accounts.html',school=school,accounts=accounts,base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
 
 @app.post('/schools/<int:sid>/update')
 @roles('superadmin')
