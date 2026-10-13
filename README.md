@@ -4,7 +4,7 @@
 
 - Identité visuelle bleu marine / turquoise et nouveau formulaire de gestion des établissements.
 - Le Super Admin crée un établissement avec sa **date de fin d'abonnement**, sa formule et son logo PNG/JPEG/WEBP (1 Mo maximum).
-- La date de fin d'abonnement est **inclusive** : l'accès reste possible jusqu'à la fin de la date indiquée et est restreint le lendemain. Une désactivation manuelle est immédiate.
+- La date de fin d'abonnement déclenche la restriction **dès le jour indiqué** (à partir de 00:00, selon la date du serveur). Une désactivation manuelle est immédiate.
 - Les utilisateurs d'un établissement expiré ou suspendu sont redirigés vers une **page de restriction** depuis toutes les pages métiers, même via les routes API. Le Super Admin n'est pas bloqué.
 - Gestion des établissements : mise à jour de l'échéance, de la formule et du logo, désactivation/réactivation, suppression définitive après confirmation du slug.
 - **Attention : la suppression définitive efface également toutes les données scolaires, utilisateurs et documents référencés en base associés à l'établissement. Elle est irréversible.** Le stockage de fichiers externe nécessite une politique de purge distincte.
