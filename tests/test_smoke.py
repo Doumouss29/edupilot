@@ -27,7 +27,7 @@ class EduPilotSmoke(unittest.TestCase):
             return sess["csrf"]
 
     def test_all_templates_compile(self):
-        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","class_details.html","dashboard_student.html","school_new.html","school_accounts.html","school_account_edit.html","change_password.html"):
+        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","class_details.html","dashboard_student.html","school_new.html","school_accounts.html","school_account_edit.html","change_password.html","students.html","grade_entry.html","grade_global.html","class_grade_summary.html"):
             project.app.jinja_env.get_template(template)
 
     def test_health(self):
@@ -258,6 +258,34 @@ class EduPilotSmoke(unittest.TestCase):
         res=self.client.post(f"/schools/{school['id']}/accounts/bulk",data={"csrf":self.token(),"action":"delete","account_ids":[str(uid)]})
         self.assertEqual(res.status_code,302)
         self.assertIsNone(project.one("SELECT id FROM users WHERE id=?",(uid,)))
+
+
+    def test_transfer_and_grading_workflows(self):
+        self.login("admin1@demo.edupilot.test")
+        school=project.one("SELECT id FROM schools WHERE slug='groupe_scolaire_excellence'")
+        cl=project.one("SELECT id,year_id FROM classes WHERE school_id=? ORDER BY id LIMIT 1",(school["id"],))
+        destination=project.execute("INSERT INTO classes(school_id,year_id,name,cycle) VALUES (?,?,?,?)",(school["id"],cl["year_id"],"Destination V08","semestre"))
+        student=project.execute("INSERT INTO users(school_id,name,email,password_hash,role) VALUES (?,?,?,?,?)",(school["id"],"Transfert V08","transfer.v08@example.test",project.generate_password_hash("SafePassword2026!"),"etudiant"))
+        eid=project.execute("INSERT INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)",(school["id"],student,cl["id"],cl["year_id"]))
+        move=self.client.post("/students/transfer",data={"csrf":self.token(),"class_id":destination,"enrollment_ids":[eid]})
+        self.assertEqual(move.status_code,302)
+        self.assertIsNotNone(project.one("SELECT id FROM enrollments WHERE student_id=? AND class_id=?",(student,destination)))
+        teacher=project.one("SELECT id FROM users WHERE school_id=? AND role='enseignant' LIMIT 1",(school["id"],))
+        course=project.execute("INSERT INTO courses(school_id,class_id,name,code,planned_minutes,teacher_id,coefficient) VALUES (?,?,?,?,?,?,?)",(school["id"],destination,"Cours pondéré","COV08",600,teacher["id"],3))
+        pdf=io.BytesIO(b"%PDF-1.4\\n%%EOF\\n")
+        result=self.client.post("/assessments",data={"csrf":self.token(),"course_id":course,"title":"Évaluation V08","coefficient":"2","description":"Consignes détaillées","document":(pdf,"sujet.pdf")},content_type="multipart/form-data")
+        self.assertEqual(result.status_code,302)
+        a=project.one("SELECT id,coefficient,attachment_name FROM assessments WHERE course_id=?",(course,))
+        self.assertIsNotNone(a)
+        self.assertEqual(a["coefficient"],2)
+        self.assertEqual(self.client.get(f"/assessments/{a['id']}/attachment").status_code,200)
+        save=self.client.post(f"/grades/entry/{a['id']}",data={"csrf":self.token(),f"note_{student}":"15",f"comment_{student}":"Progrès solide"})
+        self.assertEqual(save.status_code,302)
+        grade=project.one("SELECT value,comment FROM grades WHERE student_id=? AND assessment_id=?",(student,a["id"]))
+        self.assertEqual(grade["value"],15)
+        self.assertEqual(grade["comment"],"Progrès solide")
+        self.assertEqual(self.client.get(f"/grades/global?course_id={course}").status_code,200)
+        self.assertEqual(self.client.get(f"/grades/class-summary?class_id={destination}").status_code,200)
 
     def test_school_lifecycle_logo_and_deletion(self):
         self.login("superadmin@demo.edupilot.test")
