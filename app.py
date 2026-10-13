@@ -469,30 +469,72 @@ def people():
             clause=','.join('?' for _ in vals)
             selected=allrows(f'SELECT id FROM courses WHERE school_id=? AND id IN ({clause})',(school_id(),*vals))
             if len(selected)!=len(vals):abort(403)
+        password=request.form.get('password','')
+        if len(password)<12 or not any(x.isalpha() for x in password) or not any(x.isdigit() for x in password):
+            flash('Mot de passe temporaire : 12 caractères minimum, avec des lettres et des chiffres.','error')
+            return redirect(url_for('people'))
         with db() as c:
             if c.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone():
                 flash('Adresse e-mail déjà utilisée.','error')
                 return redirect(url_for('people'))
-            uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role) VALUES (?,?,?,?,?)',(school_id(),name,email,generate_password_hash(secrets.token_urlsafe(24)),role)).lastrowid
+            uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role,must_change_password) VALUES (?,?,?,?,?,1)',(school_id(),name,email,generate_password_hash(password),role)).lastrowid
             if role=='etudiant':
                 clazz=c.execute('SELECT year_id FROM classes WHERE school_id=? AND id=?',(school_id(),class_id)).fetchone()
                 if not clazz:abort(403)
                 c.execute('INSERT INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school_id(),uid,int(class_id),clazz['year_id']))
         if course_ids:assign_courses_to_teacher(uid,course_ids)
-        create_invite(uid)
         audit('person.created',email)
-        flash('Utilisateur créé et affectations enregistrées. Invitation générée si Brevo est configuré.','success')
+        flash('Utilisateur créé. Communiquez son mot de passe temporaire par un canal sécurisé.','success')
         return redirect(url_for('people'))
     users=scoped('SELECT * FROM users WHERE school_id=? ORDER BY role,name')
     classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name')
     courses=scoped('SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? ORDER BY cl.name,c.name')
-    rows=allrows("""SELECT u.name,u.email,u.role,
+    rows=allrows("""SELECT u.id,u.name,u.email,u.role,u.active,u.must_change_password,
                      GROUP_CONCAT(DISTINCT cl.name) class_names,
                      (SELECT GROUP_CONCAT(c.name||' ('||cl2.name||')',', ') FROM courses c JOIN classes cl2 ON cl2.id=c.class_id WHERE c.teacher_id=u.id AND c.school_id=u.school_id) teacher_courses
                   FROM users u LEFT JOIN enrollments e ON e.student_id=u.id AND e.school_id=u.school_id
                   LEFT JOIN classes cl ON cl.id=e.class_id
                   WHERE u.school_id=? GROUP BY u.id ORDER BY u.role,u.name""",(school_id(),))
-    return render_template('list.html',title='Utilisateurs',columns=['Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,courses=courses)
+    return render_template('list.html',title='Utilisateurs',columns=['Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,courses=courses,user_rows=rows)
+
+@app.post('/people/bulk')
+@roles('admin','administratif')
+def people_bulk():
+    values=request.form.getlist('user_ids')
+    action=request.form.get('action','')
+    if action not in ('suspend','activate','delete') or not values or len(values)>200 or any(not x.isdigit() for x in values):
+        flash('Sélectionnez des utilisateurs et une action valide.','error')
+        return redirect(url_for('people'))
+    selected=list(dict.fromkeys(int(x) for x in values))
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        users=c.execute('SELECT id,role,name FROM users WHERE school_id=? AND id IN ('+','.join('?' for _ in selected)+')',(school_id(),*selected)).fetchall()
+        if len(users)!=len(selected) or current_user()['id'] in selected or any(x['role']=='superadmin' for x in users):
+            abort(403)
+        if action=='delete':
+            # Keep grades, attendance, teacher assignments and audited academic history intact.
+            for user in users:
+                uid=user['id']
+                linked=any(c.execute('SELECT 1 FROM '+sql+' LIMIT 1',(uid,)).fetchone() for sql in [
+                    'grades WHERE student_id=?','attendance WHERE student_id=?','submissions WHERE student_id=?',
+                    'courses WHERE teacher_id=?','lessons WHERE teacher_id=?','teacher_history WHERE teacher_id=?',
+                    'grade_history WHERE actor_id=?','unlocks WHERE teacher_id=?'])
+                if linked:
+                    flash('Suppression refusée : un compte possède des notes, séances ou affectations historisées. Suspendez-le pour préserver les dossiers.','error')
+                    return redirect(url_for('people'))
+            for user in users:
+                uid=user['id']
+                c.execute('DELETE FROM parent_links WHERE student_id=? OR parent_id=?',(uid,uid))
+                c.execute('DELETE FROM enrollments WHERE student_id=?',(uid,))
+                c.execute('DELETE FROM notifications WHERE user_id=?',(uid,))
+                c.execute('DELETE FROM invites WHERE user_id=?',(uid,))
+                c.execute('UPDATE audit SET user_id=NULL WHERE user_id=?',(uid,))
+                c.execute('DELETE FROM users WHERE id=? AND school_id=?',(uid,school_id()))
+        else:
+            c.execute('UPDATE users SET active=? WHERE school_id=? AND id IN ('+','.join('?' for _ in selected)+')',(1 if action=='activate' else 0,school_id(),*selected))
+    audit('users.'+action,','.join(str(x) for x in selected))
+    flash(f'{len(selected)} utilisateur(s) : action « {action} » appliquée.','success')
+    return redirect(url_for('people'))
 
 @app.get('/people/import/template')
 @roles('admin','administratif')
