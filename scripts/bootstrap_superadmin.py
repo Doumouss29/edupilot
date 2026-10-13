@@ -11,6 +11,9 @@ if os.getenv("EDUPILOT_DEMO", "false").lower() == "true":
     raise SystemExit("Refus : désactiver EDUPILOT_DEMO pour la production.")
 
 from werkzeug.security import generate_password_hash
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import app as project
 
 def main():
