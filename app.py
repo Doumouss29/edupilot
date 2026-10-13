@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, school_id INTEGER, user
 CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id), student_id INTEGER NOT NULL REFERENCES users(id), filename TEXT NOT NULL, filepath TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(assessment_id,student_id));
 CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS assessment_files(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE, filename TEXT NOT NULL, mime TEXT NOT NULL, content BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS bulletin_publications(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), class_id INTEGER NOT NULL REFERENCES classes(id), student_id INTEGER NOT NULL REFERENCES users(id), published_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(class_id,student_id));
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 """
 
@@ -1228,6 +1229,7 @@ def compile_class_report(class_id, student_ids=None):
     indexed={(g['student_id'],g['assessment_id']):g for g in marks}
     last_period=one("SELECT id,name,published,locked FROM periods WHERE school_id=? AND class_id=? ORDER BY id DESC LIMIT 1",(school_id(),class_id))
     published=bool(last_period and last_period['published'])
+    individual={p['student_id'] for p in allrows('SELECT student_id FROM bulletin_publications WHERE school_id=? AND class_id=?',(school_id(),class_id))}
     results=[]
     for student in students:
         subjects=[];general_num=0.;general_den=0.
@@ -1247,7 +1249,7 @@ def compile_class_report(class_id, student_ids=None):
                 general_num+=mean*course['coefficient'];general_den+=course['coefficient']
             subjects.append({'id':course['id'],'title':course['name'],'code':course['code'],
                              'coefficient':course['coefficient'],'assessments':assessments,'mean':mean})
-        results.append({'student':student,'subjects':subjects,'general':round(general_num/general_den,2) if general_den else None})
+        results.append({'student':student,'subjects':subjects,'general':round(general_num/general_den,2) if general_den else None,'published':published or student['id'] in individual})
     return {'clazz':clazz,'courses':courses,'rows':results,'period':last_period,'published':published,
             'academic_year':clazz['academic_year']}
 
@@ -1271,13 +1273,24 @@ def school_bulletin_publish():
     class_id=request.form.get('class_id','')
     clazz=one('SELECT id FROM classes WHERE id=? AND school_id=?',(class_id,school_id()))
     if not clazz:abort(403)
-    period=one('SELECT id FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(class_id,school_id()))
+    period=one('SELECT id,published FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(class_id,school_id()))
     if not period:abort(400,'Période à créer avant publication')
-    execute('UPDATE periods SET locked=1,published=1 WHERE id=? AND school_id=?',(period['id'],school_id()))
-    student_ids=[r['student_id'] for r in allrows('SELECT DISTINCT student_id FROM enrollments WHERE school_id=? AND class_id=?',(school_id(),class_id))]
-    notify(student_ids,'Votre bulletin est disponible dans Notes et résultats.','/grades')
-    audit('report.published',str(class_id))
-    flash('Bulletins publiés dans les espaces étudiants. Les notes sont verrouillées.','success')
+    all_student_ids=[r['student_id'] for r in allrows('SELECT DISTINCT student_id FROM enrollments WHERE school_id=? AND class_id=?',(school_id(),class_id))]
+    selected=request.form.getlist('student_ids')
+    if selected and any(not v.isdigit() for v in selected):abort(400)
+    ids=list(dict.fromkeys(map(int,selected))) if selected else all_student_ids
+    if not ids or any(uid not in all_student_ids for uid in ids):abort(403)
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        c.execute('UPDATE periods SET locked=1 WHERE id=? AND school_id=?',(period['id'],school_id()))
+        for uid in ids:
+            c.execute('INSERT OR IGNORE INTO bulletin_publications(school_id,class_id,student_id) VALUES (?,?,?)',(school_id(),int(class_id),uid))
+        published_count=c.execute('SELECT COUNT(*) n FROM bulletin_publications WHERE school_id=? AND class_id=?',(school_id(),class_id)).fetchone()['n']
+        if published_count>=len(all_student_ids):
+            c.execute('UPDATE periods SET published=1 WHERE id=? AND school_id=?',(period['id'],school_id()))
+    notify(ids,'Votre bulletin est disponible dans Notes et résultats.','/grades')
+    audit('report.published',f'{class_id}:{len(ids)}')
+    flash(f'{len(ids)} bulletin(s) publié(s) dans les espaces étudiants. Les notes sont verrouillées.','success')
     return redirect(url_for('school_bulletins',class_id=class_id))
 
 @app.get('/grades/bulletins/print')
@@ -1305,7 +1318,7 @@ def student_bulletin(cid):
     elif u['role']!='etudiant':abort(403)
     if not one('SELECT id FROM enrollments WHERE school_id=? AND student_id=? AND class_id=?',(school_id(),student_id,cid)):abort(403)
     report=compile_class_report(cid,{student_id})
-    if not report['published']:abort(403,'Bulletin non encore publié par la scolarité')
+    if not report['rows'] or not report['rows'][0]['published']:abort(403,'Bulletin non encore publié par la scolarité')
     school=one('SELECT name,logo_mime,id FROM schools WHERE id=?',(school_id(),))
     return render_template('print_bulletins.html',report=report,school=school,printed_on=datetime.date.today().strftime('%d/%m/%Y'))
 
