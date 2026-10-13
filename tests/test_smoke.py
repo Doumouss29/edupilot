@@ -102,6 +102,61 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertEqual(changed["must_change_password"],0)
         self.assertTrue(project.check_password_hash(project.one("SELECT password_hash FROM users WHERE id=?",(created["id"],))["password_hash"],"MyNewPass2026Safe!"))
 
+
+    def test_student_creation_assigns_class(self):
+        self.login("admin1@demo.edupilot.test")
+        cl=project.one("SELECT id,year_id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
+        email="manual.student.demo@example.test"
+        response=self.client.post("/people",data={"csrf":self.token(),"role":"etudiant","name":"Etudiant Manuel","email":email,"class_id":cl["id"]})
+        self.assertEqual(response.status_code,302)
+        student=project.one("SELECT id FROM users WHERE email=?",(email,))
+        self.assertIsNotNone(student)
+        self.assertIsNotNone(project.one("SELECT id FROM enrollments WHERE school_id=1 AND student_id=? AND class_id=? AND year_id=?",(student["id"],cl["id"],cl["year_id"])))
+
+    def test_bulk_csv_students_enrolled(self):
+        self.login("admin1@demo.edupilot.test")
+        cl=project.one("SELECT id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
+        content=("prenom;nom;email;classe\nAicha;Demo;aicha.bulk@example.test;"+str(cl["id"])+"\nBakary;Demo;bakary.bulk@example.test;"+str(cl["id"])+"\n").encode("utf-8")
+        response=self.client.post("/people/import",data={"csrf":self.token(),"file":(io.BytesIO(content),"students.csv")},content_type="multipart/form-data")
+        self.assertEqual(response.status_code,302)
+        for email in ("aicha.bulk@example.test","bakary.bulk@example.test"):
+            student=project.one("SELECT id FROM users WHERE email=?",(email,))
+            self.assertIsNotNone(student)
+            self.assertIsNotNone(project.one("SELECT id FROM enrollments WHERE student_id=? AND class_id=?",(student["id"],cl["id"])))
+
+    def test_bulk_xlsx_students_enrolled(self):
+        from openpyxl import Workbook
+        self.login("admin1@demo.edupilot.test")
+        cl=project.one("SELECT id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
+        wb=Workbook();ws=wb.active;ws.append(["prenom","nom","email","classe"]);ws.append(["Fatou","Demo","fatou.bulk@example.test",str(cl["id"])])
+        bio=io.BytesIO();wb.save(bio);bio.seek(0)
+        response=self.client.post("/people/import",data={"csrf":self.token(),"file":(bio,"students.xlsx")},content_type="multipart/form-data")
+        self.assertEqual(response.status_code,302)
+        self.assertIsNotNone(project.one("SELECT id FROM users WHERE email='fatou.bulk@example.test'"))
+
+    def test_teacher_can_receive_several_courses(self):
+        self.login("admin1@demo.edupilot.test")
+        cl=project.one("SELECT id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
+        ids=[]
+        for name in ("SVT test","Physique test"):
+            ids.append(project.execute("INSERT INTO courses(school_id,class_id,name,code,planned_minutes) VALUES (?,?,?,?,?)",(1,cl["id"],name,"TST",600)))
+        response=self.client.post("/people",data={"csrf":self.token(),"role":"enseignant","name":"Enseignant Multi","email":"multi.teacher@example.test","course_ids":[str(x) for x in ids]})
+        self.assertEqual(response.status_code,302)
+        teacher=project.one("SELECT id FROM users WHERE email='multi.teacher@example.test'")
+        self.assertIsNotNone(teacher)
+        for cid in ids:
+            self.assertEqual(project.one("SELECT teacher_id FROM courses WHERE id=?",(cid,))["teacher_id"],teacher["id"])
+
+    def test_planning_requires_matching_class(self):
+        self.login("admin1@demo.edupilot.test")
+        own=project.one("SELECT c.id,c.class_id FROM courses c WHERE c.school_id=1 ORDER BY id LIMIT 1")
+        other=project.one("SELECT id FROM classes WHERE school_id=2 ORDER BY id LIMIT 1")
+        response=self.client.post("/planning",data={"csrf":self.token(),"course_id":own["id"],"class_id":other["id"],"starts_at":"2026-11-02T08:00","ends_at":"2026-11-02T10:00","room":"A101"})
+        self.assertEqual(response.status_code,403)
+        result=self.client.post("/planning",data={"csrf":self.token(),"course_id":own["id"],"class_id":own["class_id"],"starts_at":"2026-11-02T08:00","ends_at":"2026-11-02T10:00","room":"A101"})
+        self.assertEqual(result.status_code,302)
+        self.assertIsNotNone(project.one("SELECT id FROM lessons WHERE course_id=? AND starts_at='2026-11-02T08:00'",(own["id"],)))
+
     def test_school_lifecycle_logo_and_deletion(self):
         self.login("superadmin@demo.edupilot.test")
         token = self.token()
