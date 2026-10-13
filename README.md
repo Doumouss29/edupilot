@@ -1,3 +1,27 @@
+## V0.9 — Cours, séances, notes et bulletins (13 octobre 2026)
+
+### Administration scolaire
+- **Cours** : modification individuelle, modification groupée des coefficients matières, réaffectation groupée d'enseignants, suppression d'un ou plusieurs cours **sans** séances ni évaluations. La suppression est refusée si elle détruirait un historique académique.
+- **Notes & résultats** : accès au tableau « Bulletins et moyennes par classe » avec filtre année scolaire puis classe, une ligne par étudiant, moyenne de chaque matière, son coefficient et moyenne générale. Chaque moyenne de matière est pondérée par les coefficients des évaluations du cours ; la moyenne générale est pondérée par les coefficients des matières.
+- **Bulletins** : impression depuis le navigateur, y compris « Imprimer au format PDF », pour un, plusieurs ou tous les étudiants. Publication ciblée sur un, plusieurs ou tous les étudiants dans leur espace. La publication verrouille la période et est historisée. La page imprimable indique si le document est provisoire ou publié.
+- Si des notes doivent être corrigées après verrouillage, il faut rouvrir la période depuis la page Périodes. Aucun enseignant ni administrateur ne peut modifier des notes verrouillées sans déverrouillage autorisé.
+
+### Enseignants
+- **Notes** : sélection hiérarchique classe → cours → évaluation, puis tableau de saisie collectif des notes et commentaires, modifiable tant que la période n'est pas verrouillée. Modification des évaluations (titre, type, date, consignes et coefficient) tant que la période est ouverte.
+- **Planning** : clic sur un cours du calendrier → panneau d'actions avec déclaration de réalisation, motif et durée réelle ; disponible dès **30 minutes avant l'heure de fin** prévue. Annulation d'une séance avec motif et notifications aux étudiants. Les actions restent vérifiées côté serveur, avec périmètre limité aux séances affectées à l'enseignant.
+
+### Étudiants
+- **Notes** : espace personnel filtré par classe et année scolaire, détail de chaque matière, plusieurs notes d'évaluations, coefficients internes, commentaires et moyenne de matière. Affichage immédiat des notes **des évaluations publiées** après saisie par l'enseignant, sans attendre la publication du bulletin.
+- **Évaluations** : badge avec la note /20 quand elle est enregistrée et que l'évaluation est publiée.
+- **Bulletin** : synthèse inter-matières et moyenne générale visibles provisoirement, puis lien d'impression du bulletin officiel lorsque l'administration publie les résultats pour cet étudiant. Accès au bulletin d'un autre étudiant interdit.
+
+### Limites à maintenir en mémoire
+- Render Free + SQLite : **données, documents, notes et publications peuvent être réinitialisés** au redémarrage ou au redéploiement.
+- Le bouton « Imprimer / Enregistrer au format PDF » exploite le dialogue d'impression du navigateur. Une génération PDF serveur avec archivage et signature est une amélioration future.
+- Les moyens de communication automatisés (email/WhatsApp) pour transmettre des bulletins restent à développer ; la publication est **dans l'espace EduPilot de l'étudiant**.
+- Les filtres de périodes et règles de compensation universitaires devront être adaptés à la structure académique officielle de chaque établissement avant toute utilisation réelle.
+- Vérifier **GitHub → Actions** et les logs **Render** après le nouveau déploiement ; aucun test de production en conditions réelles n'est garanti par la seule présence des commits.
+
 ## V0.8 — Parcours, évaluation et notes (13 octobre 2026)
 
 - **Inscriptions / parcours** : nouveau tableau dédié avec filtres par classe et année. L'Admin et l'Administratif peuvent sélectionner plusieurs inscriptions et les transférer vers une autre classe **de la même année** (transactions atomiques, vérifications du tenant, protection contre les doublons). Cette opération réaffecte l'inscription de l'année courante et n'est pas un outil de promotion de fin d'année. Les dossiers de notes existants restent liés à leurs évaluations historiques ; une politique de transfert des résultats doit encore être spécifiée pour les changements de classe après notation.
