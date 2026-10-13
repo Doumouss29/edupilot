@@ -5,7 +5,7 @@
 <label>Cours<select name="course_id" required>{% for c in courses %}<option value="{{c.id}}" {% if lesson.course_id==c.id %}selected{% endif %}>{{c.class_name}} — {{c.name}}</option>{% endfor %}</select></label>
 <label>Date<input name="lesson_date" type="date" value="{{lesson.starts_at[:10]}}" required></label>
 <label>Heure de début<input name="start_time" type="time" value="{{lesson.starts_at[11:16]}}" step="1800" required></label>
-<label>Durée (heures, pas de 30 min)<select name="duration_hours" required>{% for i in range(1,25) %}<option value="{{i/2}}" {% if ((lesson.ends_at|replace('T',' ')|string) and (i/2)==((lesson.ends_at[11:13]|int*60+lesson.ends_at[14:16]|int)-(lesson.starts_at[11:13]|int*60+lesson.starts_at[14:16]|int))/60) %}selected{% endif %}>{{i/2}} h</option>{% endfor %}</select></label>
+<label>Durée (heures, pas de 30 min)<select name="duration_hours" required>{% for i in range(1,25) %}<option value="{{i/2}}" {% if duration_hours==i/2 %}selected{% endif %}>{{i/2}} h</option>{% endfor %}</select></label>
 <label>Salle<input name="room" value="{{lesson.room or ''}}" maxlength="80"></label>
 <div class="form-actions"><button class="btn primary">Enregistrer la séance</button></div></form></section>
 {% else %}<section class="panel"><h3>Séance protégée</h3><p>Cette séance est déjà déclarée, annulée, reportée ou contient des présences. Elle ne peut pas être déplacée ou supprimée sans procédure spécifique de correction.</p></section>{% endif %}{% endblock %}
