@@ -9,7 +9,6 @@ services:
     restart: unless-stopped
     init: true
     environment:
-      EDUPILOT_DEMO: "false"
       DATABASE_PATH: /data/edupilot.db
       UPLOAD_DIR: /data/uploads
       PUBLIC_BASE_URL: https://edupilot.ci
