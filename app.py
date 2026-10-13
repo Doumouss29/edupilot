@@ -128,8 +128,8 @@ def read_logo(file):
     raw=file.read(1024*1024+1)
     if not raw:return None,None
     if len(raw)>1024*1024:abort(400,'Logo supérieur à 1 Mo.')
-    if raw.startswith(b'\\x89PNG\\r\\n\\x1a\\n'):mime='image/png'
-    elif raw[:3]==b'\\xff\\xd8\\xff':mime='image/jpeg'
+    if raw.startswith(b'\x89PNG\r\n\x1a\n'):mime='image/png'
+    elif raw[:3]==b'\xff\xd8\xff':mime='image/jpeg'
     elif raw[:4]==b'RIFF' and raw[8:12]==b'WEBP':mime='image/webp'
     else:abort(400,'Format de logo non reconnu.')
     return raw,mime
