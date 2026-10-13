@@ -351,7 +351,7 @@ def school_accounts(sid):
         phone=request.form.get('phone','').strip()
         role=request.form.get('role','')
         password=request.form.get('password','')
-        if not first or not last or not phone or not email or not re.fullmatch(r'[^\\s@]+@[^\\s@]+\\.[^\\s@]+',email):abort(400,'Informations obligatoires manquantes')
+        if not first or not last or not phone or not email or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400,'Informations obligatoires manquantes')
         if len(first)>90 or len(last)>90 or len(phone)>40 or len(email)>254:abort(400)
         if role not in ('admin','administratif'):abort(400)
         if len(password)<12 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
