@@ -790,17 +790,19 @@ def planning():
         room=request.form.get('room','').strip()[:80]
         created=[]
         with db() as c:
+            c.execute('BEGIN IMMEDIATE')
             for dt in dates:
                 end_at=dt+datetime.timedelta(minutes=round(hours*60))
                 start_txt=dt.strftime('%Y-%m-%dT%H:%M')
                 end_txt=end_at.strftime('%Y-%m-%dT%H:%M')
-                clash=c.execute("""SELECT l.id,c.class_id FROM lessons l JOIN courses c ON c.id=l.course_id
+                clash=c.execute("""SELECT l.id FROM lessons l JOIN courses c ON c.id=l.course_id
                            WHERE l.school_id=? AND l.status NOT IN ('annulee','reportee')
                            AND l.starts_at < ? AND l.ends_at > ?
                            AND (c.class_id=? OR l.teacher_id=? OR (?<>'' AND l.room=?))
                            LIMIT 1""",(school_id(),end_txt,start_txt,class_id,course['teacher_id'],room,room)).fetchone()
                 if clash:
-                    flash(f'Conflit de planning le {dt.strftime("%d/%m/%Y")} : classe, enseignant ou salle déjà occupé(e). Aucune séance ajoutée.','error')
+                    c.rollback()
+                    flash(f'Conflit le {dt.strftime("%d/%m/%Y")} : classe, enseignant ou salle déjà occupé(e). Aucune séance ajoutée.','error')
                     return redirect(url_for('planning'))
                 cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room))
                 created.append(cur.lastrowid)
