@@ -1,7 +1,8 @@
 """EduPilot - application de demonstration multi-etablissements avec SQLite.
 IMPORTANT: demo seulement, stockage Render Free ephemere.
 """
-import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib
+import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib, csv, io
+from openpyxl import load_workbook
 from flask import Response
 from contextlib import contextmanager
 from pathlib import Path
@@ -429,22 +430,159 @@ def settings():
         return redirect(url_for('settings'))
     return render_template('settings.html')
 
+def assign_courses_to_teacher(teacher_id, course_ids):
+    """Assign several existing course offerings, retaining teacher history."""
+    wanted=list(dict.fromkeys(int(x) for x in course_ids if str(x).isdigit()))
+    if len(wanted)>100:abort(400,'Trop de cours sélectionnés')
+    if not wanted:return
+    marker=','.join('?' for _ in wanted)
+    matches=allrows(f'SELECT id,teacher_id FROM courses WHERE school_id=? AND id IN ({marker})',(school_id(),*wanted))
+    if len(matches)!=len(wanted):abort(403,'Cours en dehors de votre établissement')
+    now=datetime.datetime.now(datetime.timezone.utc).isoformat()
+    with db() as c:
+        for course in matches:
+            if course['teacher_id']==teacher_id:continue
+            if course['teacher_id']:
+                c.execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,course['id']))
+            c.execute('UPDATE courses SET teacher_id=? WHERE id=?',(teacher_id,course['id']))
+            c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(course['id'],teacher_id,now))
+
 @app.route('/people',methods=['GET','POST'])
 @roles('admin','administratif')
 def people():
     if request.method=='POST':
         role=request.form.get('role','etudiant')
         if role not in ('etudiant','enseignant','parent','administratif'):abort(400)
-        name=request.form.get('name','').strip();email=request.form.get('email','').strip().lower()
-        if not name or '@' not in email:abort(400)
-        try: execute('INSERT INTO users(school_id,name,email,password_hash,role) VALUES (?,?,?,?,?)',(school_id(),name,email,generate_password_hash(secrets.token_urlsafe(24)),role))
-        except sqlite3.IntegrityError:flash('Adresse e-mail déjà utilisée.','error');return redirect(url_for('people'))
-        user=one('SELECT id FROM users WHERE email=?',(email,))
-        create_invite(user['id'])
-        audit('person.created',email);flash('Utilisateur créé ; invitation générée. Configure BREVO pour envoyer le lien par e-mail.','success')
+        name=request.form.get('name','').strip()
+        email=request.form.get('email','').strip().lower()
+        if not name or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400)
+        class_id=request.form.get('class_id','').strip()
+        if role=='etudiant':
+            if not class_id or not has_school('classes',class_id):
+                flash('Sélectionnez une classe de votre établissement.','error')
+                return redirect(url_for('people'))
+        elif class_id:abort(400,'Seuls les étudiants peuvent être inscrits dans une classe depuis ce formulaire')
+        course_ids=request.form.getlist('course_ids') if role=='enseignant' else []
+        if course_ids:
+            if any(not str(v).isdigit() for v in course_ids):abort(400)
+            vals=list(dict.fromkeys(int(v) for v in course_ids))
+            clause=','.join('?' for _ in vals)
+            selected=allrows(f'SELECT id FROM courses WHERE school_id=? AND id IN ({clause})',(school_id(),*vals))
+            if len(selected)!=len(vals):abort(403)
+        with db() as c:
+            if c.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone():
+                flash('Adresse e-mail déjà utilisée.','error')
+                return redirect(url_for('people'))
+            uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role) VALUES (?,?,?,?,?)',(school_id(),name,email,generate_password_hash(secrets.token_urlsafe(24)),role)).lastrowid
+            if role=='etudiant':
+                clazz=c.execute('SELECT year_id FROM classes WHERE school_id=? AND id=?',(school_id(),class_id)).fetchone()
+                if not clazz:abort(403)
+                c.execute('INSERT INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school_id(),uid,int(class_id),clazz['year_id']))
+        if course_ids:assign_courses_to_teacher(uid,course_ids)
+        create_invite(uid)
+        audit('person.created',email)
+        flash('Utilisateur créé et affectations enregistrées. Invitation générée si Brevo est configuré.','success')
         return redirect(url_for('people'))
     users=scoped('SELECT * FROM users WHERE school_id=? ORDER BY role,name')
-    return render_template('list.html',title='Utilisateurs',columns=['Nom','E-mail','Profil'],rows=[(x['name'],x['email'],x['role']) for x in users],form='people')
+    classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name')
+    courses=scoped('SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? ORDER BY cl.name,c.name')
+    rows=allrows("""SELECT u.name,u.email,u.role,
+                     GROUP_CONCAT(DISTINCT cl.name) class_names,
+                     (SELECT GROUP_CONCAT(c.name||' ('||cl2.name||')',', ') FROM courses c JOIN classes cl2 ON cl2.id=c.class_id WHERE c.teacher_id=u.id AND c.school_id=u.school_id) teacher_courses
+                  FROM users u LEFT JOIN enrollments e ON e.student_id=u.id AND e.school_id=u.school_id
+                  LEFT JOIN classes cl ON cl.id=e.class_id
+                  WHERE u.school_id=? GROUP BY u.id ORDER BY u.role,u.name""",(school_id(),))
+    return render_template('list.html',title='Utilisateurs',columns=['Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,courses=courses)
+
+@app.post('/people/import')
+@roles('admin','administratif')
+def people_import():
+    uploaded=request.files.get('file')
+    if not uploaded or not uploaded.filename:abort(400,'Fichier obligatoire')
+    filename=uploaded.filename.lower()
+    if not filename.endswith(('.csv','.xlsx')):abort(400,'Format CSV ou XLSX uniquement')
+    content=uploaded.read(2*1024*1024+1)
+    if len(content)>2*1024*1024:abort(400,'Limite de 2 Mo')
+    try:
+        if filename.endswith('.csv'):
+            text=content.decode('utf-8-sig')
+            dialect=csv.Sniffer().sniff(text[:2048],delimiters=',;\t') if text.strip() else csv.excel
+            rows=list(csv.reader(io.StringIO(text),dialect))
+        else:
+            workbook=load_workbook(io.BytesIO(content),read_only=True,data_only=True)
+            sheet=workbook.active
+            rows=list(sheet.iter_rows(values_only=True,max_row=2002))
+            workbook.close()
+    except (UnicodeError,ValueError,csv.Error,Exception) as exc:
+        app.logger.info('Invalid student import file: %s',type(exc).__name__)
+        flash('Impossible de lire le fichier : utilisez un CSV UTF-8 ou un Excel XLSX valide.','error')
+        return redirect(url_for('people'))
+    if len(rows)<2:
+        flash('Le fichier doit contenir un en-tête et au moins un étudiant.','error')
+        return redirect(url_for('people'))
+    if len(rows)>2001:
+        flash('Maximum 2 000 étudiants par import.','error')
+        return redirect(url_for('people'))
+    def key(s):
+        return slugify(str(s or '')).replace('_','')
+    headers=[key(x) for x in rows[0]]
+    def find_col(*names):
+        for name in names:
+            if key(name) in headers:return headers.index(key(name))
+        return None
+    fi=find_col('prenom','first_name')
+    la=find_col('nom','last_name')
+    em=find_col('email','e_mail','mail')
+    cl=find_col('classe','class','class_id')
+    if None in (fi,la,em,cl):
+        flash('Colonnes requises : prenom, nom, email, classe.','error')
+        return redirect(url_for('people'))
+    classes=allrows('SELECT id,name,year_id FROM classes WHERE school_id=?',(school_id(),))
+    by_id={str(c['id']):c for c in classes}
+    by_name={}
+    for c in classes:by_name.setdefault(key(c['name']),[]).append(c)
+    prepared=[]; errors=[]; encountered=set()
+    for lineno,row in enumerate(rows[1:],2):
+        if not row or all(v is None or not str(v).strip() for v in row):continue
+        def cell(i):return str(row[i] or '').strip() if i<len(row) else ''
+        first,last,email,lookup=cell(fi),cell(la),cell(em).lower(),cell(cl)
+        target=by_id.get(lookup)
+        if not target:
+            opts=by_name.get(key(lookup),[])
+            target=opts[0] if len(opts)==1 else None
+        if not first or not last or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):
+            errors.append(f'Ligne {lineno} : identité ou e-mail invalide')
+        elif not target:
+            errors.append(f'Ligne {lineno} : classe introuvable ou ambiguë ({lookup})')
+        elif email in encountered:
+            errors.append(f'Ligne {lineno} : e-mail en doublon ({email})')
+        else:
+            encountered.add(email)
+            prepared.append((first+' '+last,email,target['id'],target['year_id']))
+        if len(errors)>=8:break
+    if not prepared and not errors:errors.append('Aucune ligne exploitable')
+    if errors:
+        flash('Import annulé. '+ ' ; '.join(errors),'error')
+        return redirect(url_for('people'))
+    hashes=[]
+    try:
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            registered={r['email'] for r in c.execute('SELECT email FROM users WHERE email IN ('+','.join('?' for _ in prepared)+')',tuple(x[1] for x in prepared))}
+            if registered:
+                flash('Import annulé : comptes déjà existants : '+', '.join(sorted(registered)[:4]),'error')
+                return redirect(url_for('people'))
+            for name,email,class_id,year_id in prepared:
+                uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role) VALUES (?,?,?,?,?)',(school_id(),name,email,generate_password_hash(secrets.token_urlsafe(24)),'etudiant')).lastrowid
+                c.execute('INSERT INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school_id(),uid,class_id,year_id))
+                hashes.append(uid)
+    except sqlite3.IntegrityError:
+        flash('Import annulé : conflit sur les données.','error')
+        return redirect(url_for('people'))
+    # Invitations can be requested later; avoid thousands of synchronous outbound email calls.
+    audit('students.imported',str(len(hashes)))
+    flash(f'{len(hashes)} étudiants importés et inscrits dans leur classe. Invitations à envoyer ultérieurement.','success')
+    return redirect(url_for('people'))
 
 def create_invite(uid):
     import hashlib
@@ -528,7 +666,9 @@ def planning():
     if u['role']=='superadmin':abort(403)
     if request.method=='POST':
         if u['role'] not in ('admin','administratif'):abort(403)
-        course_id=request.form.get('course_id');course=one('SELECT * FROM courses WHERE id=? AND school_id=?',(course_id,school_id()))
+        course_id=request.form.get('course_id');class_id=request.form.get('class_id')
+        if not class_id or not has_school('classes',class_id):abort(403)
+        course=one('SELECT * FROM courses WHERE id=? AND school_id=? AND class_id=?',(course_id,school_id(),class_id))
         if not course or not course['teacher_id']:abort(400,'Le cours doit avoir un enseignant.')
         start=request.form.get('starts_at');end=request.form.get('ends_at')
         if not start or not end or end<=start:abort(400)
@@ -541,7 +681,7 @@ def planning():
     elif u['role']=='etudiant':query+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     events=allrows(query,args)
-    return render_template('planning.html',events=events,courses=scoped('SELECT * FROM courses WHERE school_id=?') if u['role'] in ('admin','administratif') else [])
+    return render_template('planning.html',events=events,courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
 
 @app.post('/lessons/<int:lid>/declare')
 @roles('enseignant','admin','administratif')
