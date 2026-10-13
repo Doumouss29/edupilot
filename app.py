@@ -1092,6 +1092,7 @@ def lesson_edit(lid):
         editable=lesson_editable(c,lesson)
     if request.method=='GET':
         return render_template('lesson_edit.html',lesson=lesson,editable=editable,
+            duration_hours=(datetime.datetime.fromisoformat(lesson['ends_at'])-datetime.datetime.fromisoformat(lesson['starts_at'])).total_seconds()/3600,
             courses=scoped("""SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id
                     WHERE c.school_id=? ORDER BY cl.name,c.name"""))
     if not editable:abort(400,'Séance historisée : modification interdite')
