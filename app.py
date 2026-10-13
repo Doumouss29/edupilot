@@ -1175,6 +1175,11 @@ def assessments():
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.class_id=c.class_id AND e.student_id=? AND e.school_id=a.school_id)';args.append(u['id'])
     elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     rows=allrows(sql,args)
+    scores={}
+    if u['role']=='etudiant':
+        marks=allrows("""SELECT g.assessment_id,g.value,a.max_score FROM grades g JOIN assessments a ON a.id=g.assessment_id
+                         WHERE g.student_id=? AND a.school_id=? AND a.published=1""",(u['id'],school_id()))
+        scores={g['assessment_id']:round(g['value']/g['max_score']*20,2) for g in marks if g['max_score']}
     file_rows=allrows("""SELECT af.id,af.assessment_id,af.filename FROM assessment_files af
         JOIN assessments a ON a.id=af.assessment_id WHERE a.school_id=?""",(school_id(),))
     attachments={}
@@ -1183,7 +1188,7 @@ def assessments():
         if file['assessment_id'] in permitted:attachments.setdefault(file['assessment_id'],[]).append(file)
     choices=scoped('SELECT * FROM courses WHERE school_id=?')
     if u['role']=='enseignant':choices=[x for x in choices if x['teacher_id']==u['id']]
-    return render_template('assessments.html',assessments=rows,courses=choices,attachments=attachments)
+    return render_template('assessments.html',assessments=rows,courses=choices,attachments=attachments,scores=scores)
 
 def compile_class_report(class_id, student_ids=None):
     """School-scoped report: evaluation weights are internal to subjects;
@@ -1307,6 +1312,7 @@ def grades():
         else:
             gid=execute('INSERT INTO grades(assessment_id,student_id,value,comment) VALUES (?,?,?,?)',(aid,student,value,request.form.get('comment','')[:2000]));old=None
         execute('INSERT INTO grade_history(grade_id,old_value,new_value,actor_id) VALUES (?,?,?,?)',(gid,old,value,u['id']))
+        notify([int(student)],'Une note est disponible pour '+a['title']+'.','/grades')
         audit('grade.saved',str(gid));flash('Note enregistrée.','success');return redirect(url_for('grades'))
     if u['role'] in ('etudiant','parent'):
         student_id=u['id']
@@ -1381,6 +1387,8 @@ def grade_entry(aid):
                     gid=c.execute('INSERT INTO grades(assessment_id,student_id,value,comment) VALUES (?,?,?,?)',(aid,student_id,value,comment)).lastrowid
                 if old!=value:
                     c.execute('INSERT INTO grade_history(grade_id,old_value,new_value,actor_id) VALUES (?,?,?,?)',(gid,old,value,u['id']))
+        if changes and a:
+            notify([x[0] for x in changes],'Une note a été enregistrée pour '+a['title']+'. Consultez Notes et résultats.','/grades')
         audit('grades.batch.updated',f'{aid}:{len(changes)}')
         flash(f'{len(changes)} note(s) enregistrée(s).','success')
         return redirect(url_for('grade_entry',aid=aid))
