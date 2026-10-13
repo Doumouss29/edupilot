@@ -698,7 +698,7 @@ def classes():
         execute('INSERT INTO periods(school_id,class_id,name) VALUES (?,?,?)',(school_id(),cid,'Trimestre 1' if request.form.get('cycle')=='trimestre' else 'Semestre 1'))
         audit('class.created',name)
         return redirect(url_for('classes'))
-    return render_template('list.html',title='Classes',columns=['Classe','Régime','Parents','Modifier'],rows=[(x['name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif',{'link':url_for('class_edit',cid=x['id']),'label':'Modifier'}) for x in scoped('SELECT * FROM classes WHERE school_id=?')],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?'))
+    return render_template('list.html',title='Classes',columns=['Classe','Régime','Parents','Détails','Modifier'],rows=[(x['name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif',{'link':url_for('class_details',cid=x['id']),'label':'Détails'},{'link':url_for('class_edit',cid=x['id']),'label':'Modifier'}) for x in scoped('SELECT * FROM classes WHERE school_id=?')],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?'))
 
 @app.route('/classes/<int:cid>/edit',methods=['GET','POST'])
 @roles('admin','administratif')
