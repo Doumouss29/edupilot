@@ -1083,6 +1083,33 @@ def assessment_attachment(aid):
     response.headers['X-Content-Type-Options']='nosniff'
     return response
 
+@app.route('/assessments/<int:aid>/edit',methods=['GET','POST'])
+@roles('enseignant','admin','administratif')
+def assessment_edit(aid):
+    u=current_user()
+    item=one("""SELECT a.*,c.teacher_id,c.name course_name,c.class_id FROM assessments a JOIN courses c ON c.id=a.course_id
+           WHERE a.id=? AND a.school_id=?""",(aid,school_id()))
+    if not item:abort(404)
+    if u['role']=='enseignant' and item['teacher_id']!=u['id']:abort(403)
+    period=one('SELECT locked FROM periods WHERE school_id=? AND class_id=? ORDER BY id DESC LIMIT 1',(school_id(),item['class_id']))
+    if period and period['locked']:abort(403,'Période verrouillée : réouverture nécessaire')
+    if request.method=='POST':
+        title=request.form.get('title','').strip()
+        kind=request.form.get('kind','').strip()
+        description=request.form.get('description','').strip()
+        due=request.form.get('due_date','').strip() or None
+        try:
+            coef=float(request.form.get('coefficient',''))
+            if not 0<coef<=100:raise ValueError()
+            if due:datetime.date.fromisoformat(due)
+        except ValueError:abort(400)
+        if not title or len(title)>200 or len(description)>10000 or kind not in ('Devoir','Contrôle continu','Examen','Projet'):abort(400)
+        execute('UPDATE assessments SET title=?,kind=?,due_date=?,description=?,coefficient=? WHERE id=? AND school_id=?',(title,kind,due,description,coef,aid,school_id()))
+        audit('assessment.updated',str(aid))
+        flash('Évaluation modifiée.','success')
+        return redirect(url_for('assessments'))
+    return render_template('assessment_edit.html',item=item)
+
 @app.get('/assessments/files/<int:fid>')
 @login_required
 def assessment_file(fid):
