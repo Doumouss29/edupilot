@@ -630,7 +630,23 @@ def classes():
         execute('INSERT INTO periods(school_id,class_id,name) VALUES (?,?,?)',(school_id(),cid,'Trimestre 1' if request.form.get('cycle')=='trimestre' else 'Semestre 1'))
         audit('class.created',name)
         return redirect(url_for('classes'))
-    return render_template('list.html',title='Classes',columns=['Classe','Régime','Parents'],rows=[(x['name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif') for x in scoped('SELECT * FROM classes WHERE school_id=?')],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?'))
+    return render_template('list.html',title='Classes',columns=['Classe','Régime','Parents','Modifier'],rows=[(x['name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif',{'link':url_for('class_edit',cid=x['id']),'label':'Modifier'}) for x in scoped('SELECT * FROM classes WHERE school_id=?')],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?'))
+
+@app.route('/classes/<int:cid>/edit',methods=['GET','POST'])
+@roles('admin','administratif')
+def class_edit(cid):
+    item=one('SELECT * FROM classes WHERE id=? AND school_id=?',(cid,school_id()))
+    if not item:abort(404)
+    if request.method=='POST':
+        name=request.form.get('name','').strip()
+        cycle=request.form.get('cycle','')
+        campus=request.form.get('campus_id') or None
+        if not name or len(name)>180 or cycle not in ('semestre','trimestre'):abort(400)
+        if campus and not has_school('campuses',campus):abort(403)
+        execute('UPDATE classes SET name=?,cycle=?,campus_id=?,parents_enabled=? WHERE id=? AND school_id=?',(name,cycle,campus,int('parents_enabled' in request.form),cid,school_id()))
+        audit('class.updated',str(cid));flash('Classe modifiée.','success')
+        return redirect(url_for('classes'))
+    return render_template('edit_academic.html',kind='class',item=item,campuses=scoped('SELECT * FROM campuses WHERE school_id=?'))
 
 @app.post('/enroll')
 @roles('admin','administratif')
@@ -663,7 +679,36 @@ def courses():
         if teacher:execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,datetime.date.today().isoformat()))
         audit('course.created',name);return redirect(url_for('courses'))
     rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
-    return render_template('list.html',title='Cours',columns=['Cours','Classe','Enseignant','Volume prévu'],rows=[(x['name'],x['class_name'],x['teacher_name'] or 'Non affecté',f"{x['planned_minutes']/60:g} h") for x in rows],form='courses',classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant'"))
+    return render_template('list.html',title='Cours',columns=['Cours','Classe','Enseignant','Volume prévu','Modifier'],rows=[(x['name'],x['class_name'],x['teacher_name'] or 'Non affecté',f"{x['planned_minutes']/60:g} h",{'link':url_for('course_edit',cid=x['id']),'label':'Modifier'}) for x in rows],form='courses',classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant'"))
+
+@app.route('/courses/<int:cid>/edit',methods=['GET','POST'])
+@roles('admin','administratif')
+def course_edit(cid):
+    item=one('SELECT * FROM courses WHERE id=? AND school_id=?',(cid,school_id()))
+    if not item:abort(404)
+    if request.method=='POST':
+        name=request.form.get('name','').strip()
+        class_id=request.form.get('class_id')
+        teacher=request.form.get('teacher_id') or None
+        if not name or len(name)>180 or not has_school('classes',class_id):abort(400)
+        if teacher and not one("SELECT id FROM users WHERE id=? AND school_id=? AND role='enseignant' AND active=1",(teacher,school_id())):abort(403)
+        try:
+            minutes=int(round(float(request.form.get('hours',''))*60))
+            if minutes<30 or minutes>300000:raise ValueError()
+        except (ValueError,TypeError):abort(400)
+        if int(class_id)!=item['class_id'] and (one('SELECT id FROM lessons WHERE course_id=?',(cid,)) or one('SELECT id FROM assessments WHERE course_id=?',(cid,))):
+            flash('Ce cours possède des séances ou évaluations : sa classe ne peut plus être modifiée.','error')
+            return redirect(url_for('course_edit',cid=cid))
+        now=datetime.datetime.now(datetime.timezone.utc).isoformat()
+        changed_teacher=item['teacher_id']!=(int(teacher) if teacher else None)
+        with db() as c:
+            if changed_teacher:
+                c.execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,cid))
+                if teacher:c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,now))
+            c.execute('UPDATE courses SET name=?,code=?,class_id=?,teacher_id=?,planned_minutes=? WHERE id=? AND school_id=?',(name,request.form.get('code','').strip(),class_id,teacher,minutes,cid,school_id()))
+        audit('course.updated',str(cid));flash('Cours mis à jour ; les séances existantes gardent leur enseignant initial.','success')
+        return redirect(url_for('courses'))
+    return render_template('edit_academic.html',kind='course',item=item,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant' AND active=1"))
 
 @app.route('/planning',methods=['GET','POST'])
 @login_required
