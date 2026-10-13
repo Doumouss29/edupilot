@@ -121,7 +121,7 @@ def subscription_blocked(user=None):
     if not user or user['role']=='superadmin' or not user['school_id']:return False
     school=one('SELECT active,subscription_end FROM schools WHERE id=?',(user['school_id'],))
     if not school:return True
-    return not school['active'] or bool(school['subscription_end'] and school['subscription_end']<datetime.date.today().isoformat())
+    return not school['active'] or bool(school['subscription_end'] and school['subscription_end']<=datetime.date.today().isoformat())
 
 def read_logo(file):
     if not file or not file.filename:return None,None
