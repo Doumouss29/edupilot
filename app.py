@@ -311,9 +311,9 @@ def dashboard():
         sunday=monday+datetime.timedelta(days=7)
         week_start=monday.isoformat()
         week_end=sunday.isoformat()
-        lessons=allrows("""SELECT l.id,l.starts_at,l.ends_at,l.room,l.status,c.name course_name,cl.name class_name
+        lessons=allrows("""SELECT l.id,l.starts_at,l.ends_at,l.room,l.status,c.name course_name,cl.name class_name,t.name teacher_name
                          FROM lessons l JOIN courses c ON c.id=l.course_id
-                         JOIN classes cl ON cl.id=c.class_id
+                         JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id
                          WHERE l.school_id=? AND l.starts_at>=? AND l.starts_at<?
                          AND EXISTS (SELECT 1 FROM enrollments e
                            WHERE e.school_id=l.school_id AND e.student_id=? AND e.class_id=c.class_id)
@@ -332,7 +332,7 @@ def dashboard():
     classes=scoped('SELECT * FROM classes WHERE school_id=?')
     courses=scoped('SELECT c.*,cl.name class_name,u.name teacher_name FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
     if u['role']=='enseignant': courses=[x for x in courses if x['teacher_id']==u['id']]
-    lessonlist=scoped('SELECT l.*,c.name course_name,cl.name class_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id WHERE l.school_id=? ORDER BY l.starts_at DESC LIMIT 80')
+    lessonlist=scoped('SELECT l.*,c.name course_name,cl.name class_name,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? ORDER BY l.starts_at DESC LIMIT 80')
     if u['role']=='enseignant': lessonlist=[x for x in lessonlist if any(y['id']==x['course_id'] for y in courses)]
     total=sum(x['planned_minutes'] for x in courses)
     actual=sum(x['actual_minutes'] for x in lessonlist if x['status'] in ('realisee','partielle'))
@@ -1107,7 +1107,7 @@ def grades():
             gid=execute('INSERT INTO grades(assessment_id,student_id,value) VALUES (?,?,?)',(aid,student,value));old=None
         execute('INSERT INTO grade_history(grade_id,old_value,new_value,actor_id) VALUES (?,?,?,?)',(gid,old,value,u['id']))
         audit('grade.saved',str(gid));flash('Note enregistrée.','success');return redirect(url_for('grades'))
-    sql='''SELECT g.*,a.title,c.name course_name,cl.name class_name,cl.parents_enabled,p.published,u.name student_name,u.id student_id FROM grades g JOIN assessments a ON a.id=g.assessment_id JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id JOIN users u ON u.id=g.student_id LEFT JOIN periods p ON p.class_id=cl.id WHERE a.school_id=?''';args=[school_id()]
+    sql='''SELECT g.*,a.title,a.coefficient evaluation_coefficient,c.coefficient course_coefficient,c.name course_name,cl.name class_name,cl.parents_enabled,p.published,u.name student_name,u.id student_id FROM grades g JOIN assessments a ON a.id=g.assessment_id JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id JOIN users u ON u.id=g.student_id LEFT JOIN periods p ON p.class_id=cl.id WHERE a.school_id=?''';args=[school_id()]
     if u['role']=='enseignant':sql+=' AND c.teacher_id=?';args.append(u['id'])
     if u['role']=='etudiant':sql+=' AND u.id=? AND p.published=1';args.append(u['id'])
     if u['role']=='parent':sql+=' AND cl.parents_enabled=1 AND p.published=1 AND EXISTS (SELECT 1 FROM parent_links l WHERE l.student_id=u.id AND l.parent_id=? AND l.active=1)';args.append(u['id'])
@@ -1303,11 +1303,11 @@ def attendance_save(lid):
 def planning_json():
     u=current_user()
     if u['role']=='superadmin':abort(403)
-    sql='''SELECT l.id,l.starts_at,l.ends_at,l.status,l.room,c.name course,c.class_id,cl.name class_name,l.teacher_id FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id WHERE l.school_id=?'''; args=[school_id()]
+    sql='''SELECT l.id,l.starts_at,l.ends_at,l.status,l.room,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=?'''; args=[school_id()]
     if u['role']=='enseignant':sql+=' AND l.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND e.class_id=c.class_id AND p.active=1 AND cl.parents_enabled=1)';args.append(u['id'])
-    return jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name'],'start':x['starts_at'],'end':x['ends_at'],'extendedProps':{'status':x['status'],'room':x['room']}} for x in allrows(sql,args)])
+    return jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':x['starts_at'],'end':x['ends_at'],'extendedProps':{'status':x['status'],'room':x['room'],'teacher':x['teacher_name']}} for x in allrows(sql,args)])
 
 @app.errorhandler(403)
 def denied(e):return render_template('error.html',message='Accès non autorisé.'),403
