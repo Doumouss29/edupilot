@@ -69,3 +69,48 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',Inter,system-ui
 .restriction-card a{color:#255cbb;font-weight:750}
 .restriction-card footer{border-top:1px solid #e5edf4;margin-top:28px;padding-top:19px;color:#91a3b5;font-size:12px}
 @media(max-width:720px){.modern-form,.school-edit{grid-template-columns:1fr}.school-grid{grid-template-columns:1fr}.school-edit label:nth-child(3),.school-edit .checkline,.school-edit button{grid-column:auto}.login-card{padding:22px}.panel{padding:17px}.app-footer{padding:12px 18px 28px}.restriction-card{padding:30px 24px}}
+
+/* EduPilot — édition Safran : orange, blanc et touches de bleu/vert */
+:root{--navy:#1e344b;--navy2:#25475d;--blue:#e87827;--ink:#253a49;--muted:#81909b;--border:#e8ebea;--bg:#fafaf7;--white:#fff;--green:#169875;--accent:#ed8b32}
+body{background:#fafaf7;color:#263946}
+.sidebar{background:linear-gradient(168deg,#203950 0%,#182e42 72%,#1b403f 100%)}
+.brand-icon{background:linear-gradient(140deg,#fa9a37,#e26d21);box-shadow:0 8px 20px #ed772344}
+.accent,.hero-logo span{color:#ffa34f!important}
+.sidebar .nav:hover{background:#2d4b5b}
+.avatar{background:#df7b35}
+.hero-login{background:radial-gradient(circle at 10% 20%,#795038 0%,transparent 45%),linear-gradient(155deg,#233d54,#173649 75%,#214a42)}
+.hero-copy em{color:#ffa456}
+.login-panel{background:#fafaf7}
+.statusdot{background:#1ba582}
+.top-right{color:#137d65;background:#e9f9f1}
+.kpi.highlighted{background:linear-gradient(135deg,#fff5e9,#eaf8f2);border-color:#f3e0cb}
+.kpi.highlighted strong,.eyebrow{color:#c76b25}
+.btn.primary,.fc .fc-button-primary{background:linear-gradient(125deg,#ef8f32,#df6d24)!important;border:0!important;color:#fff;box-shadow:0 5px 13px #e47a2730}
+.btn.primary:hover{filter:brightness(1.04)}
+.btn.outline{color:#79533a;border-color:#e7d9cb}
+.tag{color:#a65c28;background:#fff0e0}
+.tag.success{color:#168466;background:#e6f9ef}
+.tag.danger{color:#ad3048;background:#ffebed}
+a:not(.nav):hover{color:#dc722b}
+.school-link{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#fff8ef;border:1px solid #f5e3c9;border-radius:12px;padding:12px;margin:16px 0}
+.school-link small{color:#966a48;font-weight:700}
+.school-link a{min-width:0;overflow-wrap:anywhere;color:#c96c22;font-weight:700;font-size:12px}
+.school-main-action{margin:5px 0 15px}
+.page-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0}
+.panel-title .page-actions{margin:0}
+.school-edit-details{padding:11px 0;border-top:1px solid #ece5dc;margin-top:10px}
+.school-edit-details>summary{cursor:pointer;font-size:12px;font-weight:700;color:#5f7484;margin-bottom:12px}
+.password-field{display:grid;gap:10px}
+.password-field label{font-size:12px;font-weight:700;color:#537086;display:grid;gap:6px}
+.password-field input{width:100%;border:1px solid #d8e3ee;border-radius:10px;padding:12px}
+.password-actions{display:flex;flex-wrap:wrap;gap:7px}
+.form-page{max-width:980px}
+.form-actions{display:flex;align-items:center;gap:11px;grid-column:1/-1;flex-wrap:wrap}
+.change-password-form{max-width:560px;display:grid;gap:16px}
+.change-password-form label{display:grid;gap:7px;color:#536b7b;font-size:12px;font-weight:700}
+.change-password-form input{padding:13px;border:1px solid #dee5ec;border-radius:10px}
+.table-link{font-weight:700;color:#d27329;font-size:12px;overflow-wrap:anywhere;white-space:normal}
+.school-card .school-card-header{align-items:center}
+.school-card-header p{overflow-wrap:anywhere}
+.login-foot{color:#8d9ba7;text-align:center;margin-top:16px;font-size:11px}
+@media(max-width:720px){.school-link{align-items:flex-start;flex-direction:column}.page-actions{gap:8px}}
