@@ -293,7 +293,33 @@ def dashboard():
     if u['role']=='superadmin':
         schools=allrows('SELECT s.*, (SELECT COUNT(*) FROM users u WHERE u.school_id=s.id) members FROM schools s')
         return render_template('dashboard.html',schools=schools,stats=None,classes=[],events=[],today=datetime.date.today().isoformat(),base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
-    if u['role'] in ('etudiant','parent'):
+    if u['role']=='etudiant':
+        # Week selection is server-side and restricted to this student's own enrollments.
+        ref=request.args.get('week','')
+        try:
+            today=datetime.date.fromisoformat(ref) if ref else datetime.date.today()
+        except ValueError:
+            today=datetime.date.today()
+        monday=today-datetime.timedelta(days=today.weekday())
+        sunday=monday+datetime.timedelta(days=7)
+        week_start=monday.isoformat()
+        week_end=sunday.isoformat()
+        lessons=allrows("""SELECT l.id,l.starts_at,l.ends_at,l.room,l.status,c.name course_name,cl.name class_name
+                         FROM lessons l JOIN courses c ON c.id=l.course_id
+                         JOIN classes cl ON cl.id=c.class_id
+                         WHERE l.school_id=? AND l.starts_at>=? AND l.starts_at<?
+                         AND EXISTS (SELECT 1 FROM enrollments e
+                           WHERE e.school_id=l.school_id AND e.student_id=? AND e.class_id=c.class_id)
+                         ORDER BY l.starts_at,c.name""",(u['school_id'],week_start,week_end,u['id']))
+        week_days=[{'date':monday+datetime.timedelta(days=n),'lessons':[]} for n in range(7)]
+        for item in lessons:
+            index=datetime.date.fromisoformat(item['starts_at'][:10]).weekday()
+            week_days[index]['lessons'].append(item)
+        return render_template('dashboard_student.html',week_days=week_days,
+                               monday=monday,prev_week=(monday-datetime.timedelta(days=7)).isoformat(),
+                               next_week=(monday+datetime.timedelta(days=7)).isoformat(),
+                               week_end=monday+datetime.timedelta(days=6),lesson_count=len(lessons))
+    if u['role']=='parent':
         return render_template('dashboard.html',stats={'classes':0,'courses':0,'lessons':0,'total':0,'actual':0,'percent':0},classes=[],events=[],courses=[],schools=[])
     sid=school_id()
     classes=scoped('SELECT * FROM classes WHERE school_id=?')
@@ -689,6 +715,31 @@ def class_edit(cid):
         audit('class.updated',str(cid));flash('Classe modifiée.','success')
         return redirect(url_for('classes'))
     return render_template('edit_academic.html',kind='class',item=item,campuses=scoped('SELECT * FROM campuses WHERE school_id=?'))
+
+@app.get('/classes/<int:cid>/details')
+@roles('admin','administratif','enseignant')
+def class_details(cid):
+    clazz=one("""SELECT cl.*, y.label academic_year,ca.name campus_name
+                FROM classes cl JOIN years y ON y.id=cl.year_id
+                LEFT JOIN campuses ca ON ca.id=cl.campus_id
+                WHERE cl.id=? AND cl.school_id=?""",(cid,school_id()))
+    if not clazz:abort(404)
+    if current_user()['role']=='enseignant' and not one(
+        'SELECT id FROM courses WHERE school_id=? AND class_id=? AND teacher_id=?',(school_id(),cid,current_user()['id'])):
+        abort(403)
+    students=allrows("""SELECT DISTINCT u.id,u.name,u.email,u.active
+                        FROM enrollments e JOIN users u ON u.id=e.student_id
+                        WHERE e.school_id=? AND e.class_id=? AND e.year_id=?
+                        ORDER BY u.name""",(school_id(),cid,clazz['year_id']))
+    courses=allrows("""SELECT c.id,c.name,c.code,c.planned_minutes,u.id teacher_id,u.name teacher_name
+                       FROM courses c LEFT JOIN users u ON u.id=c.teacher_id
+                       WHERE c.school_id=? AND c.class_id=? ORDER BY c.name""",(school_id(),cid))
+    teachers=allrows("""SELECT DISTINCT u.id,u.name,u.email
+                        FROM courses c JOIN users u ON u.id=c.teacher_id
+                        WHERE c.school_id=? AND c.class_id=? AND u.role='enseignant'
+                        ORDER BY u.name""",(school_id(),cid))
+    return render_template('class_details.html',clazz=clazz,students=students,
+                           teachers=teachers,courses=courses)
 
 @app.post('/enroll')
 @roles('admin','administratif')
