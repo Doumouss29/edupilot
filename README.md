@@ -1,3 +1,14 @@
+## V0.8 — Parcours, évaluation et notes (13 octobre 2026)
+
+- **Inscriptions / parcours** : nouveau tableau dédié avec filtres par classe et année. L'Admin et l'Administratif peuvent sélectionner plusieurs inscriptions et les transférer vers une autre classe **de la même année** (transactions atomiques, vérifications du tenant, protection contre les doublons). Cette opération réaffecte l'inscription de l'année courante et n'est pas un outil de promotion de fin d'année. Les dossiers de notes existants restent liés à leurs évaluations historiques ; une politique de transfert des résultats doit encore être spécifiée pour les changements de classe après notation.
+- **Vue Enseignant → Étudiants** : filtres par classe et année ; seules les classes où l'enseignant est affecté sont accessibles.
+- **Cours** : coefficient de la matière lors de la création et de l'édition (par défaut 1).
+- **Évaluations** : coefficient interne propre à chaque évaluation, indépendamment du coefficient de matière ; consignes multiligne ; jusqu'à **5 documents joints** (PDF, DOCX, PNG, JPEG, 3 Mo max chacun et 10 Mo au total). Fichiers stockés en SQLite pour la démonstration et téléchargés par route contrôlant rôle, établissement et inscription.
+- **Notes** : filtrage par évaluation ; vue de saisie collective avec une ligne par étudiant et des champs note + commentaire, modifications atomiques, audit et respect des périodes verrouillées. Tableau par cours avec moyenne pondérée par coefficients d'évaluations. Tableau global par classe avec matières en colonnes, moyenne de chaque matière et moyenne générale pondérée par coefficients matières. Évaluations non notées exclues provisoirement des moyennes.
+- **Planning** : nom de l'enseignant et salle indiqués dans les événements et les listes ; le bouton de déclaration/validation n'est affiché qu'après l'heure de fin de séance. Durée proposée = durée prévue, modifiable avant validation.
+
+**Limites actuelles :** ceci reste une version de démonstration. Les transactions d'évaluations/notes et la gestion des pièces jointes nécessitent une recette approfondie, ainsi qu'un stockage persistant avant toute utilisation réelle. L'affichage des résultats publiés et les procédures de correction doivent être vérifiés pour le futur déploiement commercial. Render Free peut effacer SQLite (documents compris).
+
 ## V0.7 — Super Admin : gestion des comptes des établissements
 
 Dans **Gérer les établissements → Gérer les accès**, le Super Admin peut désormais :
