@@ -1190,6 +1190,42 @@ def grade_global():
         rows.append({'student':student,'notes':cells,'average':round(weighted/weight,2) if weight else None})
     return render_template('grade_global.html',choices=choices,course=course,assessments=assessments,rows=rows)
 
+@app.get('/grades/class-summary')
+@roles('enseignant','admin','administratif')
+def class_grade_summary():
+    u=current_user()
+    classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name')
+    if u['role']=='enseignant':
+        classes=[cl for cl in classes if one('SELECT id FROM courses WHERE class_id=? AND school_id=? AND teacher_id=?',(cl['id'],school_id(),u['id']))]
+    selected_id=request.args.get('class_id','')
+    selected=next((cl for cl in classes if str(cl['id'])==selected_id),classes[0] if classes else None)
+    if not selected:return render_template('class_grade_summary.html',classes=classes,selected=None,courses=[],rows=[])
+    courses=allrows('SELECT id,name,coefficient FROM courses WHERE class_id=? AND school_id=? ORDER BY name',(selected['id'],school_id()))
+    if u['role']=='enseignant':
+        courses=[c for c in courses if one('SELECT id FROM courses WHERE id=? AND teacher_id=?',(c['id'],u['id']))]
+    students=allrows("""SELECT DISTINCT u.id,u.name FROM enrollments e JOIN users u ON u.id=e.student_id
+                        WHERE e.school_id=? AND e.class_id=? ORDER BY u.name""",(school_id(),selected['id']))
+    course_averages={}
+    for course in courses:
+        assessments=allrows('SELECT id,coefficient,max_score FROM assessments WHERE school_id=? AND course_id=?',(school_id(),course['id']))
+        marks=allrows('SELECT g.assessment_id,g.student_id,g.value FROM grades g JOIN assessments a ON a.id=g.assessment_id WHERE a.school_id=? AND a.course_id=?',(school_id(),course['id']))
+        marks_by={(g['student_id'],g['assessment_id']):g['value'] for g in marks}
+        for student in students:
+            numerator=denominator=0.0
+            for a in assessments:
+                value=marks_by.get((student['id'],a['id']))
+                if value is not None and a['max_score']:
+                    numerator+=value/a['max_score']*20*a['coefficient']
+                    denominator+=a['coefficient']
+            course_averages[(student['id'],course['id'])]=round(numerator/denominator,2) if denominator else None
+    rows=[]
+    for student in students:
+        notes=[course_averages[(student['id'],course['id'])] for course in courses]
+        weighted=sum(v*course['coefficient'] for v,course in zip(notes,courses) if v is not None)
+        denominator=sum(course['coefficient'] for v,course in zip(notes,courses) if v is not None)
+        rows.append({'student':student,'notes':notes,'general':round(weighted/denominator,2) if denominator else None})
+    return render_template('class_grade_summary.html',classes=classes,selected=selected,courses=courses,rows=rows)
+
 @app.route('/periods',methods=['GET','POST'])
 @roles('admin','administratif')
 def periods():
