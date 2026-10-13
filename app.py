@@ -1210,17 +1210,39 @@ def grades():
             gid=execute('INSERT INTO grades(assessment_id,student_id,value,comment) VALUES (?,?,?,?)',(aid,student,value,request.form.get('comment','')[:2000]));old=None
         execute('INSERT INTO grade_history(grade_id,old_value,new_value,actor_id) VALUES (?,?,?,?)',(gid,old,value,u['id']))
         audit('grade.saved',str(gid));flash('Note enregistrée.','success');return redirect(url_for('grades'))
-    sql='''SELECT g.*,a.title,a.coefficient evaluation_coefficient,c.coefficient course_coefficient,c.name course_name,cl.name class_name,cl.parents_enabled,p.published,u.name student_name,u.id student_id FROM grades g JOIN assessments a ON a.id=g.assessment_id JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id JOIN users u ON u.id=g.student_id LEFT JOIN periods p ON p.class_id=cl.id WHERE a.school_id=?''';args=[school_id()]
-    if u['role']=='enseignant':sql+=' AND c.teacher_id=?';args.append(u['id'])
-    if u['role']=='etudiant':sql+=' AND u.id=? AND p.published=1';args.append(u['id'])
-    if u['role']=='parent':sql+=' AND cl.parents_enabled=1 AND p.published=1 AND EXISTS (SELECT 1 FROM parent_links l WHERE l.student_id=u.id AND l.parent_id=? AND l.active=1)';args.append(u['id'])
-    selected_assessment=request.args.get('assessment_id','')
-    if selected_assessment and selected_assessment.isdigit():sql+=' AND a.id=?';args.append(int(selected_assessment))
-    rows=allrows(sql,args)
-    evals=scoped('SELECT a.*,c.name course_name,c.class_id,c.teacher_id FROM assessments a JOIN courses c ON c.id=a.course_id WHERE a.school_id=?')
-    if u['role']=='enseignant':evals=[a for a in evals if a['teacher_id']==u['id']]
-    return render_template('grades.html',grades=rows,evaluations=evals,students=scoped("SELECT * FROM users WHERE school_id=? AND role='etudiant'") if u['role'] in ('enseignant','admin','administratif') else [])
-
+    if u['role'] in ('etudiant','parent'):
+        student_id=u['id']
+        if u['role']=='parent':
+            # Only an authorized parent with a child in an enabled class may see results.
+            children=allrows("""SELECT DISTINCT st.id,st.name FROM parent_links p JOIN users st ON st.id=p.student_id
+                       JOIN enrollments e ON e.student_id=st.id JOIN classes cl ON cl.id=e.class_id
+                       WHERE p.school_id=? AND p.parent_id=? AND p.active=1 AND cl.parents_enabled=1""",(school_id(),u['id']))
+            request_id=request.args.get('student_id','')
+            child=next((v for v in children if str(v['id'])==request_id),children[0] if children else None)
+            if not child:return render_template('student_grades.html',enrollments=[],selected=None,report=None,children=children,selected_student=None)
+            student_id=child['id']
+        else:children=[];child=None
+        enrolls=allrows("""SELECT DISTINCT cl.id,cl.name,y.label,y.id year_id,cl.parents_enabled
+                        FROM enrollments e JOIN classes cl ON cl.id=e.class_id JOIN years y ON y.id=e.year_id
+                        WHERE e.school_id=? AND e.student_id=? ORDER BY y.label DESC,cl.name""",(school_id(),student_id))
+        if u['role']=='parent':enrolls=[v for v in enrolls if v['parents_enabled']]
+        selected=next((v for v in enrolls if str(v['id'])==request.args.get('class_id','')),enrolls[0] if enrolls else None)
+        report=compile_class_report(selected['id'],student_ids=[student_id]) if selected else None
+        return render_template('student_grades.html',enrollments=enrolls,selected=selected,report=report,
+                               children=children,selected_student=child)
+    class_rows=allrows("""SELECT cl.id,cl.name,y.label,y.id year_id FROM classes cl JOIN years y ON y.id=cl.year_id
+                     WHERE cl.school_id=? ORDER BY y.label DESC,cl.name""",(school_id(),))
+    if u['role']=='enseignant':
+        class_rows=[cl for cl in class_rows if one('SELECT id FROM courses WHERE school_id=? AND class_id=? AND teacher_id=?',(school_id(),cl['id'],u['id']))]
+    selected_class=next((v for v in class_rows if str(v['id'])==request.args.get('class_id','')),class_rows[0] if class_rows else None)
+    courses=allrows('SELECT id,name FROM courses WHERE school_id=? AND class_id=? ORDER BY name',(school_id(),selected_class['id'])) if selected_class else []
+    if u['role']=='enseignant':courses=[c for c in courses if one('SELECT id FROM courses WHERE id=? AND teacher_id=?',(c['id'],u['id']))]
+    selected_course=next((c for c in courses if str(c['id'])==request.args.get('course_id','')),courses[0] if courses else None)
+    assessments=allrows('SELECT id,title,coefficient FROM assessments WHERE school_id=? AND course_id=? ORDER BY id',(school_id(),selected_course['id'])) if selected_course else []
+    selected_assessment=next((v for v in assessments if str(v['id'])==request.args.get('assessment_id','')),assessments[0] if assessments else None)
+    return render_template('staff_grades.html',classes=class_rows,selected_class=selected_class,courses=courses,
+                           selected_course=selected_course,assessments=assessments,selected_assessment=selected_assessment)
+    
 @app.route('/grades/entry/<int:aid>',methods=['GET','POST'])
 @roles('enseignant','admin','administratif')
 def grade_entry(aid):
