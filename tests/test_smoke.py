@@ -26,6 +26,10 @@ class EduPilotSmoke(unittest.TestCase):
         with self.client.session_transaction() as sess:
             return sess["csrf"]
 
+    def test_all_templates_compile(self):
+        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html"):
+            project.app.jinja_env.get_template(template)
+
     def test_health(self):
         self.assertEqual(self.client.get("/health").json["status"], "ok")
 
