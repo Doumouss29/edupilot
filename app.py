@@ -1056,6 +1056,125 @@ def planning():
     events=allrows(query,args)
     return render_template('planning.html',now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
 
+def editable_lesson_row(conn,lid):
+    return conn.execute("""SELECT l.*,c.class_id FROM lessons l JOIN courses c ON c.id=l.course_id
+        WHERE l.id=? AND l.school_id=?""",(lid,school_id())).fetchone()
+
+def lesson_editable(conn,lesson):
+    if lesson['status']!='programmee' or lesson['actual_minutes'] or lesson['validated']:return False
+    return not conn.execute('SELECT 1 FROM attendance WHERE lesson_id=? LIMIT 1',(lesson['id'],)).fetchone()
+
+def assert_lesson_schedule_available(conn,planned,editing_ids):
+    # Check against existing sessions outside of this batch and against each
+    # other; never partially modify a set when one session conflicts.
+    ignored=set(editing_ids)
+    for item in planned:
+        overlapping=conn.execute("""SELECT l.id,c.class_id,l.teacher_id,l.room FROM lessons l
+              JOIN courses c ON c.id=l.course_id WHERE l.school_id=?
+              AND l.status NOT IN ('annulee','reportee')
+              AND l.starts_at<? AND l.ends_at>?""",
+              (school_id(),item['end'],item['start'])).fetchall()
+        for other in overlapping:
+            if other['id'] in ignored:continue
+            if other['class_id']==item['class_id'] or other['teacher_id']==item['teacher_id'] or (item['room'] and item['room']==other['room']):
+                abort(400,'Conflit de planning avec une séance existante')
+    for i,x in enumerate(planned):
+        for y in planned[i+1:]:
+            if x['start']<y['end'] and x['end']>y['start'] and (x['class_id']==y['class_id'] or x['teacher_id']==y['teacher_id'] or (x['room'] and x['room']==y['room'])):
+                abort(400,'Conflit entre les séances sélectionnées')
+
+@app.route('/lessons/<int:lid>/edit',methods=['GET','POST'])
+@roles('admin','administratif')
+def lesson_edit(lid):
+    with db() as c:
+        lesson=editable_lesson_row(c,lid)
+        if not lesson:abort(404)
+        editable=lesson_editable(c,lesson)
+    if request.method=='GET':
+        return render_template('lesson_edit.html',lesson=lesson,editable=editable,
+            courses=scoped("""SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id
+                    WHERE c.school_id=? ORDER BY cl.name,c.name"""))
+    if not editable:abort(400,'Séance historisée : modification interdite')
+    try:
+        course_id=int(request.form.get('course_id',''))
+        date=datetime.date.fromisoformat(request.form.get('lesson_date',''))
+        time=datetime.time.fromisoformat(request.form.get('start_time',''))
+        duration=float(request.form.get('duration_hours',''))
+        if not 0.5<=duration<=12 or not (duration*2).is_integer():raise ValueError()
+        start=datetime.datetime.combine(date,time)
+        end=start+datetime.timedelta(minutes=round(duration*60))
+        if start.date()!=end.date():raise ValueError()
+    except (ValueError,OverflowError):abort(400,'Date, heure ou durée invalide')
+    course=one('SELECT id,class_id,teacher_id FROM courses WHERE id=? AND school_id=?',(course_id,school_id()))
+    if not course or not course['teacher_id']:abort(400,'Cours sans enseignant')
+    room=request.form.get('room','').strip()
+    if len(room)>80:abort(400)
+    item={'id':lid,'start':start.strftime('%Y-%m-%dT%H:%M'),'end':end.strftime('%Y-%m-%dT%H:%M'),
+          'room':room,'class_id':course['class_id'],'teacher_id':course['teacher_id']}
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        current=editable_lesson_row(c,lid)
+        if not current or not lesson_editable(c,current):abort(400,'Séance non modifiable')
+        assert_lesson_schedule_available(c,[item],{lid})
+        c.execute('UPDATE lessons SET course_id=?,teacher_id=?,starts_at=?,ends_at=?,room=? WHERE id=? AND school_id=?',
+                  (course_id,course['teacher_id'],item['start'],item['end'],room,lid,school_id()))
+    notify(list(set(classmates(lesson['course_id'])+classmates(course_id)+[lesson['teacher_id'],course['teacher_id']])),
+           'Une séance du planning a été modifiée.','/planning')
+    audit('lesson.updated',str(lid))
+    flash('Séance modifiée. Les personnes concernées ont été notifiées.','success')
+    return redirect(url_for('planning'))
+
+@app.post('/lessons/bulk')
+@roles('admin','administratif')
+def lessons_bulk():
+    chosen=request.form.getlist('lesson_ids')
+    action=request.form.get('action','')
+    if action not in ('delete','modify') or not chosen or len(chosen)>200 or any(not v.isdigit() for v in chosen):abort(400)
+    ids=list(dict.fromkeys(int(v) for v in chosen))
+    if action=='modify':
+        try:
+            day_offset=int(request.form.get('day_offset','0'))
+            minute_offset=int(request.form.get('minute_offset','0'))
+            if abs(day_offset)>365 or abs(minute_offset)>1440 or minute_offset%30:raise ValueError()
+        except ValueError:abort(400,'Décalage invalide')
+        new_room=request.form.get('room','').strip()
+        if len(new_room)>80:abort(400)
+        update_room=bool(request.form.get('change_room'))
+        if not (day_offset or minute_offset or update_room):abort(400,'Aucune modification sélectionnée')
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        qs=','.join('?' for _ in ids)
+        rows=c.execute(f"""SELECT l.*,co.class_id FROM lessons l JOIN courses co ON co.id=l.course_id
+                       WHERE l.school_id=? AND l.id IN ({qs})""",(school_id(),*ids)).fetchall()
+        if len(rows)!=len(ids):abort(403)
+        if any(not lesson_editable(c,row) for row in rows):
+            flash('Opération refusée : une séance est réalisée, déclarée, annulée ou possède des présences.','error')
+            return redirect(url_for('planning'))
+        planned=[]
+        if action=='modify':
+            for row in rows:
+                try:
+                    start=datetime.datetime.fromisoformat(row['starts_at'])+datetime.timedelta(days=day_offset,minutes=minute_offset)
+                    end=datetime.datetime.fromisoformat(row['ends_at'])+datetime.timedelta(days=day_offset,minutes=minute_offset)
+                except (ValueError,OverflowError):abort(400)
+                if start.date()!=end.date():abort(400,'Une séance ne peut pas franchir minuit')
+                planned.append({'id':row['id'],'start':start.strftime('%Y-%m-%dT%H:%M'),'end':end.strftime('%Y-%m-%dT%H:%M'),
+                         'room':new_room if update_room else row['room'] or '', 'class_id':row['class_id'],'teacher_id':row['teacher_id']})
+            assert_lesson_schedule_available(c,planned,set(ids))
+            for item in planned:
+                c.execute('UPDATE lessons SET starts_at=?,ends_at=?,room=? WHERE id=? AND school_id=?',
+                          (item['start'],item['end'],item['room'],item['id'],school_id()))
+        else:
+            c.execute(f'DELETE FROM lessons WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
+    notified=set()
+    for row in rows:
+        notified.update(classmates(row['course_id']))
+        notified.add(row['teacher_id'])
+    notify(list(notified),'Séances '+('supprimées' if action=='delete' else 'modifiées')+' dans votre planning.','/planning')
+    audit('lessons.bulk.'+action,','.join(map(str,ids)))
+    flash(f'{len(ids)} séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+'.','success')
+    return redirect(url_for('planning'))
+
 @app.post('/lessons/<int:lid>/declare')
 @roles('enseignant','admin','administratif')
 def declare(lid):
