@@ -494,6 +494,12 @@ def people():
                   WHERE u.school_id=? GROUP BY u.id ORDER BY u.role,u.name""",(school_id(),))
     return render_template('list.html',title='Utilisateurs',columns=['Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,courses=courses)
 
+@app.get('/people/import/template')
+@roles('admin','administratif')
+def students_csv_template():
+    csv_data='\ufeffprenom;nom;email;classe\nAmadou;Traore;amadou.exemple@example.test;Licence 1\n'
+    return Response(csv_data,mimetype='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename=edupilot-modele-etudiants.csv'})
+
 @app.post('/people/import')
 @roles('admin','administratif')
 def people_import():
@@ -513,7 +519,7 @@ def people_import():
             sheet=workbook.active
             rows=list(sheet.iter_rows(values_only=True,max_row=2002))
             workbook.close()
-    except (UnicodeError,ValueError,csv.Error,Exception) as exc:
+    except Exception as exc:
         app.logger.info('Invalid student import file: %s',type(exc).__name__)
         flash('Impossible de lire le fichier : utilisez un CSV UTF-8 ou un Excel XLSX valide.','error')
         return redirect(url_for('people'))
@@ -568,7 +574,7 @@ def people_import():
     try:
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
-            registered={r['email'] for r in c.execute('SELECT email FROM users WHERE email IN ('+','.join('?' for _ in prepared)+')',tuple(x[1] for x in prepared))}
+            registered={r['email'] for r in c.execute('SELECT email FROM users WHERE email IN ('+','.join('?' for _ in prepared)+')',tuple(x[1] for x in prepared)).fetchall()}
             if registered:
                 flash('Import annulé : comptes déjà existants : '+', '.join(sorted(registered)[:4]),'error')
                 return redirect(url_for('people'))
