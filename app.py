@@ -2,6 +2,7 @@
 IMPORTANT: demo seulement, stockage Render Free ephemere.
 """
 import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib
+from flask import Response
 from contextlib import contextmanager
 from pathlib import Path
 import requests
@@ -19,7 +20,7 @@ UPLOAD_DIR.mkdir(parents=True,exist_ok=True)
 
 SCHEMA = """
 PRAGMA foreign_keys=ON;
-CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1, subscription_end TEXT, logo BLOB, logo_mime TEXT);
 CREATE TABLE IF NOT EXISTS campuses(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS years(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), label TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1);
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, school_id INTEG
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, school_id INTEGER, user_id INTEGER, action TEXT NOT NULL, details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id), student_id INTEGER NOT NULL REFERENCES users(id), filename TEXT NOT NULL, filepath TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(assessment_id,student_id));
 CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 """
 
 def connection():
@@ -100,8 +102,47 @@ def seed():
         c.execute('INSERT INTO users(school_id,name,email,password_hash,role) VALUES (NULL,?,?,?,?)',('Éditeur EduPilot','superadmin@demo.edupilot.test',generate_password_hash('Demo2026!'),'superadmin'))
 
 Path(DB).parent.mkdir(parents=True,exist_ok=True)
-with db() as c: c.executescript(SCHEMA)
+with db() as c:
+    c.executescript(SCHEMA)
+    existing={r['name'] for r in c.execute('PRAGMA table_info(schools)').fetchall()}
+    for name,definition in [('subscription_end','TEXT'),('logo','BLOB'),('logo_mime','TEXT')]:
+        if name not in existing: c.execute(f'ALTER TABLE schools ADD COLUMN {name} {definition}')
+    c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_name','LMurbs')")
+    c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_phone','+2250711124359')")
+    c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('powered_by','Propulsé par LMurbs')")
 seed()
+
+def setting(key,default=''):
+    row=one('SELECT value FROM settings WHERE key=?',(key,))
+    return row['value'] if row else default
+
+def subscription_blocked(user=None):
+    user=user or current_user()
+    if not user or user['role']=='superadmin' or not user['school_id']:return False
+    school=one('SELECT active,subscription_end FROM schools WHERE id=?',(user['school_id'],))
+    if not school:return True
+    return not school['active'] or bool(school['subscription_end'] and school['subscription_end']<datetime.date.today().isoformat())
+
+def read_logo(file):
+    if not file or not file.filename:return None,None
+    raw=file.read(1024*1024+1)
+    if not raw:return None,None
+    if len(raw)>1024*1024:abort(400,'Logo supérieur à 1 Mo.')
+    if raw.startswith(b'\\x89PNG\\r\\n\\x1a\\n'):mime='image/png'
+    elif raw[:3]==b'\\xff\\xd8\\xff':mime='image/jpeg'
+    elif raw[:4]==b'RIFF' and raw[8:12]==b'WEBP':mime='image/webp'
+    else:abort(400,'Format de logo non reconnu.')
+    return raw,mime
+
+@app.get('/school-logo/<int:sid>')
+def school_logo(sid):
+    row=one('SELECT logo,logo_mime FROM schools WHERE id=?',(sid,))
+    if not row or not row['logo']:abort(404)
+    resp=Response(row['logo'],mimetype=row['logo_mime'])
+    resp.headers['X-Content-Type-Options']='nosniff'
+    resp.headers['Cache-Control']='public, max-age=300'
+    return resp
+
 
 @app.before_request
 def safety():
@@ -109,10 +150,13 @@ def safety():
         token=request.form.get('csrf','') or request.headers.get('X-CSRF-Token','')
         if token!=session.get('csrf') or not token: abort(400,'Jeton CSRF invalide')
     if 'csrf' not in session: session['csrf']=secrets.token_urlsafe(24)
+    u=current_user()
+    if u and subscription_blocked(u) and request.endpoint not in ('restricted','logout','login','health','school_logo','static'):
+        return redirect(url_for('restricted'))
 
 @app.context_processor
 def globals_template():
-    return dict(me=current_user(),csrf=session.get('csrf',''),appname='EduPilot')
+    return dict(me=current_user(),csrf=session.get('csrf',''),appname='EduPilot',support_name=setting('support_name','LMurbs'),support_phone=setting('support_phone','+2250711124359'),powered_by=setting('powered_by','Propulsé par LMurbs'),school_brand=one('SELECT id,name,logo_mime FROM schools WHERE id=?',(school_id(),)) if school_id() else None)
 
 def current_user():
     uid=session.get('uid')
@@ -183,6 +227,12 @@ def login():
         flash('Identifiants incorrects.','error')
     return render_template('login.html')
 
+@app.get('/restricted')
+@login_required
+def restricted():
+    if not subscription_blocked():return redirect(url_for('dashboard'))
+    return render_template('restricted.html')
+
 @app.post('/logout')
 def logout():session.clear();return redirect(url_for('login'))
 
@@ -211,17 +261,90 @@ def dashboard():
 def schools():
     if request.method=='POST':
         name=request.form.get('name','').strip()
-        if not name: abort(400)
+        if not name:abort(400)
+        end=request.form.get('subscription_end','').strip() or None
+        if end:
+            try: datetime.date.fromisoformat(end)
+            except ValueError:abort(400)
+        plan=request.form.get('plan','standard')
+        if plan not in ('essentiel','standard','premium'):abort(400)
         slug=slugify(name)
+        if not slug:abort(400)
         n=2;unique=slug
         while one('SELECT id FROM schools WHERE slug=?',(unique,)):
             unique=slug+'_'+str(n);n+=1
-        sid=execute('INSERT INTO schools(name,slug,plan) VALUES (?,?,?)',(name,unique,request.form.get('plan','standard')))
+        logo,mime=read_logo(request.files.get('logo'))
+        sid=execute('INSERT INTO schools(name,slug,plan,subscription_end,logo,logo_mime) VALUES (?,?,?,?,?,?)',(name,unique,plan,end,logo,mime))
         execute('INSERT INTO years(school_id,label) VALUES (?,?)',(sid,'2026-2027'))
         execute('INSERT INTO campuses(school_id,name) VALUES (?,?)',(sid,'Campus principal'))
         flash('Établissement créé : /'+unique,'success')
         return redirect(url_for('schools'))
-    return render_template('list.html',title='Établissements',columns=['Établissement','URL','Formule'],rows=[(s['name'],'/'+s['slug'],s['plan']) for s in allrows('SELECT * FROM schools')],form='schools')
+    records=allrows('SELECT id,name,slug,plan,active,subscription_end,logo_mime FROM schools ORDER BY id DESC')
+    return render_template('schools.html',schools=records,today=datetime.date.today().isoformat())
+
+@app.post('/schools/<int:sid>/update')
+@roles('superadmin')
+def school_update(sid):
+    school=one('SELECT * FROM schools WHERE id=?',(sid,))
+    if not school:abort(404)
+    action=request.form.get('action','update')
+    if action=='delete':
+        if request.form.get('confirm_slug')!=school['slug']:abort(400,'Confirmation requise.')
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            c.execute('DELETE FROM attendance WHERE lesson_id IN (SELECT id FROM lessons WHERE school_id=?)',(sid,))
+            c.execute('DELETE FROM submissions WHERE assessment_id IN (SELECT id FROM assessments WHERE school_id=?)',(sid,))
+            c.execute('DELETE FROM grade_history WHERE grade_id IN (SELECT g.id FROM grades g JOIN assessments a ON a.id=g.assessment_id WHERE a.school_id=?)',(sid,))
+            c.execute('DELETE FROM grades WHERE assessment_id IN (SELECT id FROM assessments WHERE school_id=?)',(sid,))
+            c.execute('DELETE FROM assessments WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM unlocks WHERE period_id IN (SELECT id FROM periods WHERE school_id=?)',(sid,))
+            c.execute('DELETE FROM periods WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM lessons WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM teacher_history WHERE course_id IN (SELECT id FROM courses WHERE school_id=?)',(sid,))
+            c.execute('DELETE FROM courses WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM enrollments WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM parent_links WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM classes WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM years WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM campuses WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM notifications WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM audit WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM invites WHERE user_id IN (SELECT id FROM users WHERE school_id=?)',(sid,))
+            c.execute('DELETE FROM users WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM schools WHERE id=?',(sid,))
+        flash('Établissement et données associés supprimés définitivement.','success')
+    elif action in ('activate','deactivate'):
+        execute('UPDATE schools SET active=? WHERE id=?',(1 if action=='activate' else 0,sid))
+        flash('Statut de l’établissement mis à jour.','success')
+    elif action=='update':
+        end=request.form.get('subscription_end','').strip() or None
+        if end:
+            try:datetime.date.fromisoformat(end)
+            except ValueError:abort(400)
+        plan=request.form.get('plan',school['plan'])
+        if plan not in ('essentiel','standard','premium'):abort(400)
+        logo,mime=read_logo(request.files.get('logo'))
+        if logo:execute('UPDATE schools SET plan=?,subscription_end=?,logo=?,logo_mime=? WHERE id=?',(plan,end,logo,mime,sid))
+        elif request.form.get('remove_logo')=='1':execute('UPDATE schools SET plan=?,subscription_end=?,logo=NULL,logo_mime=NULL WHERE id=?',(plan,end,sid))
+        else:execute('UPDATE schools SET plan=?,subscription_end=? WHERE id=?',(plan,end,sid))
+        flash('Paramètres de l’établissement enregistrés.','success')
+    else:abort(400)
+    return redirect(url_for('schools'))
+
+@app.route('/settings',methods=['GET','POST'])
+@roles('superadmin')
+def settings():
+    if request.method=='POST':
+        name=request.form.get('support_name','').strip()
+        phone=request.form.get('support_phone','').strip()
+        powered=request.form.get('powered_by','').strip()
+        if not name or not phone or not powered or len(name)>120 or len(phone)>40 or len(powered)>180:abort(400)
+        with db() as c:
+            for k,v in [('support_name',name),('support_phone',phone),('powered_by',powered)]:
+                c.execute('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(k,v))
+        flash('Coordonnées du support mises à jour.','success')
+        return redirect(url_for('settings'))
+    return render_template('settings.html')
 
 @app.route('/people',methods=['GET','POST'])
 @roles('admin','administratif')
