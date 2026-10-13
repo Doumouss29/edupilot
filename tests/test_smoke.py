@@ -27,7 +27,7 @@ class EduPilotSmoke(unittest.TestCase):
             return sess["csrf"]
 
     def test_all_templates_compile(self):
-        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","school_new.html","school_accounts.html","change_password.html"):
+        for template in ("base.html","dashboard.html","schools.html","settings.html","restricted.html","login.html","list.html","planning.html","edit_academic.html","class_details.html","dashboard_student.html","school_new.html","school_accounts.html","change_password.html"):
             project.app.jinja_env.get_template(template)
 
     def test_health(self):
@@ -184,6 +184,32 @@ class EduPilotSmoke(unittest.TestCase):
         r=self.client.post("/people/bulk",data={"csrf":self.token(),"action":"activate","user_ids":[str(target["id"])]})
         self.assertEqual(r.status_code,302)
         self.assertEqual(project.one("SELECT active FROM users WHERE id=?",(target["id"],))["active"],1)
+
+
+    def test_class_details_scoped_and_lists(self):
+        self.login("admin1@demo.edupilot.test")
+        own=project.one("SELECT id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
+        foreign=project.one("SELECT id FROM classes WHERE school_id=2 ORDER BY id LIMIT 1")
+        r=self.client.get(f"/classes/{own['id']}/details")
+        self.assertEqual(r.status_code,200)
+        self.assertIn("Étudiants de la classe".encode(),r.data)
+        self.assertIn("Enseignants affectés".encode(),r.data)
+        self.assertIn("Cours de la classe".encode(),r.data)
+        self.assertEqual(self.client.get(f"/classes/{foreign['id']}/details").status_code,404)
+
+    def test_student_dashboard_week_and_privacy(self):
+        self.login("eleve1_1@demo.edupilot.test")
+        week=self.client.get("/?week=2026-10-12")
+        self.assertEqual(week.status_code,200)
+        self.assertIn("Mes prochaines séances".encode(),week.data)
+        self.assertNotIn(b"Avancement pedagogique",week.data)
+        self.assertIn(b"/planning",week.data)
+        # No administrative metrics or class management links on the student dashboard.
+        self.assertNotIn(b"Sur 0 heures",week.data)
+        far=self.client.get("/?week=2028-02-07")
+        self.assertEqual(far.status_code,200)
+        self.assertIn("Aucune séance programmée".encode(),far.data)
+        self.assertEqual(self.client.get("/classes/1/details").status_code,403)
 
     def test_school_lifecycle_logo_and_deletion(self):
         self.login("superadmin@demo.edupilot.test")
