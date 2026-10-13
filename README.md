@@ -1,3 +1,17 @@
+## V1.0 — Administration des séances individuelles et groupées
+
+Depuis **Calendrier / Planification** (rôle Admin ou Administratif), une nouvelle section **Gérer plusieurs séances** permet :
+
+- **Modification individuelle** : bouton « Modifier » pour une séance ; changer le cours (et son enseignant affecté), la date, l'heure de début, la durée de 30 minutes en 30 minutes et la salle.
+- **Modification groupée** : sélectionner jusqu'à 200 séances programmées et appliquer un décalage commun en jours, en minutes (multiple de 30), ainsi qu'un changement de salle optionnel. Les classes et cours de chaque séance sont conservés ; pour changer de cours individuellement, ouvrir la fiche Modifier.
+- **Suppression groupée** : sélectionner une ou plusieurs séances programmées sans historique de réalisation ni présence, puis confirmer la suppression.
+- Les modifications groupées sont **atomiques** : si un conflit existe entre des séances de la même classe, du même enseignant ou de la même salle, l'opération est refusée entièrement ; aucun changement partiel.
+- Les séances **réalisées, partielles, annulées, reportées, validées ou ayant des présences enregistrées** ne peuvent pas être modifiées ni supprimées dans ces formulaires pour préserver la traçabilité.
+- Contrôles côté serveur : accès limité au tenant courant, profils Admin/Administratif, validation des durées, absence de franchissement de minuit, vérification des conflits de réservation, audit, notification aux personnes concernées.
+- Tests automatisés ajoutés pour modification individuelle, modification groupée, suppression groupée, permissions enseignants, protection des historiques et isolement entre établissements.
+
+Déploiement : les commits sont poussés dans `main`. Sur Render, **Manual Deploy → Deploy latest commit** si nécessaire. Vérifier GitHub Actions et Render avant les essais.
+
 ## V0.9 — Cours, séances, notes et bulletins (13 octobre 2026)
 
 ### Administration scolaire
