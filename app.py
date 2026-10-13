@@ -1185,6 +1185,104 @@ def assessments():
     if u['role']=='enseignant':choices=[x for x in choices if x['teacher_id']==u['id']]
     return render_template('assessments.html',assessments=rows,courses=choices,attachments=attachments)
 
+def compile_class_report(class_id, student_ids=None):
+    """School-scoped report: evaluation weights are internal to subjects;
+    subject coefficients are used only for the overall mean."""
+    clazz=one("""SELECT c.id,c.name,c.year_id,y.label academic_year FROM classes c
+                 JOIN years y ON y.id=c.year_id WHERE c.id=? AND c.school_id=?""",(class_id,school_id()))
+    if not clazz:abort(404)
+    courses=allrows('SELECT id,name,code,coefficient FROM courses WHERE class_id=? AND school_id=? ORDER BY name',(class_id,school_id()))
+    students=allrows("""SELECT DISTINCT u.id,u.name FROM enrollments e JOIN users u ON u.id=e.student_id
+                WHERE e.school_id=? AND e.class_id=? AND e.year_id=? ORDER BY u.name""",(school_id(),class_id,clazz['year_id']))
+    if student_ids is not None:students=[student for student in students if student['id'] in student_ids]
+    evals=allrows("""SELECT a.id,a.course_id,a.title,a.coefficient,a.max_score,a.published FROM assessments a
+                   JOIN courses c ON c.id=a.course_id WHERE a.school_id=? AND c.class_id=? ORDER BY a.id""",(school_id(),class_id))
+    marks=allrows("""SELECT g.student_id,g.assessment_id,g.value,g.comment FROM grades g JOIN assessments a ON a.id=g.assessment_id
+                  JOIN courses c ON c.id=a.course_id WHERE a.school_id=? AND c.class_id=?""",(school_id(),class_id))
+    indexed={(g['student_id'],g['assessment_id']):g for g in marks}
+    last_period=one("SELECT id,name,published,locked FROM periods WHERE school_id=? AND class_id=? ORDER BY id DESC LIMIT 1",(school_id(),class_id))
+    published=bool(last_period and last_period['published'])
+    results=[]
+    for student in students:
+        subjects=[];general_num=0.;general_den=0.
+        for course in courses:
+            assessments=[];num=0.;den=0.
+            for ev in evals:
+                if ev['course_id']!=course['id'] or not ev['published']:continue
+                grade=indexed.get((student['id'],ev['id']))
+                score=(grade['value']/ev['max_score']*20) if grade and ev['max_score'] else None
+                if score is not None:
+                    num+=score*ev['coefficient'];den+=ev['coefficient']
+                assessments.append({'id':ev['id'],'title':ev['title'],'coefficient':ev['coefficient'],
+                                    'score':round(score,2) if score is not None else None,
+                                    'comment':grade['comment'] if grade else None})
+            mean=round(num/den,2) if den else None
+            if mean is not None:
+                general_num+=mean*course['coefficient'];general_den+=course['coefficient']
+            subjects.append({'id':course['id'],'title':course['name'],'code':course['code'],
+                             'coefficient':course['coefficient'],'assessments':assessments,'mean':mean})
+        results.append({'student':student,'subjects':subjects,'general':round(general_num/general_den,2) if general_den else None})
+    return {'clazz':clazz,'courses':courses,'rows':results,'period':last_period,'published':published,
+            'academic_year':clazz['academic_year']}
+
+@app.get('/grades/bulletins')
+@roles('admin','administratif')
+def school_bulletins():
+    options=allrows("""SELECT c.id,c.name,y.id year_id,y.label academic_year
+               FROM classes c JOIN years y ON y.id=c.year_id WHERE c.school_id=?
+               ORDER BY y.label DESC,c.name""",(school_id(),))
+    yr=request.args.get('year_id','')
+    shown=[r for r in options if not yr or str(r['year_id'])==yr]
+    selected=next((r for r in shown if str(r['id'])==request.args.get('class_id','')),shown[0] if shown else None)
+    report=compile_class_report(selected['id']) if selected else None
+    years=allrows("SELECT id,label FROM years WHERE school_id=? ORDER BY label DESC",(school_id(),))
+    return render_template('school_bulletins.html',report=report,options=shown,years=years,
+                           selected=selected,chosen_year=yr)
+
+@app.post('/grades/bulletins/publish')
+@roles('admin','administratif')
+def school_bulletin_publish():
+    class_id=request.form.get('class_id','')
+    clazz=one('SELECT id FROM classes WHERE id=? AND school_id=?',(class_id,school_id()))
+    if not clazz:abort(403)
+    period=one('SELECT id FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(class_id,school_id()))
+    if not period:abort(400,'Période à créer avant publication')
+    execute('UPDATE periods SET locked=1,published=1 WHERE id=? AND school_id=?',(period['id'],school_id()))
+    student_ids=[r['student_id'] for r in allrows('SELECT DISTINCT student_id FROM enrollments WHERE school_id=? AND class_id=?',(school_id(),class_id))]
+    notify(student_ids,'Votre bulletin est disponible dans Notes et résultats.','/grades')
+    audit('report.published',str(class_id))
+    flash('Bulletins publiés dans les espaces étudiants. Les notes sont verrouillées.','success')
+    return redirect(url_for('school_bulletins',class_id=class_id))
+
+@app.get('/grades/bulletins/print')
+@roles('admin','administratif')
+def bulletin_print():
+    clazz=request.args.get('class_id','')
+    if not one('SELECT id FROM classes WHERE id=? AND school_id=?',(clazz,school_id())):abort(404)
+    requested=request.args.getlist('student_ids')
+    if any(not x.isdigit() for x in requested):abort(400)
+    chosen=set(map(int,requested)) if requested else None
+    report=compile_class_report(clazz,chosen)
+    school=one('SELECT name,logo_mime,id FROM schools WHERE id=?',(school_id(),))
+    return render_template('print_bulletins.html',report=report,school=school,printed_on=datetime.date.today().strftime('%d/%m/%Y'))
+
+@app.get('/grades/my-bulletin/<int:cid>')
+@login_required
+def student_bulletin(cid):
+    u=current_user()
+    student_id=u['id']
+    if u['role']=='parent':
+        candidate=request.args.get('student_id','')
+        if not candidate.isdigit() or not one("""SELECT p.id FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id
+            JOIN classes cl ON cl.id=e.class_id WHERE p.parent_id=? AND p.student_id=? AND p.school_id=? AND p.active=1 AND e.class_id=? AND cl.parents_enabled=1""",(u['id'],int(candidate),school_id(),cid)):abort(403)
+        student_id=int(candidate)
+    elif u['role']!='etudiant':abort(403)
+    if not one('SELECT id FROM enrollments WHERE school_id=? AND student_id=? AND class_id=?',(school_id(),student_id,cid)):abort(403)
+    report=compile_class_report(cid,{student_id})
+    if not report['published']:abort(403,'Bulletin non encore publié par la scolarité')
+    school=one('SELECT name,logo_mime,id FROM schools WHERE id=?',(school_id(),))
+    return render_template('print_bulletins.html',report=report,school=school,printed_on=datetime.date.today().strftime('%d/%m/%Y'))
+
 @app.route('/grades',methods=['GET','POST'])
 @login_required
 def grades():
