@@ -911,7 +911,30 @@ def courses():
         if teacher:execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,datetime.date.today().isoformat()))
         audit('course.created',name);return redirect(url_for('courses'))
     rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
-    return render_template('list.html',title='Cours',columns=['Cours','Classe','Enseignant','Volume prévu','Coeff. matière','Modifier'],rows=[(x['name'],x['class_name'],x['teacher_name'] or 'Non affecté',f"{x['planned_minutes']/60:g} h",x["coefficient"],{'link':url_for('course_edit',cid=x['id']),'label':'Modifier'}) for x in rows],form='courses',classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant'"))
+    return render_template('courses_manage.html',courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant'"))
+
+@app.post('/courses/bulk')
+@roles('admin','administratif')
+def courses_bulk():
+    ids=request.form.getlist('course_ids')
+    action=request.form.get('action','')
+    if action!='delete' or not ids or len(ids)>100 or any(not x.isdigit() for x in ids):abort(400)
+    ids=list(dict.fromkeys(map(int,ids)))
+    qs=','.join('?' for _ in ids)
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        rows=c.execute(f'SELECT id FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids)).fetchall()
+        if len(rows)!=len(ids):abort(403)
+        for cid in ids:
+            for table in ('lessons','assessments'):
+                if c.execute(f'SELECT id FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone():
+                    flash('Suppression refusée : un cours possède des séances ou évaluations. Conservez les historiques.','error')
+                    return redirect(url_for('courses'))
+        c.execute(f'DELETE FROM teacher_history WHERE course_id IN ({qs})',ids)
+        c.execute(f'DELETE FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
+    audit('courses.bulk.deleted',','.join(map(str,ids)))
+    flash(f'{len(ids)} cours supprimé(s).','success')
+    return redirect(url_for('courses'))
 
 @app.route('/courses/<int:cid>/edit',methods=['GET','POST'])
 @roles('admin','administratif')
