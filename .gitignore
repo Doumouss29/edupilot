@@ -1,5 +1,7 @@
 *.db
-*.sqlite3
-.env
+*.sqlite*
 __pycache__/
+.env
+.venv/
 *.pyc
+uploads/
