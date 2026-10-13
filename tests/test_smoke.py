@@ -308,6 +308,70 @@ class EduPilotSmoke(unittest.TestCase):
         early=self.client.post(f"/lessons/{future}/declare",data={"csrf":self.token(),"status":"realisee","actual_minutes":"90"})
         self.assertEqual(early.status_code,400)
 
+
+    def test_teacher_grade_immediate_visibility_and_bulletin_publication(self):
+        self.login("enseignant1@demo.edupilot.test")
+        teacher=project.one("SELECT id,school_id FROM users WHERE email='enseignant1@demo.edupilot.test'")
+        course=project.one("SELECT id,class_id FROM courses WHERE school_id=? AND teacher_id=? LIMIT 1",(teacher["school_id"],teacher["id"]))
+        self.assertIsNotNone(course)
+        assessment=project.one("SELECT id FROM assessments WHERE course_id=? LIMIT 1",(course["id"],))
+        self.assertIsNotNone(assessment)
+        student=project.one("SELECT student_id FROM enrollments WHERE school_id=? AND class_id=? LIMIT 1",(teacher["school_id"],course["class_id"]))
+        self.assertIsNotNone(student)
+        response=self.client.post(f"/grades/entry/{assessment['id']}",data={"csrf":self.token(),
+            f"note_{student['student_id']}":"17.5",f"comment_{student['student_id']}":"Très bon niveau"})
+        self.assertEqual(response.status_code,302)
+        st=project.one("SELECT email FROM users WHERE id=?",(student["student_id"],))
+        self.client.post("/logout",data={"csrf":self.token()})
+        # Student seeded account belongs to the same class; use known demo student.
+        self.login("eleve1_1@demo.edupilot.test")
+        page=self.client.get("/grades")
+        self.assertEqual(page.status_code,200)
+        self.assertIn("Mes notes".encode(),page.data)
+        eva=self.client.get("/assessments")
+        self.assertEqual(eva.status_code,200)
+        self.assertIn("Note".encode(),eva.data)
+        cid=course["class_id"]
+        draft=self.client.get(f"/grades/my-bulletin/{cid}")
+        self.assertEqual(draft.status_code,403)
+        self.client.post("/logout",data={"csrf":self.token()})
+        self.login("admin1@demo.edupilot.test")
+        overview=self.client.get(f"/grades/bulletins?class_id={cid}")
+        self.assertEqual(overview.status_code,200)
+        printable=self.client.get(f"/grades/bulletins/print?class_id={cid}")
+        self.assertEqual(printable.status_code,200)
+        published=self.client.post("/grades/bulletins/publish",data={"csrf":self.token(),"class_id":cid})
+        self.assertEqual(published.status_code,302)
+        self.client.post("/logout",data={"csrf":self.token()})
+        self.login("eleve1_1@demo.edupilot.test")
+        report=self.client.get(f"/grades/my-bulletin/{cid}")
+        self.assertEqual(report.status_code,200)
+        self.assertIn("Bulletin".encode(),report.data)
+
+    def test_school_bulk_course_coefficient_and_deletion(self):
+        self.login("admin1@demo.edupilot.test")
+        school=project.one("SELECT id FROM schools WHERE slug='groupe_scolaire_excellence'")
+        clazz=project.one("SELECT id FROM classes WHERE school_id=? LIMIT 1",(school["id"],))
+        ids=[project.execute("INSERT INTO courses(school_id,class_id,name,code,planned_minutes,coefficient) VALUES (?,?,?,?,?,?)",
+                 (school["id"],clazz["id"],"Matière groupée "+str(i),"MTEST",300,1)) for i in range(2)]
+        response=self.client.post("/courses/bulk",data={"csrf":self.token(),"action":"coefficient","coefficient":"4","course_ids":[str(v) for v in ids]})
+        self.assertEqual(response.status_code,302)
+        for cid in ids:self.assertEqual(project.one("SELECT coefficient FROM courses WHERE id=?",(cid,))["coefficient"],4)
+        response=self.client.post("/courses/bulk",data={"csrf":self.token(),"action":"delete","course_ids":[str(v) for v in ids]})
+        self.assertEqual(response.status_code,302)
+        for cid in ids:self.assertIsNone(project.one("SELECT id FROM courses WHERE id=?",(cid,)))
+
+    def test_teacher_session_can_be_confirmed_20_minutes_before_end(self):
+        self.login("enseignant1@demo.edupilot.test")
+        teacher=project.one("SELECT id,school_id FROM users WHERE email='enseignant1@demo.edupilot.test'")
+        course=project.one("SELECT id FROM courses WHERE school_id=? AND teacher_id=? LIMIT 1",(teacher["school_id"],teacher["id"]))
+        end=project.datetime.datetime.now()+project.datetime.timedelta(minutes=20)
+        start=end-project.datetime.timedelta(minutes=90)
+        lesson=project.execute("INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)",
+            (teacher["school_id"],course["id"],teacher["id"],start.strftime('%Y-%m-%dT%H:%M'),end.strftime('%Y-%m-%dT%H:%M'),"Test A12"))
+        result=self.client.post(f"/lessons/{lesson}/declare",data={"csrf":self.token(),"status":"realisee","actual_minutes":"70"})
+        self.assertEqual(result.status_code,302)
+
     def test_school_lifecycle_logo_and_deletion(self):
         self.login("superadmin@demo.edupilot.test")
         token = self.token()
