@@ -1007,7 +1007,7 @@ def planning():
     elif u['role']=='etudiant':query+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     events=allrows(query,args)
-    return render_template('planning.html',events=events,courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
+    return render_template('planning.html',now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
 
 @app.post('/lessons/<int:lid>/declare')
 @roles('enseignant','admin','administratif')
