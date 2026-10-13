@@ -1325,7 +1325,7 @@ def grades():
         period=one('SELECT * FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(a['class_id'],school_id()))
         if period and period['locked']:
             unlocked=one('SELECT * FROM unlocks WHERE period_id=? AND teacher_id=? AND expires_at>? ORDER BY id DESC LIMIT 1',(period['id'],u['id'],datetime.datetime.now(datetime.timezone.utc).isoformat()))
-            if not unlocked and u['role']=='enseignant':abort(403,'Période verrouillée')
+            if not unlocked:abort(403,'Période verrouillée : réouverture administrative nécessaire')
         existing=one('SELECT * FROM grades WHERE assessment_id=? AND student_id=?',(aid,student))
         if existing:
             execute('UPDATE grades SET value=?,comment=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(value,request.form.get('comment','')[:2000],existing['id']))
@@ -1378,8 +1378,8 @@ def grade_entry(aid):
     u=current_user()
     if u['role']=='enseignant' and a['teacher_id']!=u['id']:abort(403)
     period=one('SELECT * FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(a['class_id'],school_id()))
-    if period and period['locked'] and u['role']=='enseignant':
-        if not one('SELECT id FROM unlocks WHERE period_id=? AND teacher_id=? AND expires_at>?',(period['id'],u['id'],datetime.datetime.now(datetime.timezone.utc).isoformat())):abort(403,'Période verrouillée')
+    if period and period['locked']:
+        if not one('SELECT id FROM unlocks WHERE period_id=? AND teacher_id=? AND expires_at>?',(period['id'],u['id'],datetime.datetime.now(datetime.timezone.utc).isoformat())):abort(403,'Période verrouillée : demander une réouverture')
     students=allrows("""SELECT DISTINCT u.id,u.name,g.value,g.comment FROM enrollments e JOIN users u ON u.id=e.student_id
                         LEFT JOIN grades g ON g.student_id=u.id AND g.assessment_id=?
                         WHERE e.school_id=? AND e.class_id=? ORDER BY u.name""",(aid,school_id(),a['class_id']))
