@@ -500,6 +500,7 @@ def school_update(sid):
             c.execute('DELETE FROM lessons WHERE school_id=?',(sid,))
             c.execute('DELETE FROM teacher_history WHERE course_id IN (SELECT id FROM courses WHERE school_id=?)',(sid,))
             c.execute('DELETE FROM courses WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM bulletin_publications WHERE school_id=?',(sid,))
             c.execute('DELETE FROM enrollments WHERE school_id=?',(sid,))
             c.execute('DELETE FROM parent_links WHERE school_id=?',(sid,))
             c.execute('DELETE FROM classes WHERE school_id=?',(sid,))
