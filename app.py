@@ -672,15 +672,55 @@ def planning():
     if u['role']=='superadmin':abort(403)
     if request.method=='POST':
         if u['role'] not in ('admin','administratif'):abort(403)
-        course_id=request.form.get('course_id');class_id=request.form.get('class_id')
-        if not class_id or not has_school('classes',class_id):abort(403)
+        course_id=request.form.get('course_id')
+        class_id=request.form.get('class_id')
         course=one('SELECT * FROM courses WHERE id=? AND school_id=? AND class_id=?',(course_id,school_id(),class_id))
-        if not course or not course['teacher_id']:abort(400,'Le cours doit avoir un enseignant.')
-        start=request.form.get('starts_at');end=request.form.get('ends_at')
-        if not start or not end or end<=start:abort(400)
-        lesson=execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start,end,request.form.get('room','')))
-        notify(classmates(course_id)+[course['teacher_id']],'Nouvelle séance programmée : '+course['name'],'/planning')
-        audit('lesson.created',str(lesson));return redirect(url_for('planning'))
+        if not course:
+            flash('Sélectionnez une classe puis un cours appartenant à cette classe.','error')
+            return redirect(url_for('planning'))
+        if not course['teacher_id']:
+            flash('Affectez un enseignant à ce cours avant la planification.','error')
+            return redirect(url_for('planning'))
+        try:
+            day=datetime.date.fromisoformat(request.form.get('lesson_date',''))
+            start_time=datetime.time.fromisoformat(request.form.get('start_time',''))
+            hours=float(request.form.get('duration_hours',''))
+            if hours<0.5 or hours>12 or not (hours*2).is_integer():raise ValueError('durée')
+            start_dt=datetime.datetime.combine(day,start_time)
+            end_dt=start_dt+datetime.timedelta(minutes=round(hours*60))
+            if end_dt.date()!=day:raise ValueError('minuit')
+            mode=request.form.get('mode','unique')
+            if mode not in ('unique','hebdomadaire'):raise ValueError('mode')
+            if mode=='hebdomadaire':
+                last=datetime.date.fromisoformat(request.form.get('repeat_until',''))
+                if last<day or (last-day).days>365:raise ValueError('récurrence')
+                dates=[start_dt+datetime.timedelta(days=7*i) for i in range((last-day).days//7+1)]
+            else: dates=[start_dt]
+            if len(dates)>53:raise ValueError('limite')
+        except (ValueError,TypeError,OverflowError):
+            flash('Date, heure, durée ou récurrence invalide. Une séance doit finir le même jour et durer de 0,5 à 12 h.','error')
+            return redirect(url_for('planning'))
+        room=request.form.get('room','').strip()[:80]
+        created=[]
+        with db() as c:
+            for dt in dates:
+                end_at=dt+datetime.timedelta(minutes=round(hours*60))
+                start_txt=dt.strftime('%Y-%m-%dT%H:%M')
+                end_txt=end_at.strftime('%Y-%m-%dT%H:%M')
+                clash=c.execute("""SELECT l.id,c.class_id FROM lessons l JOIN courses c ON c.id=l.course_id
+                           WHERE l.school_id=? AND l.status NOT IN ('annulee','reportee')
+                           AND l.starts_at < ? AND l.ends_at > ?
+                           AND (c.class_id=? OR l.teacher_id=? OR (?<>'' AND l.room=?))
+                           LIMIT 1""",(school_id(),end_txt,start_txt,class_id,course['teacher_id'],room,room)).fetchone()
+                if clash:
+                    flash(f'Conflit de planning le {dt.strftime("%d/%m/%Y")} : classe, enseignant ou salle déjà occupé(e). Aucune séance ajoutée.','error')
+                    return redirect(url_for('planning'))
+                cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room))
+                created.append(cur.lastrowid)
+        notify(classmates(course_id)+[course['teacher_id']],f'{len(created)} séance(s) programmée(s) : '+course['name'],'/planning')
+        audit('lesson.created',','.join(str(x) for x in created))
+        flash(f'{len(created)} séance(s) ajoutée(s) au planning.','success')
+        return redirect(url_for('planning'))
     query='''SELECT l.*,c.name course_name,cl.name class_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id WHERE l.school_id=?'''
     args=[school_id()]
     if u['role']=='enseignant':query+=' AND l.teacher_id=?';args.append(u['id'])
