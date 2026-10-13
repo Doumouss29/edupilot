@@ -1,3 +1,14 @@
+## Mise à jour V0.4 — étudiants, enseignants et planification (13 octobre 2026)
+
+- **Utilisateurs → Étudiant** : sélection d'une classe obligatoire lors de la création ; inscription liée à l'année scolaire associée à la classe. Un établissement ne peut inscrire un étudiant dans une classe d'un autre établissement.
+- **Utilisateurs → Enseignant** : sélection multiple des cours existants, y compris dans des classes différentes. Historique de réaffectation conservé. La création ultérieure de cours permet toujours de sélectionner le même enseignant pour autant de cours que nécessaire.
+- **Import d'étudiants CSV / XLSX** : colonnes `prenom;nom;email;classe`, fichier CSV encodé UTF-8, séparateur virgule, point-virgule ou tabulation, ou fichier `.xlsx`. La colonne `classe` contient soit un nom de classe unique dans l'établissement, soit son ID. Le fichier modèle est téléchargeable sur la page Utilisateurs. Maximum **2 Mo / 2 000 étudiants** ; validation complète avant l'insertion, rejet global si doublon, classe inconnue, erreur de format ou e-mail utilisé.
+- Les comptes importés n'ont **pas encore d'invitation envoyée** ; leur activation collective par e-mail fera l'objet d'une évolution. Ne pas importer de données réelles sur Render Free.
+- **Calendrier / Planification** : choix de la classe, puis cours filtrés de cette classe. Le serveur vérifie l'appartenance du cours à la classe et à l'établissement avant de créer la séance.
+- **Navigation latérale** : Calendrier / planification → Classes → Cours → Utilisateurs → Inscriptions / parcours, etc.
+- Nouvelle dépendance `openpyxl` ; Render doit exécuter un nouveau build `pip install -r requirements.txt`.
+- Tests automatisés ajoutés pour les parcours étudiants, CSV, Excel, enseignants mult-cours et validation de classe au planning.
+
 ## Mise à jour V0.3 — interface et création des accès (13 octobre 2026)
 
 - Palette **orange, blanc**, touches de bleu marine et de vert, sans habillage national marqué.
