@@ -1,3 +1,15 @@
+## V0.7 — Super Admin : gestion des comptes des établissements
+
+Dans **Gérer les établissements → Gérer les accès**, le Super Admin peut désormais :
+
+- Cliquer sur **Modifier** pour un compte Admin ou Administratif : prénom, nom, e-mail, téléphone, profil. Il peut facultativement définir un nouveau mot de passe temporaire, ce qui oblige l'utilisateur à le changer à sa prochaine connexion.
+- Sélectionner **un ou plusieurs comptes** grâce aux cases à cocher et appliquer : **Suspendre**, **Réactiver**, **Passer au profil Admin**, **Passer au profil Administratif**, **Supprimer définitivement**.
+- La suppression est limitée aux comptes sans dépendances académiques (séances, notes, inscriptions, affectations...). Pour préserver l'historique, utiliser **Suspendre**.
+- Toutes ces opérations sont réservées au Super Admin, ciblent exclusivement l'établissement sélectionné et sont enregistrées dans le journal d'audit.
+- Les tests de régression ont été complétés pour les actions groupées, les modifications individuelles et la protection entre établissements.
+
+Attention : Render Free utilise toujours SQLite sans garantie de persistance. Ne pas utiliser de comptes ou de données réelles pour cette démo.
+
 ## V0.6 — Fiches de classes et tableau de bord étudiant
 
 - La liste des classes propose **Détails** en plus de **Modifier**.
