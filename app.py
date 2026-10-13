@@ -1116,6 +1116,76 @@ def grades():
     if u['role']=='enseignant':evals=[a for a in evals if a['teacher_id']==u['id']]
     return render_template('grades.html',grades=rows,evaluations=evals,students=scoped("SELECT * FROM users WHERE school_id=? AND role='etudiant'") if u['role'] in ('enseignant','admin','administratif') else [])
 
+@app.route('/grades/entry/<int:aid>',methods=['GET','POST'])
+@roles('enseignant','admin','administratif')
+def grade_entry(aid):
+    a=one("""SELECT a.id,a.title,a.max_score,a.coefficient,c.id course_id,c.class_id,c.teacher_id,c.name course_name,cl.name class_name
+             FROM assessments a JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id
+             WHERE a.id=? AND a.school_id=?""",(aid,school_id()))
+    if not a:abort(404)
+    u=current_user()
+    if u['role']=='enseignant' and a['teacher_id']!=u['id']:abort(403)
+    period=one('SELECT * FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(a['class_id'],school_id()))
+    if period and period['locked'] and u['role']=='enseignant':
+        if not one('SELECT id FROM unlocks WHERE period_id=? AND teacher_id=? AND expires_at>?',(period['id'],u['id'],datetime.datetime.now(datetime.timezone.utc).isoformat())):abort(403,'Période verrouillée')
+    students=allrows("""SELECT DISTINCT u.id,u.name,g.value,g.comment FROM enrollments e JOIN users u ON u.id=e.student_id
+                        LEFT JOIN grades g ON g.student_id=u.id AND g.assessment_id=?
+                        WHERE e.school_id=? AND e.class_id=? ORDER BY u.name""",(aid,school_id(),a['class_id']))
+    if request.method=='POST':
+        changes=[]
+        for student in students:
+            raw=request.form.get(f"note_{student['id']}",'').strip()
+            comment=request.form.get(f"comment_{student['id']}",'').strip()
+            if len(comment)>2000:abort(400,'Commentaire trop long')
+            if not raw:
+                if student['value'] is not None: # Empty input does not erase an existing grade
+                    continue
+                continue
+            try:
+                value=float(raw)
+                if not (0<=value<=a['max_score']):raise ValueError()
+            except ValueError:abort(400,'Note invalide')
+            changes.append((student['id'],value,comment,student['value']))
+        with db() as c:
+            for student_id,value,comment,old in changes:
+                row=c.execute('SELECT id FROM grades WHERE assessment_id=? AND student_id=?',(aid,student_id)).fetchone()
+                if row:
+                    c.execute('UPDATE grades SET value=?,comment=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(value,comment,row['id']))
+                    gid=row['id']
+                else:
+                    gid=c.execute('INSERT INTO grades(assessment_id,student_id,value,comment) VALUES (?,?,?,?)',(aid,student_id,value,comment)).lastrowid
+                if old!=value:
+                    c.execute('INSERT INTO grade_history(grade_id,old_value,new_value,actor_id) VALUES (?,?,?,?)',(gid,old,value,u['id']))
+        audit('grades.batch.updated',f'{aid}:{len(changes)}')
+        flash(f'{len(changes)} note(s) enregistrée(s).','success')
+        return redirect(url_for('grade_entry',aid=aid))
+    return render_template('grade_entry.html',assessment=a,students=students)
+
+@app.get('/grades/global')
+@roles('enseignant','admin','administratif')
+def grade_global():
+    u=current_user()
+    choices=scoped("""SELECT c.id,c.name,cl.name class_name,c.coefficient FROM courses c JOIN classes cl ON cl.id=c.class_id
+                      WHERE c.school_id=? ORDER BY cl.name,c.name""")
+    if u['role']=='enseignant':choices=[c for c in choices if one('SELECT id FROM courses WHERE id=? AND teacher_id=?',(c['id'],u['id']))]
+    requested=request.args.get('course_id','')
+    selected=next((c for c in choices if str(c['id'])==requested),choices[0] if choices else None)
+    if not selected:return render_template('grade_global.html',choices=choices,course=None,assessments=[],rows=[])
+    course=one('SELECT * FROM courses WHERE id=? AND school_id=?',(selected['id'],school_id()))
+    assessments=allrows('SELECT id,title,coefficient,max_score FROM assessments WHERE school_id=? AND course_id=? ORDER BY id',(school_id(),course['id']))
+    students=allrows("""SELECT DISTINCT u.id,u.name FROM enrollments e JOIN users u ON u.id=e.student_id
+                        WHERE e.school_id=? AND e.class_id=? ORDER BY u.name""",(school_id(),course['class_id']))
+    results=allrows("""SELECT g.student_id,g.assessment_id,g.value FROM grades g JOIN assessments a ON a.id=g.assessment_id
+                       WHERE a.school_id=? AND a.course_id=?""",(school_id(),course['id']))
+    marks={(g['student_id'],g['assessment_id']):g['value'] for g in results}
+    rows=[]
+    for student in students:
+        cells=[marks.get((student['id'],a['id'])) for a in assessments]
+        weighted=sum((v/a['max_score']*20)*a['coefficient'] for v,a in zip(cells,assessments) if v is not None and a['max_score'])
+        weight=sum(a['coefficient'] for v,a in zip(cells,assessments) if v is not None and a['max_score'])
+        rows.append({'student':student,'notes':cells,'average':round(weighted/weight,2) if weight else None})
+    return render_template('grade_global.html',choices=choices,course=course,assessments=assessments,rows=rows)
+
 @app.route('/periods',methods=['GET','POST'])
 @roles('admin','administratif')
 def periods():
