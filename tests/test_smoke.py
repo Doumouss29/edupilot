@@ -148,6 +148,51 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertTrue(project.check_password_hash(project.one("SELECT password_hash FROM users WHERE id=?",(created["id"],))["password_hash"],"MyNewPass2026Safe!"))
 
 
+    def test_brevo_invitation_activation_and_password_reset(self):
+        import re
+        from unittest.mock import patch,Mock
+        self.login("admin1@tests.edupilot.invalid")
+        classroom=project.one("SELECT id FROM classes WHERE school_id=1 LIMIT 1")
+        captures=[]
+        def brevo_mock(url,**kwargs):
+            captures.append(kwargs["json"])
+            response=Mock()
+            response.raise_for_status.return_value=None
+            return response
+        with patch.dict(project.os.environ,{"BREVO_API_KEY":"ci-test-key","BREVO_SENDER_EMAIL":"noreply@edupilot.ci"}),patch.object(project.requests,"post",side_effect=brevo_mock):
+            resp=self.client.post("/people",data={"csrf":self.token(),"name":"Élève Invité","email":"invite.student@example.test","role":"etudiant","class_id":classroom["id"]})
+            self.assertEqual(resp.status_code,302)
+            self.assertEqual(len(captures),1)
+            self.assertEqual(captures[0]["to"][0]["email"],"invite.student@example.test")
+            msg=captures[0]["textContent"]
+            found=re.search(r"https://[^\\s]+/activate/([A-Za-z0-9_-]+)",msg)
+            self.assertIsNotNone(found)
+            self.assertNotIn("Temporary2026Secret!",msg)
+            token=found.group(1)
+            self.assertEqual(self.client.get("/activate/"+token).status_code,200)
+            activated=self.client.post("/activate/"+token,data={"csrf":self.token(),"password":"SecurePassword2026!","confirm_password":"SecurePassword2026!"})
+            self.assertEqual(activated.status_code,302)
+            self.assertEqual(self.client.get("/activate/"+token).status_code,404)
+            student=project.one("SELECT must_change_password,password_hash FROM users WHERE email='invite.student@example.test'")
+            self.assertEqual(student["must_change_password"],0)
+            self.assertTrue(project.check_password_hash(student["password_hash"],"SecurePassword2026!"))
+            self.client.post("/logout",data={"csrf":self.token()})
+            csrf=self.csrf()
+            reset=self.client.post("/forgot-password",data={"csrf":csrf,"email":"invite.student@example.test"})
+            self.assertEqual(reset.status_code,302)
+            self.assertEqual(len(captures),2)
+            reset_token=re.search(r"/activate/([A-Za-z0-9_-]+)",captures[1]["textContent"]).group(1)
+            self.assertNotEqual(reset_token,token)
+            again=self.client.post("/forgot-password",data={"csrf":csrf,"email":"invite.student@example.test"})
+            self.assertEqual(again.status_code,302)
+            self.assertEqual(len(captures),2)  # Rate-limited, but same public response.
+            unknown=self.client.post("/forgot-password",data={"csrf":csrf,"email":"unknown@example.test"})
+            self.assertEqual(unknown.status_code,302)
+            self.assertEqual(len(captures),2)
+            changed=self.client.post("/activate/"+reset_token,data={"csrf":csrf,"password":"AnotherPassword2026!","confirm_password":"AnotherPassword2026!"})
+            self.assertEqual(changed.status_code,302)
+            self.assertEqual(self.client.get("/activate/"+reset_token).status_code,404)
+
     def test_student_creation_assigns_class(self):
         self.login("admin1@tests.edupilot.invalid")
         cl=project.one("SELECT id,year_id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
