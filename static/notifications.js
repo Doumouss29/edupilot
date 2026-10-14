@@ -90,6 +90,23 @@
       enable.hidden=true;pushStatus.textContent='Notifications du téléphone activées.';
     }catch(e){pushStatus.textContent='Impossible d’activer les notifications sur cet appareil.';}
   });
+  const logoutForm=document.getElementById('edupilot-logout');
+  if(logoutForm){
+    logoutForm.addEventListener('submit',async event=>{
+      event.preventDefault();
+      try{
+        if('serviceWorker' in navigator){
+          const registration=await navigator.serviceWorker.getRegistration('/');
+          const subscription=registration ? await registration.pushManager.getSubscription() : null;
+          if(subscription){
+            logoutForm.querySelector('[name="push_endpoint"]').value=subscription.endpoint;
+            await subscription.unsubscribe();
+          }
+        }
+      }catch(e){/* Logout must remain available without Web Push. */}
+      logoutForm.submit();
+    });
+  }
   load().catch(()=>{});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)load().catch(()=>{});});
   setInterval(()=>{if(!document.hidden)load().catch(()=>{});},60000);
