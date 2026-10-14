@@ -758,6 +758,22 @@ def school_matricules(sid):
     rules=allrows('SELECT * FROM matricule_rules WHERE school_id=? ORDER BY role',(sid,))
     return render_template('school_matricules.html',school=school,rules=rules)
 
+@app.post('/accounts/<int:uid>/resend-invite')
+@roles('superadmin','admin','administratif')
+def resend_account_invite(uid):
+    actor=current_user()
+    person=one('SELECT id,school_id,role FROM users WHERE id=? AND active=1',(uid,))
+    if not person:abort(404)
+    if actor['role']=='superadmin':
+        if person['role'] not in ('admin','administratif'):abort(403)
+        target=url_for('school_accounts',sid=person['school_id'])
+    else:
+        if person['school_id']!=actor['school_id'] or person['role']=='superadmin':abort(403)
+        target=url_for('people')
+    sent=create_invite(uid)
+    flash('Lien envoyé par e-mail.' if sent else 'Brevo indisponible : invitation non envoyée.', 'success' if sent else 'error')
+    return redirect(target)
+
 @app.post('/people/<int:uid>/matricule')
 @roles('admin')
 def edit_person_matricule(uid):
@@ -835,10 +851,19 @@ def people():
 def people_bulk():
     values=request.form.getlist('user_ids')
     action=request.form.get('action','')
-    if action not in ('suspend','activate','delete') or not values or len(values)>200 or any(not x.isdigit() for x in values):
+    if action not in ('suspend','activate','delete','invite') or not values or len(values)>200 or any(not x.isdigit() for x in values):
         flash('Sélectionnez des utilisateurs et une action valide.','error')
         return redirect(url_for('people'))
     selected=list(dict.fromkeys(int(x) for x in values))
+    if action=='invite' and len(selected)>30:
+        flash('Limitez les envois d’invitation à 30 utilisateurs par opération.','error')
+        return redirect(url_for('people'))
+    if action=='invite':
+        matches=allrows('SELECT id,role FROM users WHERE school_id=? AND active=1 AND id IN ('+','.join('?' for _ in selected)+')',(school_id(),*selected))
+        if len(matches)!=len(selected) or current_user()['id'] in selected or any(x['role']=='superadmin' for x in matches):abort(403)
+        successes=sum(1 for person in matches if create_invite(person['id']))
+        flash(f'{successes} invitation(s) envoyée(s) sur {len(matches)}.','success' if successes==len(matches) else 'error')
+        return redirect(url_for('people'))
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
         users=c.execute('SELECT id,role,name FROM users WHERE school_id=? AND id IN ('+','.join('?' for _ in selected)+')',(school_id(),*selected)).fetchall()
