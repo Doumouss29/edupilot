@@ -148,3 +148,29 @@ a:not(.nav):hover{color:#dc722b}
 .school-logo-thumb img,.school-logo img{display:block;width:100%!important;height:100%!important;max-width:100%;max-height:100%;object-fit:contain;object-position:center}
 .school-logo-thumb>span{font-size:20px}
 .school-card-header{align-items:center}
+
+
+/* Centre de notifications réactif (desktop et mobile) */
+.notification-control{position:relative;flex-shrink:0;margin-left:16px}
+.notification-bell{border:1px solid #e5eaf0;background:#fff;color:#263e54;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;position:relative;box-shadow:0 3px 14px #182e420c}
+.notification-bell:hover,.notification-bell:focus-visible{border-color:#e88536;background:#fff9f1;outline-offset:2px}
+.notification-count{position:absolute;top:-7px;right:-8px;min-width:21px;height:21px;padding:0 5px;border-radius:12px;background:#db4d37;color:white;font-size:11px;font-weight:800;line-height:21px}
+.notification-count[hidden],.notification-panel[hidden],#notification-push-enable[hidden]{display:none!important}
+.notification-panel{position:absolute;right:0;top:calc(100% + 12px);z-index:150;background:#fff;border:1px solid #e0e7ef;border-radius:16px;width:min(380px,calc(100vw - 24px));max-height:min(75vh,610px);overflow:hidden;box-shadow:0 18px 60px #0a24402f;display:flex;flex-direction:column;color:#253a49}
+.notification-panel-header{padding:15px 17px;border-bottom:1px solid #e9edf2;display:flex;align-items:center;justify-content:space-between}
+.notification-panel-header strong{font-size:16px}
+.notification-close{background:none;border:0;color:#65788b;font-size:26px;line-height:1}
+.notification-panel-actions{display:flex;gap:10px;justify-content:space-between;padding:9px 13px;border-bottom:1px solid #eff1f4}
+.notification-panel-actions button,.notification-push button{border:0;background:transparent;color:#bc6125;font-weight:700;font-size:12px;padding:7px;min-height:34px}
+.notification-items{overflow-y:auto;overscroll-behavior:contain;min-height:45px}
+.notification-item{display:flex;align-items:stretch;border-bottom:1px solid #eff1f4}
+.notification-item.is-unread{background:#fff8ee}
+.notification-item-link{min-width:0;flex:1;padding:12px 15px;display:grid;gap:6px;line-height:1.45;font-size:13px;color:#263e54}
+.notification-item-link small{color:#8794a0;font-size:11px}
+.notification-item-action{border:0;background:transparent;color:#8595a3;font-size:20px;padding:0 15px;align-self:stretch}
+.notification-item-action:hover{color:#b72d2d;background:#fff0ee}
+.notification-empty{padding:22px 15px;text-align:center;color:#82919b}
+.notification-push{padding:9px 14px;border-top:1px solid #edf0f4;background:#f8fafb}
+.notification-push p{font-size:11px;line-height:1.4;margin:4px 0}
+.notification-push button{border:1px solid #e9c59e;border-radius:8px;background:#fff;margin-bottom:5px}
+@media(max-width:720px){.topbar{padding:15px 16px;gap:8px}.notification-control{margin-left:auto}.notification-panel{position:fixed;top:70px;right:12px;left:12px;width:auto;max-height:calc(100dvh - 85px)}.notification-bell{width:43px;height:43px}.notification-panel-actions button{font-size:11px}}
