@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions(id INTEGER PRIMARY KEY, user_id IN
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, school_id INTEGER, user_id INTEGER, action TEXT NOT NULL, details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id), student_id INTEGER NOT NULL REFERENCES users(id), filename TEXT NOT NULL, filepath TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(assessment_id,student_id));
 CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS password_reset_limits(key_hash TEXT PRIMARY KEY, attempted_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS assessment_files(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE, filename TEXT NOT NULL, mime TEXT NOT NULL, content BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS bulletin_publications(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), class_id INTEGER NOT NULL REFERENCES classes(id), student_id INTEGER NOT NULL REFERENCES users(id), published_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(class_id,student_id));
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -254,7 +255,7 @@ def send_brevo_email(address,subject,message):
 
 def send_account_link(uid,purpose='activation'):
     """Émet un lien à usage unique, valable 48 h pour activation, 30 min pour réinitialisation."""
-    user=one('SELECT u.id,u.name,u.email,u.active,u.school_id,s.name school_name FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.id=?',(uid,))
+    user=one('SELECT u.id,u.name,u.email,u.active,u.role,u.school_id,s.name school_name FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.id=?',(uid,))
     if not user or not user['active']:return False
     token=secrets.token_urlsafe(32)
     token_hash=hashlib.sha256(token.encode()).hexdigest()
@@ -269,7 +270,7 @@ def send_account_link(uid,purpose='activation'):
         content=f"Bonjour {user['name']},\n\nPour définir un nouveau mot de passe EduPilot, ouvrez ce lien personnel :\n{url}\n\nCe lien expire dans 30 minutes et ne peut servir qu'une fois. Si vous n'avez rien demandé, ignorez ce message.\n\nEduPilot"
     else:
         subject='Bienvenue sur EduPilot — Activez votre compte'
-        content=f"Bonjour {user['name']},\n\nVotre compte EduPilot ({user['role'] if 'role' in user.keys() else 'utilisateur'}) pour {user['school_name'] or 'la plateforme'} a été créé.\n\nPour choisir votre mot de passe et activer votre accès :\n{url}\n\nCe lien personnel expire dans 48 heures. Ne le transférez à personne.\n\nEduPilot"
+        content=f"Bonjour {user['name']},\n\nVotre compte EduPilot ({user['role']}) pour {user['school_name'] or 'la plateforme'} a été créé.\n\nPour choisir votre mot de passe et activer votre accès :\n{url}\n\nCe lien personnel expire dans 48 heures. Ne le transférez à personne.\n\nEduPilot"
     sent=send_brevo_email(user['email'],subject,content)
     # Ne pas enregistrer les URL contenant un jeton dans les notifications internes.
     return sent
@@ -1035,7 +1036,21 @@ def forgot_password():
     if request.method=='POST':
         email=request.form.get('email','').strip().lower()
         if len(email)>254:abort(400)
-        user=one('SELECT id FROM users WHERE email=? AND active=1',(email,))
+        # Always answer identically, regardless of whether the address exists.
+        # Throttle per address and source IP; never store the address in the rate-limit table.
+        ip=(request.remote_addr or 'unknown')[:80]
+        stamp=int(time.time())
+        keys=[hashlib.sha256((key+':'+value).encode()).hexdigest()
+              for key,value in [('email',email),('ip',ip)]]
+        permitted=False
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            recent=[c.execute('SELECT attempted_at FROM password_reset_limits WHERE key_hash=?',(key,)).fetchone() for key in keys]
+            if all(not row or stamp-row['attempted_at']>=60 for row in recent):
+                permitted=True
+                for key in keys:
+                    c.execute('INSERT INTO password_reset_limits(key_hash,attempted_at) VALUES (?,?) ON CONFLICT(key_hash) DO UPDATE SET attempted_at=excluded.attempted_at',(key,stamp))
+        user=one('SELECT id FROM users WHERE email=? AND active=1',(email,)) if permitted else None
         if user:send_account_link(user['id'],'reset')
         flash('Si cette adresse correspond à un compte actif, un lien de réinitialisation vient d’être envoyé.','success')
         return redirect(url_for('forgot_password'))
