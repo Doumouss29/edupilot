@@ -1213,28 +1213,31 @@ def courses_bulk():
         if value:
             if not value.isdigit() or not one("SELECT id FROM users WHERE id=? AND school_id=? AND role='enseignant' AND active=1",(value,school_id())):abort(403)
             teacher_id=int(value)
-    with db() as c:
-        c.execute('BEGIN IMMEDIATE')
-        rows=c.execute(f'SELECT id,teacher_id FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids)).fetchall()
-        if len(rows)!=len(ids):abort(403)
-        if action=='delete':
-            for cid in ids:
-                for table in ('lessons','assessments'):
-                    if c.execute(f'SELECT id FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone():
-                        flash('Suppression refusée : un cours possède des séances ou évaluations. Conservez les historiques.','error')
-                        return redirect(url_for('courses'))
-            c.execute(f'DELETE FROM teacher_history WHERE course_id IN ({qs})',ids)
-            c.execute(f'DELETE FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
-        elif action=='coefficient':
-            c.execute(f'UPDATE courses SET coefficient=? WHERE school_id=? AND id IN ({qs})',(coefficient,school_id(),*ids))
-        else:
-            now=datetime.datetime.now(datetime.timezone.utc).isoformat()
-            for course in rows:
-                if course['teacher_id']==teacher_id:continue
-                c.execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,course['id']))
-                if teacher_id:c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(course['id'],teacher_id,now))
-                sync_course_future_teacher(c,course['id'],teacher_id)
-                c.execute('UPDATE courses SET teacher_id=? WHERE id=? AND school_id=?',(teacher_id,course['id'],school_id()))
+    try:
+            c.execute('BEGIN IMMEDIATE')
+            rows=c.execute(f'SELECT id,teacher_id FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids)).fetchall()
+            if len(rows)!=len(ids):abort(403)
+            if action=='delete':
+                for cid in ids:
+                    for table in ('lessons','assessments'):
+                        if c.execute(f'SELECT id FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone():
+                            flash('Suppression refusée : un cours possède des séances ou évaluations. Conservez les historiques.','error')
+                            return redirect(url_for('courses'))
+                c.execute(f'DELETE FROM teacher_history WHERE course_id IN ({qs})',ids)
+                c.execute(f'DELETE FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
+            elif action=='coefficient':
+                c.execute(f'UPDATE courses SET coefficient=? WHERE school_id=? AND id IN ({qs})',(coefficient,school_id(),*ids))
+            else:
+                now=datetime.datetime.now(datetime.timezone.utc).isoformat()
+                for course in rows:
+                    if course['teacher_id']==teacher_id:continue
+                    c.execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,course['id']))
+                    if teacher_id:c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(course['id'],teacher_id,now))
+                    sync_course_future_teacher(c,course['id'],teacher_id)
+                    c.execute('UPDATE courses SET teacher_id=? WHERE id=? AND school_id=?',(teacher_id,course['id'],school_id()))
+    except ValueError as exc:
+        flash(str(exc),'error')
+        return redirect(url_for('courses'))
     audit('courses.bulk.'+action,','.join(map(str,ids)))
     flash(f'{len(ids)} cours : modifications enregistrées.','success')
     return redirect(url_for('courses'))
@@ -1261,6 +1264,23 @@ def sync_course_future_teacher(conn,course_id,teacher_id):
     for lesson in lessons:
         conn.execute('UPDATE lessons SET teacher_id=? WHERE id=?',(teacher_id,lesson['id']))
     return len(lessons)
+
+# Reprise non destructive des séances à venir dont le cours avait déjà changé
+# d'enseignant avant l'installation de ce correctif.
+with db() as c:
+    c.execute('BEGIN IMMEDIATE')
+    stale=c.execute("""SELECT DISTINCT l.course_id,c.teacher_id FROM lessons l
+        JOIN courses c ON c.id=l.course_id
+        WHERE l.starts_at>=? AND l.status='programmee'
+        AND COALESCE(l.actual_minutes,0)=0 AND COALESCE(l.validated,0)=0
+        AND l.teacher_id IS NOT c.teacher_id
+        AND NOT EXISTS(SELECT 1 FROM attendance a WHERE a.lesson_id=l.id)""",
+        (datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),)).fetchall()
+    for item in stale:
+        try:
+            sync_course_future_teacher(c,item['course_id'],item['teacher_id'])
+        except ValueError:
+            app.logger.warning('Séances non synchronisées pour le cours %s : conflit de planning',item['course_id'])
 
 @app.route('/courses/<int:cid>/edit',methods=['GET','POST'])
 @roles('admin','administratif')
