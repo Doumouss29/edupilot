@@ -200,6 +200,27 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertEqual(response.status_code,302)
         self.assertIsNotNone(project.one("SELECT id FROM users WHERE email='fatou.bulk@example.test'"))
 
+    def test_notification_bell_api_and_clear(self):
+        self.login("admin1@tests.edupilot.invalid")
+        user=project.one("SELECT id FROM users WHERE school_id=1 AND role='admin' LIMIT 1")
+        foreign=project.one("SELECT id FROM users WHERE school_id=2 LIMIT 1")
+        aid=project.execute("INSERT INTO notifications(school_id,user_id,message,href) VALUES (1,?,'Alerte école','/planning')",(user["id"],))
+        other=project.execute("INSERT INTO notifications(school_id,user_id,message,href) VALUES (2,?,'Alerte étrangère','/planning')",(foreign["id"],))
+        result=self.client.get("/api/notifications")
+        self.assertEqual(result.status_code,200)
+        self.assertEqual(result.json["unread"],1)
+        self.assertEqual(len(result.json["notifications"]),1)
+        self.assertEqual(result.json["notifications"][0]["id"],aid)
+        self.assertIn(b'notification-bell',self.client.get("/").data)
+        self.assertNotIn(b'EduPilot D',self.client.get("/").data)
+        self.assertEqual(self.client.post("/api/notifications/read",json={"ids":[aid]},headers={"X-CSRF-Token":self.token()}).status_code,200)
+        self.assertEqual(self.client.get("/api/notifications").json["unread"],0)
+        self.assertEqual(self.client.post("/api/notifications/delete",json={"all":True},headers={"X-CSRF-Token":self.token()}).status_code,200)
+        self.assertIsNone(project.one("SELECT id FROM notifications WHERE id=?",(aid,)))
+        self.assertIsNotNone(project.one("SELECT id FROM notifications WHERE id=?",(other,)))
+        self.assertEqual(self.client.get("/sw.js").status_code,200)
+        self.assertEqual(self.client.get("/manifest.webmanifest").status_code,200)
+
     def test_event_notifications_roles_and_school_isolation(self):
         with self.client:
             self.login("admin1@tests.edupilot.invalid")
