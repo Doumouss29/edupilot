@@ -2085,13 +2085,20 @@ def assign_teacher(cid):
     if not one("SELECT id FROM users WHERE school_id=? AND id=? AND role='enseignant'",(school_id(),teacher)):abort(403)
     old=one('SELECT teacher_id FROM courses WHERE id=?',(cid,))
     now=datetime.datetime.now(datetime.timezone.utc).isoformat()
-    if old['teacher_id']:
-        execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,cid))
-    with db() as c:
-        c.execute('BEGIN IMMEDIATE')
-        sync_course_future_teacher(c,cid,int(teacher))
-        c.execute('UPDATE courses SET teacher_id=? WHERE id=?',(teacher,cid))
-        c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,now))
+    if old['teacher_id']==int(teacher):
+        flash('Cet enseignant est déjà affecté à ce cours.','success')
+        return redirect(url_for('courses'))
+    try:
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            sync_course_future_teacher(c,cid,int(teacher))
+            if old['teacher_id']:
+                c.execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,cid))
+            c.execute('UPDATE courses SET teacher_id=? WHERE id=?',(teacher,cid))
+            c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,now))
+    except ValueError as exc:
+        flash(str(exc),'error')
+        return redirect(url_for('courses'))
     audit('course.teacher.changed',str(cid))
     notify([int(teacher)],'Vous êtes affecté à un nouveau cours.','/planning')
     flash('Enseignant affecté. Les séances futures sont synchronisées et l’historique est conservé.','success')
