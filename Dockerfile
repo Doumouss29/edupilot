@@ -11,6 +11,7 @@ COPY app.py /app/
 COPY templates/ /app/templates/
 COPY static/ /app/static/
 COPY scripts/ /app/scripts/
+RUN python scripts/build_icons.py
 
 RUN groupadd --gid 10001 edupilot && useradd --uid 10001 --gid 10001 --shell /usr/sbin/nologin edupilot
 USER 10001:10001
