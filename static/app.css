@@ -174,3 +174,109 @@ a:not(.nav):hover{color:#dc722b}
 .notification-push p{font-size:11px;line-height:1.4;margin:4px 0}
 .notification-push button{border:1px solid #e9c59e;border-radius:8px;background:#fff;margin-bottom:5px}
 @media(max-width:720px){.topbar{padding:15px 16px;gap:8px}.notification-control{margin-left:auto}.notification-panel{position:fixed;top:70px;right:12px;left:12px;width:auto;max-height:calc(100dvh - 85px)}.notification-bell{width:43px;height:43px}.notification-panel-actions button{font-size:11px}}
+
+
+/* EduPilot — navigation mobile, iOS PWA et mises en page réactives */
+.mobile-sidebar-heading,.mobile-menu-button,.mobile-backdrop{display:none}
+.topbar-heading{min-width:0;flex:1}
+.topbar-heading h1{overflow-wrap:anywhere}
+html{min-width:0;-webkit-text-size-adjust:100%}
+body{min-width:0}
+input,select,textarea{max-width:100%}
+img,video,iframe,canvas{max-width:100%}
+.layout,.main,.content,.panel,.two-col,.panel-title,.inline-form,.modern-form,.page-actions{min-width:0}
+.table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+.table-scroll table{width:max-content;min-width:100%}
+.table-scroll td,.table-scroll th{vertical-align:middle}
+.panel-title{flex-wrap:wrap}
+.page-actions>*{min-width:0}
+.form-actions{flex-wrap:wrap}
+#calendar,.fc{max-width:100%;min-width:0}
+.fc .fc-toolbar{gap:10px;flex-wrap:wrap}
+.fc .fc-toolbar-title{overflow-wrap:anywhere}
+.fc .fc-button{white-space:nowrap}
+.mobile-sidebar-heading{color:#fff;font-size:15px;font-weight:750;align-items:center;justify-content:space-between;padding:4px 10px 14px}
+.mobile-menu-close{border:1px solid #ffffff3b;border-radius:10px;width:42px;height:42px;color:white;background:#ffffff15;font-size:24px}
+.mobile-menu-button{width:44px;height:44px;flex:0 0 44px;align-items:center;justify-content:center;border:1px solid #e4e8eb;background:#fff;border-radius:11px;color:#263946}
+@media(max-width:1024px){
+ .content{padding:22px}
+ .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .two-col,.class-detail-columns{grid-template-columns:1fr}
+ .fc .fc-toolbar{align-items:center}
+}
+@media(max-width:720px){
+ body.mobile-menu-open{overflow:hidden;touch-action:none}
+ .layout{display:block;min-height:100dvh}
+ .mobile-menu-button{display:flex}
+ .mobile-backdrop:not([hidden]){display:block;position:fixed;inset:0;background:rgba(7,17,31,.58);z-index:990}
+ .sidebar{
+   position:fixed;top:0;bottom:0;left:0;z-index:991;
+   width:min(320px,88vw);max-width:88vw;height:100dvh;min-height:0;
+   padding:calc(env(safe-area-inset-top,0px) + 15px) 16px calc(env(safe-area-inset-bottom,0px) + 18px);
+   transform:translateX(-105%);transition:transform .22s ease;
+   overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;
+   box-shadow:12px 0 32px rgba(0,0,0,.24)
+ }
+ .sidebar.mobile-open{transform:translateX(0)}
+ .mobile-sidebar-heading{display:flex}
+ .sidebar .brand{padding:6px 8px 16px;font-size:21px}
+ .sidebar .brand small{display:block;font-size:8px}
+ .sidebar .identity{display:flex;margin-bottom:12px}
+ .sidebar .identity b,.sidebar .identity small{max-width:210px}
+ .sidebar nav{display:grid;overflow:visible;gap:4px}
+ .sidebar .nav{white-space:normal;padding:13px;min-height:44px;display:flex;align-items:center}
+ .sidebar .logout{display:block;margin-top:14px}
+ .sidebar .logout button{min-height:44px;width:100%;border:1px solid #ffffff28;border-radius:10px;color:#fff;background:#ffffff14}
+ .sidebar .side-foot{display:block;margin-top:auto;padding-top:20px}
+ .main{width:100%;min-width:0}
+ .topbar{height:auto;min-height:72px;padding:calc(env(safe-area-inset-top,0px) + 12px) 14px 12px;gap:10px;align-items:center}
+ .topbar-heading .eyebrow{font-size:9px;letter-spacing:1px}
+ .topbar h1{font-size:19px;line-height:1.2;margin-top:5px}
+ .notification-control{margin-left:0}
+ .content{padding:16px 12px 24px}
+ .panel{padding:15px;border-radius:12px}
+ .panel-title{align-items:flex-start}
+ .welcome{display:grid;gap:14px}
+ .welcome h2,.section-intro h2{font-size:22px}
+ .today{width:fit-content;max-width:100%}
+ .kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+ .kpi{padding:14px;min-height:110px}
+ .kpi strong{font-size:23px}
+ .two-col,.card-grid,.class-detail-summary,.student-shortcuts,.school-grid{grid-template-columns:minmax(0,1fr)}
+ .inline-form,.planning-form{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:stretch}
+ .inline-form>label,.planning-form>label{min-width:0!important;width:100%;flex:none}
+ .inline-form input,.inline-form select,.inline-form textarea,.modern-form input,.modern-form select,.modern-form textarea{width:100%;min-width:0}
+ .modern-form,.school-edit{grid-template-columns:minmax(0,1fr)}
+ .form-actions,.page-actions{display:flex;flex-wrap:wrap;gap:9px}
+ .page-actions select{width:100%;min-width:0!important}
+ .page-actions .btn,.form-actions .btn{min-height:44px;max-width:100%;white-space:normal}
+ .btn{white-space:normal;text-align:center;min-height:42px}
+ input,select,textarea{font-size:16px}
+ .student-shortcuts{gap:10px}
+ .student-shortcut{width:100%;min-width:0;text-align:left}
+ .student-week-panel{padding:13px}
+ .week-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+ .week-actions .btn{padding:8px 5px;font-size:11px}
+ .student-week-grid{grid-template-columns:1fr}
+ .student-day{min-width:0}
+ .fc .fc-toolbar{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
+ .fc .fc-toolbar-chunk{display:flex;justify-content:center;align-items:center;gap:4px;max-width:100%}
+ .fc .fc-toolbar-title{font-size:16px!important}
+ .fc .fc-button{font-size:12px;padding:7px 8px}
+ .fc .fc-toolbar-chunk:nth-child(2){order:-1;flex-basis:100%}
+ .fc .fc-scrollgrid{min-width:0}
+ .fc .fc-daygrid-day-number,.fc .fc-col-header-cell-cushion{font-size:11px}
+ .fc .fc-event-title{font-size:11px}
+ .notification-panel{top:calc(env(safe-area-inset-top,0px) + 75px);max-height:calc(100dvh - env(safe-area-inset-top,0px) - 90px)}
+ .app-footer{overflow-wrap:anywhere}
+}
+@media(max-width:380px){
+ .content{padding:12px 9px 20px}
+ .kpis{grid-template-columns:1fr 1fr}
+ .kpi{padding:11px}
+ .topbar h1{font-size:17px}
+ .notification-bell{width:40px;height:40px}
+ .student-week-grid{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){.sidebar{transition:none!important}}
+@media print{.mobile-menu-button,.mobile-sidebar-heading,.mobile-backdrop{display:none!important}}
