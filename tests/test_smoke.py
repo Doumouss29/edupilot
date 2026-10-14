@@ -78,8 +78,8 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertIn(b"Tableau de bord", result.data)
 
     def test_superadmin_can_upload_and_replace_platform_logo(self):
-        png=b'\\x89PNG\\r\\n\\x1a\\n'+b'logo-payload-for-testing'
-        jpeg=b'\\xff\\xd8\\xff'+b'jpg-payload-for-testing'
+        png=b'\x89PNG\r\n\x1a\n'+b'logo-payload-for-testing'
+        jpeg=b'\xff\xd8\xff'+b'jpg-payload-for-testing'
         self.login("superadmin@tests.edupilot.invalid")
         fields={"csrf":self.token(),"support_name":"LMurbs",
                 "support_phone":"+2250711124359","powered_by":"Propulsé par LMurbs"}
@@ -108,7 +108,7 @@ class EduPilotSmoke(unittest.TestCase):
         self.login("admin1@tests.edupilot.invalid")
         response=self.client.post("/settings",data={"csrf":self.token(),
             "support_name":"other","support_phone":"other","powered_by":"other",
-            "platform_logo":(io.BytesIO(b'\\x89PNG\\r\\n\\x1a\\nX'),"bad.png")},
+            "platform_logo":(io.BytesIO(b'\x89PNG\r\n\x1a\nX'),"bad.png")},
             content_type="multipart/form-data")
         self.assertEqual(response.status_code,403)
         self.assertIsNone(project.one('SELECT id FROM platform_branding WHERE id=1'))
@@ -586,7 +586,7 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertIsNotNone(project.one("SELECT id FROM enrollments WHERE student_id=? AND class_id=?",(student,destination)))
         teacher=project.one("SELECT id FROM users WHERE school_id=? AND role='enseignant' LIMIT 1",(school["id"],))
         course=project.execute("INSERT INTO courses(school_id,class_id,name,code,planned_minutes,teacher_id,coefficient) VALUES (?,?,?,?,?,?,?)",(school["id"],destination,"Cours pondéré","COV08",600,teacher["id"],3))
-        pdf=io.BytesIO(b"%PDF-1.4\\n%%EOF\\n")
+        pdf=io.BytesIO(b"%PDF-1.4\n%%EOF\n")
         result=self.client.post("/assessments",data={"csrf":self.token(),"course_id":course,"title":"Évaluation V08","coefficient":"2","description":"Consignes détaillées","documents":(pdf,"sujet.pdf")},content_type="multipart/form-data")
         self.assertEqual(result.status_code,302)
         a=project.one("SELECT id,coefficient FROM assessments WHERE course_id=?",(course,))
