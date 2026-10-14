@@ -1866,7 +1866,12 @@ def push_subscribe():
     keys=sub.get('keys',{})
     if not isinstance(endpoint,str) or len(endpoint)>2048 or not isinstance(keys,dict):abort(400)
     parsed=urlsplit(endpoint)
-    if (parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password
+    # Restrict callback endpoints to known Web Push operators to prevent arbitrary server requests.
+    trusted_hosts=('fcm.googleapis.com','updates.push.services.mozilla.com',
+                   'web.push.apple.com','push.apple.com','notify.windows.com','wns.windows.com')
+    host=(parsed.hostname or '').lower()
+    is_provider=any(host==domain or host.endswith('.'+domain) for domain in trusted_hosts)
+    if (parsed.scheme!='https' or not is_provider or parsed.username or parsed.password
         or not all(isinstance(keys.get(k),str) and 8<=len(keys[k])<=512 for k in ('p256dh','auth'))):
         abort(400,'Abonnement push invalide')
     raw=json.dumps({'endpoint':endpoint,'keys':{'p256dh':keys['p256dh'],'auth':keys['auth']}},separators=(',',':'))
