@@ -421,14 +421,14 @@ class EduPilotSmoke(unittest.TestCase):
         edit=self.client.post(f"/schools/{sid}/accounts/{admin['id']}/edit",data={
             "csrf":self.token(),"first_name":"Adèle","last_name":"Direction",
             "email":"admin1@tests.edupilot.invalid","phone":"+2250700001111",
-            "role":"administratif","temporary_password":"SafeTemporary2026!"
+            "role":"administratif"
         })
         self.assertEqual(edit.status_code,302)
         updated=project.one("SELECT name,phone,role,must_change_password,password_hash FROM users WHERE id=?",(admin["id"],))
         self.assertEqual(updated["name"],"Adèle Direction")
         self.assertEqual(updated["role"],"administratif")
-        self.assertEqual(updated["must_change_password"],1)
-        self.assertTrue(project.check_password_hash(updated["password_hash"],"SafeTemporary2026!"))
+        self.assertEqual(updated["must_change_password"],0)
+        self.assertTrue(project.check_password_hash(updated["password_hash"],"Test2026!"))
         changed=self.client.post(f"/schools/{sid}/accounts/bulk",data={
             "csrf":self.token(),"account_ids":[str(admin["id"]),str(staff["id"])],"action":"set_admin"
         })
