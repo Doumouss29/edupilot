@@ -1422,7 +1422,8 @@ def planning():
         return redirect(url_for('planning'))
     query='''SELECT l.*,c.name course_name,cl.name class_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id WHERE l.school_id=?'''
     args=[school_id()]
-    if u['role']=='enseignant':query+=' AND l.teacher_id=?';args.append(u['id'])
+    if u['role']=='enseignant' or (u['role']=='admin' and request.args.get('mine')=='1'):
+        query+=' AND l.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':query+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     events=allrows(query,args)
@@ -2183,7 +2184,8 @@ def planning_json():
     u=current_user()
     if u['role']=='superadmin':abort(403)
     sql='''SELECT l.id,l.starts_at,l.ends_at,l.status,l.room,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=?'''; args=[school_id()]
-    if u['role']=='enseignant':sql+=' AND l.teacher_id=?';args.append(u['id'])
+    if u['role']=='enseignant' or (u['role']=='admin' and request.args.get('mine')=='1'):
+        sql+=' AND l.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND e.class_id=c.class_id AND p.active=1 AND cl.parents_enabled=1)';args.append(u['id'])
     return jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':x['starts_at'],'end':x['ends_at'],'extendedProps':{'status':x['status'],'room':x['room'],'teacher':x['teacher_name'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
