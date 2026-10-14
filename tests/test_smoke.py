@@ -431,6 +431,30 @@ class EduPilotSmoke(unittest.TestCase):
             self.assertNotIn(admin['id'],user_ids)  # Actor does not receive a duplicate alert.
             self.assertNotIn(other['id'],user_ids)
 
+    def test_school_admin_can_also_teach_without_second_account(self):
+        import datetime
+        self.login("admin1@tests.edupilot.invalid")
+        admin=project.one("SELECT id,role FROM users WHERE email='admin1@tests.edupilot.invalid'")
+        other=project.one("SELECT id FROM users WHERE school_id=2 AND role='admin' LIMIT 1")
+        course=project.one("SELECT * FROM courses WHERE school_id=1 LIMIT 1")
+        listing=self.client.get("/courses")
+        self.assertEqual(listing.status_code,200)
+        self.assertIn(admin["name"].encode() if "name" in admin.keys() else b"Admin",listing.data)
+        response=self.client.post(f"/courses/{course['id']}/assign",data={"csrf":self.token(),"teacher_id":str(admin["id"])})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(project.one("SELECT teacher_id FROM courses WHERE id=?",(course["id"],))["teacher_id"],admin["id"])
+        day=(datetime.datetime.now()+datetime.timedelta(days=3)).replace(hour=14,minute=0,second=0,microsecond=0)
+        fmt=lambda d:d.strftime("%Y-%m-%dT%H:%M")
+        own=project.execute("INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)",
+            (1,course["id"],admin["id"],fmt(day),fmt(day+datetime.timedelta(hours=1)),"A12"))
+        self.assertEqual(self.client.get("/planning?mine=1").status_code,200)
+        mine=self.client.get("/api/planning?mine=1").json
+        self.assertIn(own,{int(row["id"]) for row in mine})
+        self.assertEqual(admin["role"],"admin")
+        # A school admin must never be assignable from another tenant.
+        forbidden=self.client.post(f"/courses/{course['id']}/assign",data={"csrf":self.token(),"teacher_id":str(other["id"])})
+        self.assertEqual(forbidden.status_code,403)
+
     def test_teacher_change_updates_only_future_sessions_and_calendar(self):
         import datetime
         from werkzeug.security import generate_password_hash
