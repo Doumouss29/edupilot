@@ -7,7 +7,7 @@ const directionRole=document.querySelector('select[name="role"]'), directionMatr
 const matriculeConfig={{matricule_rules|tojson}};
 let manuallyEdited=false;
 directionMatricule.addEventListener('input',()=>manuallyEdited=true);
-function suggestedDirectionMatricule(){if(manuallyEdited)return;const r=matriculeConfig[directionRole.value];if(r)directionMatricule.value=r.prefix+String(r.next_number).padStart(r.padding,'0')}
+async function suggestedDirectionMatricule(){if(manuallyEdited)return;try{const resp=await fetch({{url_for('school_matricule_preview',sid=school.id)|tojson}}+'?role='+encodeURIComponent(directionRole.value));if(resp.ok&&!manuallyEdited)directionMatricule.value=(await resp.json()).matricule}catch(e){const r=matriculeConfig[directionRole.value];if(r&&!manuallyEdited)directionMatricule.value=r.prefix+String(r.next_number).padStart(r.padding,'0')}}
 directionRole.addEventListener('change',suggestedDirectionMatricule);suggestedDirectionMatricule();
 document.getElementById('accounts-select-all').addEventListener('change',e=>document.querySelectorAll('[name="account_ids"]').forEach(c=>c.checked=e.target.checked));
 document.getElementById('accounts-bulk').addEventListener('submit',e=>{const checked=document.querySelectorAll('[name="account_ids"]:checked');const action=document.getElementById('accounts-action').value;if(!checked.length){e.preventDefault();alert('Veuillez sélectionner au moins un compte.');return}if(action==='delete'&&!confirm('Confirmer la suppression définitive des comptes sélectionnés ? Cette action est irréversible.'))e.preventDefault()});
