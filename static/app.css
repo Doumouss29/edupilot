@@ -340,3 +340,50 @@ img,video,iframe,canvas{max-width:100%}
  .platform-brand-editor{padding:12px}
  .platform-brand-preview{max-width:100%}
 }
+
+
+/* Ajustement proportionnel des logos — ordinateur et smartphone */
+@media(min-width:721px){
+  .platform-logo-sidebar{
+    width:128px;
+    max-width:128px;
+    height:90px;
+    padding:5px;
+    margin-inline:auto;
+  }
+  .tenant-identity{
+    gap:13px;
+    padding:12px 10px;
+  }
+  .tenant-identity img,.tenant-identity>span{
+    width:64px;
+    height:64px;
+    flex:0 0 64px;
+    padding:3px;
+    object-fit:contain;
+  }
+  .tenant-identity>div{min-width:0}
+  .tenant-identity b,.tenant-identity small{
+    max-width:100%;
+    white-space:normal;
+    overflow-wrap:anywhere;
+  }
+}
+@media(max-width:720px){
+  .mobile-school-brand{min-height:76px;gap:12px;padding:9px 11px}
+  .mobile-school-brand img,.mobile-school-fallback{
+    width:62px;
+    height:62px;
+    flex:0 0 62px;
+    padding:3px;
+    object-fit:contain;
+  }
+  .mobile-school-name strong{font-size:14px}
+}
+@media(max-width:380px){
+  .mobile-school-brand img,.mobile-school-fallback{
+    width:54px;
+    height:54px;
+    flex:0 0 54px;
+  }
+}
