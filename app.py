@@ -810,10 +810,17 @@ def people_import():
     la=find_col('nom','last_name')
     em=find_col('email','e_mail','mail')
     cl=find_col('classe','class','class_id')
-    if None in (fi,la,em,cl):
-        flash('Colonnes requises : prenom, nom, email, classe.','error')
+    selected_class_id=request.form.get('import_class_id','').strip()
+    if None in (fi,la,em) or (cl is None and not selected_class_id):
+        flash('Colonnes requises : prenom, nom, email. Indiquez une classe dans le formulaire ou dans le fichier.','error')
         return redirect(url_for('people'))
     classes=allrows('SELECT id,name,year_id FROM classes WHERE school_id=?',(school_id(),))
+    selected_class=None
+    if selected_class_id:
+        selected_class=next((c for c in classes if str(c['id'])==selected_class_id),None)
+        if selected_class is None:
+            flash('Classe sélectionnée introuvable dans votre établissement.','error')
+            return redirect(url_for('people'))
     by_id={str(c['id']):c for c in classes}
     by_name={}
     for c in classes:by_name.setdefault(key(c['name']),[]).append(c)
@@ -821,11 +828,14 @@ def people_import():
     for lineno,row in enumerate(rows[1:],2):
         if not row or all(v is None or not str(v).strip() for v in row):continue
         def cell(i):return str(row[i] or '').strip() if i<len(row) else ''
-        first,last,email,lookup=cell(fi),cell(la),cell(em).lower(),cell(cl)
-        target=by_id.get(lookup)
-        if not target:
-            opts=by_name.get(key(lookup),[])
-            target=opts[0] if len(opts)==1 else None
+        first,last,email=cell(fi),cell(la),cell(em).lower()
+        lookup=cell(cl) if cl is not None else ''
+        target=selected_class
+        if target is None:
+            target=by_id.get(lookup)
+            if not target:
+                opts=by_name.get(key(lookup),[])
+                target=opts[0] if len(opts)==1 else None
         if not first or not last or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):
             errors.append(f'Ligne {lineno} : identité ou e-mail invalide')
         elif not target:
@@ -857,7 +867,7 @@ def people_import():
         return redirect(url_for('people'))
     # Invitations can be requested later; avoid thousands of synchronous outbound email calls.
     audit('students.imported',str(len(hashes)))
-    flash(f'{len(hashes)} étudiants importés et inscrits dans leur classe. Invitations à envoyer ultérieurement.','success')
+    flash(f'{len(hashes)} étudiants importés et inscrits dans '+(selected_class['name'] if selected_class else 'leurs classes')+'. Invitations à envoyer ultérieurement.','success')
     return redirect(url_for('people'))
 
 def create_invite(uid):
