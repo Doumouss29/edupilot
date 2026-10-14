@@ -121,19 +121,28 @@ class EduPilotSmoke(unittest.TestCase):
         created=project.one("SELECT * FROM users WHERE email=?",("alice.edupilot@example.test",))
         self.assertEqual(created['school_id'],school['id'])
         self.assertEqual(created['must_change_password'],1)
+        # The supplied legacy password is ignored. The recipient chooses their own
+        # password through the single-use activation link sent by Brevo.
+        self.assertFalse(project.check_password_hash(created['password_hash'],password))
         self.client.post("/logout",data={"csrf":token})
         # Ensure the scoped login does not accept another institution's admin.
         csrf=self.csrf()
         wrong=self.client.post(f"/{school['slug']}/login",data={"csrf":csrf,"email":"admin1@tests.edupilot.invalid","password":"Test2026!"})
         self.assertEqual(wrong.status_code,302)
         with self.client.session_transaction() as sess:self.assertNotIn("uid",sess)
+        import hashlib
+        token_value="sample-activation-token-for-test"
+        project.execute("INSERT INTO invites(user_id,token_hash,expires_at) VALUES (?,?,?)",
+            (created["id"],hashlib.sha256(token_value.encode()).hexdigest(),"2099-01-01T00:00:00+00:00"))
         csrf=self.csrf()
-        login=self.client.post(f"/{school['slug']}/login",data={"csrf":csrf,"email":"alice.edupilot@example.test","password":password})
-        self.assertIn("/change-password",login.headers["Location"])
-        self.assertIn("/change-password",self.client.get("/classes").headers["Location"])
-        csrf=self.token()
-        result=self.client.post("/change-password",data={"csrf":csrf,"old_password":password,"new_password":"MyNewPass2026Safe!","confirm_password":"MyNewPass2026Safe!"})
+        opened=self.client.get("/activate/"+token_value)
+        self.assertEqual(opened.status_code,200)
+        result=self.client.post("/activate/"+token_value,data={"csrf":csrf,"password":"MyNewPass2026Safe!","confirm_password":"MyNewPass2026Safe!"})
         self.assertEqual(result.status_code,302)
+        self.assertEqual(self.client.get("/activate/"+token_value).status_code,404)
+        csrf=self.csrf()
+        login=self.client.post(f"/{school['slug']}/login",data={"csrf":csrf,"email":"alice.edupilot@example.test","password":"MyNewPass2026Safe!"})
+        self.assertIn("/",login.headers["Location"])
         changed=project.one("SELECT must_change_password FROM users WHERE id=?",(created["id"],))
         self.assertEqual(changed["must_change_password"],0)
         self.assertTrue(project.check_password_hash(project.one("SELECT password_hash FROM users WHERE id=?",(created["id"],))["password_hash"],"MyNewPass2026Safe!"))
