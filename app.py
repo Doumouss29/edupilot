@@ -10,6 +10,7 @@ from flask import Flask, request, redirect, url_for, render_template, flash, ses
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import HTTPException
 from flask import send_file
 
 ROOT = Path(__file__).parent
@@ -166,9 +167,10 @@ def subscription_blocked(user=None):
 
 def read_logo(file):
     if not file or not file.filename:return None,None
-    raw=file.read(1024*1024+1)
+    # Accepter les logos sources haute résolution (ex. PNG EduPilot de 2,1 Mo).
+    raw=file.read(5*1024*1024+1)
     if not raw:return None,None
-    if len(raw)>1024*1024:abort(400,'Logo supérieur à 1 Mo.')
+    if len(raw)>5*1024*1024:abort(400,'Logo supérieur à 5 Mo. Utilisez une image PNG, JPG ou WebP plus légère.')
     if raw.startswith(b'\x89PNG\r\n\x1a\n'):mime='image/png'
     elif raw[:3]==b'\xff\xd8\xff':mime='image/jpeg'
     elif raw[:4]==b'RIFF' and raw[8:12]==b'WEBP':mime='image/webp'
@@ -703,8 +705,14 @@ def settings():
         name=request.form.get('support_name','').strip()
         phone=request.form.get('support_phone','').strip()
         powered=request.form.get('powered_by','').strip()
-        if not name or not phone or not powered or len(name)>120 or len(phone)>40 or len(powered)>180:abort(400)
-        logo,mime=read_logo(request.files.get('platform_logo'))
+        if not name or not phone or not powered or len(name)>120 or len(phone)>40 or len(powered)>180:
+            flash('Vérifiez les champs du support : nom (120 caractères), téléphone (40) et signature (180) sont obligatoires.','error')
+            return redirect(url_for('settings'))
+        try:
+            logo,mime=read_logo(request.files.get('platform_logo'))
+        except HTTPException as exc:
+            flash(exc.description or 'Fichier logo invalide. Formats autorisés : PNG, JPG ou WebP (5 Mo maximum).','error')
+            return redirect(url_for('settings'))
         remove=request.form.get('remove_platform_logo')=='1'
         if logo and remove:
             flash('Choisissez soit un nouveau logo, soit sa suppression.','error')
