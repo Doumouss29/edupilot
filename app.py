@@ -28,6 +28,7 @@ UPLOAD_DIR.mkdir(parents=True,exist_ok=True)
 
 SCHEMA = """
 PRAGMA foreign_keys=ON;
+CREATE TABLE IF NOT EXISTS platform_branding(id INTEGER PRIMARY KEY CHECK(id=1),logo BLOB NOT NULL,logo_mime TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1, subscription_end TEXT, logo BLOB, logo_mime TEXT);
 CREATE TABLE IF NOT EXISTS campuses(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, matricule TEXT, active INTEGER NOT NULL DEFAULT 1, first_name TEXT, last_name TEXT, phone TEXT, must_change_password INTEGER NOT NULL DEFAULT 0);
@@ -174,6 +175,15 @@ def read_logo(file):
     else:abort(400,'Format de logo non reconnu.')
     return raw,mime
 
+@app.get('/platform-logo')
+def platform_logo():
+    row=one('SELECT logo,logo_mime FROM platform_branding WHERE id=1')
+    if not row or not row['logo']:abort(404)
+    resp=Response(row['logo'],mimetype=row['logo_mime'])
+    resp.headers['X-Content-Type-Options']='nosniff'
+    resp.headers['Cache-Control']='public, max-age=60, must-revalidate'
+    return resp
+
 @app.get('/school-logo/<int:sid>')
 def school_logo(sid):
     row=one('SELECT logo,logo_mime FROM schools WHERE id=?',(sid,))
@@ -198,7 +208,7 @@ def safety():
 
 @app.context_processor
 def globals_template():
-    return dict(me=current_user(),csrf=session.get('csrf',''),appname='EduPilot',support_name=setting('support_name','LMurbs'),support_phone=setting('support_phone','+2250711124359'),powered_by=setting('powered_by','Propulsé par LMurbs'),school_brand=one('SELECT id,name,logo_mime FROM schools WHERE id=?',(school_id(),)) if school_id() else None)
+    return dict(me=current_user(),csrf=session.get('csrf',''),appname='EduPilot',support_name=setting('support_name','LMurbs'),support_phone=setting('support_phone','+2250711124359'),powered_by=setting('powered_by','Propulsé par LMurbs'),school_brand=one('SELECT id,name,logo_mime FROM schools WHERE id=?',(school_id(),)) if school_id() else None, platform_logo_enabled=bool(one('SELECT id FROM platform_branding WHERE id=1')))
 
 def current_user():
     uid=session.get('uid')
@@ -694,10 +704,19 @@ def settings():
         phone=request.form.get('support_phone','').strip()
         powered=request.form.get('powered_by','').strip()
         if not name or not phone or not powered or len(name)>120 or len(phone)>40 or len(powered)>180:abort(400)
+        logo,mime=read_logo(request.files.get('platform_logo'))
+        remove=request.form.get('remove_platform_logo')=='1'
+        if logo and remove:
+            flash('Choisissez soit un nouveau logo, soit sa suppression.','error')
+            return redirect(url_for('settings'))
         with db() as c:
+            if logo:
+                c.execute('INSERT INTO platform_branding(id,logo,logo_mime) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET logo=excluded.logo,logo_mime=excluded.logo_mime',(logo,mime))
+            elif remove:
+                c.execute('DELETE FROM platform_branding WHERE id=1')
             for k,v in [('support_name',name),('support_phone',phone),('powered_by',powered)]:
                 c.execute('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(k,v))
-        flash('Coordonnées du support mises à jour.','success')
+        flash('Paramètres de la plateforme et identité visuelle enregistrés.','success')
         return redirect(url_for('settings'))
     return render_template('settings.html')
 
