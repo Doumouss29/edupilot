@@ -249,6 +249,49 @@ def notify(ids,message,href=''):
 def classmates(course_id):
     return [r['student_id'] for r in scoped('SELECT e.student_id FROM enrollments e JOIN courses c ON c.class_id=e.class_id WHERE e.school_id=? AND c.id=?',(course_id,))]
 
+def event_recipients(course_ids=(),teacher_ids=(),include_management=True,include_parents=True):
+    """Recipients scoped to the current establishment and relevant classes."""
+    sid=school_id()
+    recipients=set()
+    courses=[int(cid) for cid in course_ids if cid]
+    teachers=[int(uid) for uid in teacher_ids if uid]
+    if courses:
+        clause=','.join('?' for _ in courses)
+        students=allrows(f"""SELECT DISTINCT e.student_id FROM enrollments e
+            JOIN courses c ON c.class_id=e.class_id AND c.school_id=e.school_id
+            JOIN users u ON u.id=e.student_id
+            WHERE e.school_id=? AND c.id IN ({clause}) AND u.active=1""",(sid,*courses))
+        recipients.update(r['student_id'] for r in students)
+        if include_parents:
+            parents=allrows(f"""SELECT DISTINCT p.parent_id FROM parent_links p
+                JOIN enrollments e ON e.student_id=p.student_id AND e.school_id=p.school_id
+                JOIN courses c ON c.class_id=e.class_id AND c.school_id=e.school_id
+                JOIN classes cl ON cl.id=c.class_id
+                JOIN users u ON u.id=p.parent_id
+                WHERE p.school_id=? AND c.id IN ({clause})
+                AND p.active=1 AND cl.parents_enabled=1 AND u.active=1""",(sid,*courses))
+            recipients.update(r['parent_id'] for r in parents)
+    if teachers:
+        clause=','.join('?' for _ in teachers)
+        selected=allrows(f"""SELECT id FROM users WHERE school_id=? AND active=1
+            AND role='enseignant' AND id IN ({clause})""",(sid,*teachers))
+        recipients.update(r['id'] for r in selected)
+    if include_management:
+        managers=allrows("""SELECT id FROM users WHERE school_id=? AND active=1
+                            AND role IN ('admin','administratif')""",(sid,))
+        recipients.update(r['id'] for r in managers)
+    return sorted(recipients)
+
+def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True):
+    recipients=event_recipients(course_ids,teacher_ids,include_parents=include_parents)
+    # No duplicate notification to the user who performed the operation.
+    actor=current_user()
+    if actor:
+        recipients=[uid for uid in recipients if uid!=actor['id']]
+    if recipients:
+        notify(recipients,message,href)
+
+
 def slugify(s):
     s=unicodedata.normalize('NFKD',s).encode('ascii','ignore').decode().lower()
     return re.sub(r'^_+|_+$','',re.sub(r'[^a-z0-9]+','_',s))
