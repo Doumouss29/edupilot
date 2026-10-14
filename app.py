@@ -343,7 +343,7 @@ def event_recipients(course_ids=(),teacher_ids=(),include_management=True,includ
     if teachers:
         clause=','.join('?' for _ in teachers)
         selected=allrows(f"""SELECT id FROM users WHERE school_id=? AND active=1
-            AND role='enseignant' AND id IN ({clause})""",(sid,*teachers))
+            AND role IN ('enseignant','admin') AND id IN ({clause})""",(sid,*teachers))
         recipients.update(r['id'] for r in selected)
     if include_management:
         managers=allrows("""SELECT id FROM users WHERE school_id=? AND active=1
@@ -1144,7 +1144,7 @@ def class_details(cid):
                        WHERE c.school_id=? AND c.class_id=? ORDER BY c.name""",(school_id(),cid))
     teachers=allrows("""SELECT DISTINCT u.id,u.name,u.matricule,u.email
                         FROM courses c JOIN users u ON u.id=c.teacher_id
-                        WHERE c.school_id=? AND c.class_id=? AND u.role='enseignant'
+                        WHERE c.school_id=? AND c.class_id=? AND u.role IN ('enseignant','admin')
                         ORDER BY u.name""",(school_id(),cid))
     return render_template('class_details.html',clazz=clazz,students=students,
                            teachers=teachers,courses=courses)
@@ -1221,7 +1221,7 @@ def courses():
     if request.method=='POST':
         cl=request.form.get('class_id');teacher=request.form.get('teacher_id') or None
         if not has_school('classes',cl):abort(403)
-        if teacher and not one("SELECT id FROM users WHERE school_id=? AND id=? AND role='enseignant'",(school_id(),teacher)):abort(403)
+        if teacher and not one("SELECT id FROM users WHERE school_id=? AND id=? AND role IN ('enseignant','admin')",(school_id(),teacher)):abort(403)
         name=request.form.get('name','').strip()
         if not name:abort(400)
         try:
@@ -1232,7 +1232,7 @@ def courses():
         if teacher:execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,datetime.date.today().isoformat()))
         audit('course.created',name);return redirect(url_for('courses'))
     rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
-    return render_template('courses_manage.html',courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant'"))
+    return render_template('courses_manage.html',courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin')"))
 
 @app.post('/courses/bulk')
 @roles('admin','administratif')
@@ -1251,7 +1251,7 @@ def courses_bulk():
     if action=='teacher':
         value=request.form.get('teacher_id','').strip()
         if value:
-            if not value.isdigit() or not one("SELECT id FROM users WHERE id=? AND school_id=? AND role='enseignant' AND active=1",(value,school_id())):abort(403)
+            if not value.isdigit() or not one("SELECT id FROM users WHERE id=? AND school_id=? AND role IN ('enseignant','admin') AND active=1",(value,school_id())):abort(403)
             teacher_id=int(value)
     try:
         with db() as c:
@@ -1333,7 +1333,7 @@ def course_edit(cid):
         class_id=request.form.get('class_id')
         teacher=request.form.get('teacher_id') or None
         if not name or len(name)>180 or not has_school('classes',class_id):abort(400)
-        if teacher and not one("SELECT id FROM users WHERE id=? AND school_id=? AND role='enseignant' AND active=1",(teacher,school_id())):abort(403)
+        if teacher and not one("SELECT id FROM users WHERE id=? AND school_id=? AND role IN ('enseignant','admin') AND active=1",(teacher,school_id())):abort(403)
         try:
             minutes=int(round(float(request.form.get('hours',''))*60))
             coefficient=float(request.form.get('coefficient','1'))
@@ -1360,7 +1360,7 @@ def course_edit(cid):
             notify_event([cid],'Changement d’enseignant pour le cours '+name+'. '+str(moved)+' séance(s) future(s) réattribuée(s).','/planning',teacher_ids=[item['teacher_id'],int(teacher) if teacher else None])
         audit('course.updated',str(cid));flash(f'Cours mis à jour. {moved} séance(s) future(s) synchronisée(s) ; historique conservé.','success')
         return redirect(url_for('courses'))
-    return render_template('edit_academic.html',kind='course',item=item,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant' AND active=1"))
+    return render_template('edit_academic.html',kind='course',item=item,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') AND active=1"))
 
 @app.route('/planning',methods=['GET','POST'])
 @login_required
@@ -2109,7 +2109,7 @@ def campuses():
 def assign_teacher(cid):
     if not has_school('courses',cid):abort(403)
     teacher=request.form.get('teacher_id')
-    if not one("SELECT id FROM users WHERE school_id=? AND id=? AND role='enseignant'",(school_id(),teacher)):abort(403)
+    if not one("SELECT id FROM users WHERE school_id=? AND id=? AND role IN ('enseignant','admin')",(school_id(),teacher)):abort(403)
     old=one('SELECT teacher_id FROM courses WHERE id=?',(cid,))
     now=datetime.datetime.now(datetime.timezone.utc).isoformat()
     if old['teacher_id']==int(teacher):
