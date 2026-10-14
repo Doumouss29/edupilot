@@ -29,7 +29,7 @@ SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1, subscription_end TEXT, logo BLOB, logo_mime TEXT);
 CREATE TABLE IF NOT EXISTS campuses(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), name TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, first_name TEXT, last_name TEXT, phone TEXT, must_change_password INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, matricule TEXT, active INTEGER NOT NULL DEFAULT 1, first_name TEXT, last_name TEXT, phone TEXT, must_change_password INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS years(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), label TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS classes(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), year_id INTEGER NOT NULL REFERENCES years(id), campus_id INTEGER REFERENCES campuses(id), name TEXT NOT NULL, cycle TEXT NOT NULL DEFAULT 'semestre', parents_enabled INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS enrollments(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), student_id INTEGER NOT NULL REFERENCES users(id), class_id INTEGER NOT NULL REFERENCES classes(id), year_id INTEGER NOT NULL REFERENCES years(id), status TEXT NOT NULL DEFAULT 'inscrit', UNIQUE(student_id,class_id,year_id));
@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, user_id INTEGER NOT N
 CREATE TABLE IF NOT EXISTS assessment_files(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE, filename TEXT NOT NULL, mime TEXT NOT NULL, content BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS bulletin_publications(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), class_id INTEGER NOT NULL REFERENCES classes(id), student_id INTEGER NOT NULL REFERENCES users(id), published_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(class_id,student_id));
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS matricule_rules(school_id INTEGER NOT NULL REFERENCES schools(id),role TEXT NOT NULL,prefix TEXT NOT NULL, next_number INTEGER NOT NULL DEFAULT 1, padding INTEGER NOT NULL DEFAULT 4,PRIMARY KEY(school_id,role));
 """
 
 def connection():
@@ -89,7 +90,7 @@ with db() as c:
     for name,definition in [('subscription_end','TEXT'),('logo','BLOB'),('logo_mime','TEXT')]:
         if name not in existing: c.execute(f'ALTER TABLE schools ADD COLUMN {name} {definition}')
     columns={r['name'] for r in c.execute('PRAGMA table_info(users)').fetchall()}
-    for name,definition in [('first_name','TEXT'),('last_name','TEXT'),('phone','TEXT'),('must_change_password','INTEGER NOT NULL DEFAULT 0')]:
+    for name,definition in [('first_name','TEXT'),('last_name','TEXT'),('phone','TEXT'),('must_change_password','INTEGER NOT NULL DEFAULT 0'),('matricule','TEXT')]:
         if name not in columns:c.execute(f'ALTER TABLE users ADD COLUMN {name} {definition}')
     for table, additions in {'courses':[('coefficient','REAL NOT NULL DEFAULT 1')],
         'assessments':[('attachment_name','TEXT'),('attachment_blob','BLOB'),('attachment_mime','TEXT')],
@@ -97,9 +98,53 @@ with db() as c:
         existing_columns={x['name'] for x in c.execute(f'PRAGMA table_info({table})')}
         for column,definition in additions:
             if column not in existing_columns:c.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+    c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_school_matricule ON users(school_id,matricule) WHERE matricule IS NOT NULL')
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_name','LMurbs')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_phone','+2250711124359')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('powered_by','Propulsé par LMurbs')")
+MATRICULE_PROFILES = {'etudiant': 'ETU', 'enseignant': 'ENS', 'administratif': 'ADM', 'admin': 'DIR', 'parent': 'PAR'}
+
+def ensure_matricule_rules(c, sid):
+    for role, prefix in MATRICULE_PROFILES.items():
+        c.execute('INSERT OR IGNORE INTO matricule_rules(school_id,role,prefix,next_number,padding) VALUES (?,?,?,1,4)', (sid,role,prefix))
+
+def validate_matricule(value):
+    value=(value or '').strip().upper()
+    if not re.fullmatch(r'[A-Z0-9][A-Z0-9_/-]{1,39}',value):
+        raise ValueError('Le matricule doit contenir 2 à 40 caractères (lettres, chiffres, tiret, / ou _).')
+    return value
+
+def next_matricule(c, sid, role, advance=True):
+    ensure_matricule_rules(c,sid)
+    rule=c.execute('SELECT prefix,next_number,padding FROM matricule_rules WHERE school_id=? AND role=?',(sid,role)).fetchone()
+    if not rule:raise ValueError('Profil non configuré')
+    number=rule['next_number']
+    while True:
+        candidate=f"{rule['prefix']}{number:0{rule['padding']}d}"
+        if not c.execute('SELECT 1 FROM users WHERE school_id=? AND matricule=?',(sid,candidate)).fetchone():
+            break
+        number+=1
+    if advance:
+        c.execute('UPDATE matricule_rules SET next_number=? WHERE school_id=? AND role=?',(number+1,sid,role))
+    return candidate
+
+def requested_matricule(c,sid,role,raw):
+    raw=(raw or '').strip()
+    candidate=validate_matricule(raw) if raw else next_matricule(c,sid,role)
+    if c.execute('SELECT 1 FROM users WHERE school_id=? AND matricule=?',(sid,candidate)).fetchone():
+        raise ValueError('Ce matricule existe déjà dans cet établissement.')
+    return candidate
+
+# Migration non destructive : attribuer les numéros manquants aux comptes existants.
+with db() as c:
+    c.execute('BEGIN IMMEDIATE')
+    for school in c.execute('SELECT id FROM schools').fetchall():
+        sid=school['id']
+        ensure_matricule_rules(c,sid)
+        for user in c.execute("SELECT id,role FROM users WHERE school_id=? AND (matricule IS NULL OR matricule='') ORDER BY id",(sid,)).fetchall():
+            if user['role'] in MATRICULE_PROFILES:
+                c.execute('UPDATE users SET matricule=? WHERE id=?',(next_matricule(c,sid,user['role']),user['id']))
+
 def setting(key,default=''):
     row=one('SELECT value FROM settings WHERE key=?',(key,))
     return row['value'] if row else default
@@ -347,6 +392,7 @@ def school_new():
         sid=c.execute('INSERT INTO schools(name,slug,plan,subscription_end,logo,logo_mime) VALUES (?,?,?,?,?,?)',(name,unique,plan,end,logo,mime)).lastrowid
         c.execute('INSERT INTO years(school_id,label) VALUES (?,?)',(sid,'2026-2027'))
         c.execute('INSERT INTO campuses(school_id,name) VALUES (?,?)',(sid,'Campus principal'))
+        ensure_matricule_rules(c,sid)
     flash('Établissement créé. Créez maintenant ses comptes administrateurs.','success')
     return redirect(url_for('school_accounts',sid=sid))
 
@@ -370,11 +416,18 @@ def school_accounts(sid):
         if one('SELECT id FROM users WHERE email=?',(email,)):
             flash('Cette adresse e-mail est déjà utilisée.','error')
         else:
-            execute('INSERT INTO users(school_id,name,first_name,last_name,email,phone,password_hash,role,must_change_password) VALUES (?,?,?,?,?,?,?,?,1)',(sid,first+' '+last,first,last,email,phone,generate_password_hash(password),role))
+            try:
+                with db() as c:
+                    c.execute('BEGIN IMMEDIATE')
+                    matricule=requested_matricule(c,sid,role,request.form.get('matricule'))
+                    c.execute('INSERT INTO users(school_id,name,first_name,last_name,email,phone,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,1)',(sid,first+' '+last,first,last,email,phone,generate_password_hash(password),role,matricule))
+            except (ValueError,sqlite3.IntegrityError) as exc:
+                flash(str(exc),'error')
+                return redirect(url_for('school_accounts',sid=sid))
             flash('Compte créé. Transmettez le mot de passe temporaire au destinataire par un canal sécurisé.','success')
             return redirect(url_for('school_accounts',sid=sid))
-    accounts=allrows("SELECT id,first_name,last_name,name,email,phone,role,active,must_change_password FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
-    return render_template('school_accounts.html',school=school,accounts=accounts,base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
+    accounts=allrows("SELECT id,first_name,last_name,name,email,phone,role,matricule,active,must_change_password FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
+    return render_template('school_accounts.html',school=school,accounts=accounts,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(sid,))},base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
 
 @app.route('/schools/<int:sid>/accounts/<int:uid>/edit',methods=['GET','POST'])
 @roles('superadmin')
@@ -398,9 +451,18 @@ def school_account_edit(sid,uid):
         if reset and (len(reset)<12 or not any(ch.isalpha() for ch in reset) or not any(ch.isdigit() for ch in reset)):
             flash('Le mot de passe temporaire doit avoir au moins 12 caractères, avec lettres et chiffres.','error')
             return redirect(url_for('school_account_edit',sid=sid,uid=uid))
+        try:
+            matricule=validate_matricule(request.form.get('matricule') or account['matricule'])
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                if c.execute('SELECT 1 FROM users WHERE school_id=? AND matricule=? AND id<>?',(sid,matricule,uid)).fetchone():
+                    raise ValueError('Matricule déjà utilisé dans cet établissement')
+                c.execute('UPDATE users SET name=?,first_name=?,last_name=?,email=?,phone=?,role=?,matricule=? WHERE id=? AND school_id=?',
+                          (first+' '+last,first,last,email,phone,role,matricule,uid,sid))
+        except (ValueError,sqlite3.IntegrityError) as exc:
+            flash(str(exc),'error')
+            return redirect(url_for('school_account_edit',sid=sid,uid=uid))
         with db() as c:
-            c.execute('UPDATE users SET name=?,first_name=?,last_name=?,email=?,phone=?,role=? WHERE id=? AND school_id=?',
-                      (first+' '+last,first,last,email,phone,role,uid,sid))
             if reset:
                 c.execute('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=? AND school_id=?',
                           (generate_password_hash(reset),uid,sid))
@@ -537,6 +599,61 @@ def assign_courses_to_teacher(teacher_id, course_ids):
             c.execute('UPDATE courses SET teacher_id=? WHERE id=?',(teacher_id,course['id']))
             c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(course['id'],teacher_id,now))
 
+
+@app.get('/api/matricule/next')
+@roles('admin','administratif')
+def matricule_preview():
+    role=request.args.get('role','etudiant')
+    if role not in MATRICULE_PROFILES:abort(400)
+    with db() as c:
+        value=next_matricule(c,school_id(),role,advance=False)
+    return jsonify(matricule=value)
+
+@app.route('/schools/<int:sid>/matricules',methods=['GET','POST'])
+@roles('superadmin')
+def school_matricules(sid):
+    school=one('SELECT id,name FROM schools WHERE id=?',(sid,))
+    if not school:abort(404)
+    if request.method=='POST':
+        try:
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                ensure_matricule_rules(c,sid)
+                for role in MATRICULE_PROFILES:
+                    prefix=request.form.get('prefix_'+role,'').strip().upper()
+                    padding=int(request.form.get('padding_'+role,'4'))
+                    start=int(request.form.get('next_'+role,'1'))
+                    if not re.fullmatch(r'[A-Z0-9][A-Z0-9_/-]{0,14}',prefix) or not (2<=padding<=10) or not (1<=start<=999999999):
+                        raise ValueError('Paramètres invalides pour '+role)
+                    c.execute('UPDATE matricule_rules SET prefix=?,padding=?,next_number=? WHERE school_id=? AND role=?',
+                              (prefix,padding,start,sid,role))
+            flash('Numérotation des matricules enregistrée.','success')
+        except (ValueError,sqlite3.IntegrityError) as exc:
+            flash(str(exc),'error')
+        return redirect(url_for('school_matricules',sid=sid))
+    with db() as c:
+        ensure_matricule_rules(c,sid)
+    rules=allrows('SELECT * FROM matricule_rules WHERE school_id=? ORDER BY role',(sid,))
+    return render_template('school_matricules.html',school=school,rules=rules)
+
+@app.post('/people/<int:uid>/matricule')
+@roles('admin')
+def edit_person_matricule(uid):
+    user=one('SELECT id,matricule FROM users WHERE school_id=? AND id=?',(school_id(),uid))
+    if not user:abort(404)
+    try:
+        value=validate_matricule(request.form.get('matricule'))
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            if c.execute('SELECT 1 FROM users WHERE school_id=? AND matricule=? AND id<>?',(school_id(),value,uid)).fetchone():
+                raise ValueError('Matricule déjà attribué')
+            c.execute('UPDATE users SET matricule=? WHERE school_id=? AND id=?',(value,school_id(),uid))
+        audit('person.matricule_updated',f'{uid}:{user["matricule"]}->{value}')
+        flash('Matricule mis à jour.','success')
+    except (ValueError,sqlite3.IntegrityError) as exc:
+        flash(str(exc),'error')
+    return redirect(url_for('people'))
+
 @app.route('/people',methods=['GET','POST'])
 @roles('admin','administratif')
 def people():
@@ -567,7 +684,13 @@ def people():
             if c.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone():
                 flash('Adresse e-mail déjà utilisée.','error')
                 return redirect(url_for('people'))
-            uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role,must_change_password) VALUES (?,?,?,?,?,1)',(school_id(),name,email,generate_password_hash(password),role)).lastrowid
+            c.execute('BEGIN IMMEDIATE')
+            try:
+                matricule=requested_matricule(c,school_id(),role,request.form.get('matricule'))
+                uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,1)',(school_id(),name,email,generate_password_hash(password),role,matricule)).lastrowid
+            except (ValueError,sqlite3.IntegrityError) as exc:
+                flash(str(exc),'error')
+                return redirect(url_for('people'))
             if role=='etudiant':
                 clazz=c.execute('SELECT year_id FROM classes WHERE school_id=? AND id=?',(school_id(),class_id)).fetchone()
                 if not clazz:abort(403)
@@ -579,13 +702,13 @@ def people():
     users=scoped('SELECT * FROM users WHERE school_id=? ORDER BY role,name')
     classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name')
     courses=scoped('SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? ORDER BY cl.name,c.name')
-    rows=allrows("""SELECT u.id,u.name,u.email,u.role,u.active,u.must_change_password,
+    rows=allrows("""SELECT u.id,u.name,u.email,u.role,u.matricule,u.active,u.must_change_password,
                      GROUP_CONCAT(DISTINCT cl.name) class_names,
                      (SELECT GROUP_CONCAT(c.name||' ('||cl2.name||')',', ') FROM courses c JOIN classes cl2 ON cl2.id=c.class_id WHERE c.teacher_id=u.id AND c.school_id=u.school_id) teacher_courses
                   FROM users u LEFT JOIN enrollments e ON e.student_id=u.id AND e.school_id=u.school_id
                   LEFT JOIN classes cl ON cl.id=e.class_id
                   WHERE u.school_id=? GROUP BY u.id ORDER BY u.role,u.name""",(school_id(),))
-    return render_template('list.html',title='Utilisateurs',columns=['Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,courses=courses,user_rows=rows)
+    return render_template('list.html',title='Utilisateurs',columns=['Matricule','Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['matricule'],x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,courses=courses,user_rows=rows,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(school_id(),))})
 
 @app.post('/people/bulk')
 @roles('admin','administratif')
@@ -711,7 +834,7 @@ def people_import():
                 flash('Import annulé : comptes déjà existants : '+', '.join(sorted(registered)[:4]),'error')
                 return redirect(url_for('people'))
             for name,email,class_id,year_id in prepared:
-                uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role) VALUES (?,?,?,?,?)',(school_id(),name,email,generate_password_hash(secrets.token_urlsafe(24)),'etudiant')).lastrowid
+                uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role,matricule) VALUES (?,?,?,?,?,?)',(school_id(),name,email,generate_password_hash(secrets.token_urlsafe(24)),'etudiant',next_matricule(c,school_id(),'etudiant'))).lastrowid
                 c.execute('INSERT INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school_id(),uid,class_id,year_id))
                 hashes.append(uid)
     except sqlite3.IntegrityError:
@@ -849,7 +972,7 @@ def students_transfer():
 def students():
     u=current_user()
     if u['role'] not in ('admin','administratif','enseignant'):abort(403)
-    sql="""SELECT e.id enrollment_id,u.name,c.name class_name,c.id class_id,y.id year_id,y.label
+    sql="""SELECT e.id enrollment_id,u.name,u.matricule,c.name class_name,c.id class_id,y.id year_id,y.label
            FROM enrollments e JOIN users u ON u.id=e.student_id
            JOIN classes c ON c.id=e.class_id JOIN years y ON y.id=e.year_id
            WHERE e.school_id=?"""
