@@ -356,7 +356,7 @@ def dashboard():
         return render_template('dashboard.html',stats={'classes':0,'courses':0,'lessons':0,'total':0,'actual':0,'percent':0},classes=[],events=[],courses=[],schools=[])
     sid=school_id()
     classes=scoped('SELECT * FROM classes WHERE school_id=?')
-    courses=scoped('SELECT c.*,cl.name class_name,u.name teacher_name FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
+    courses=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
     if u['role']=='enseignant': courses=[x for x in courses if x['teacher_id']==u['id']]
     lessonlist=scoped('SELECT l.*,CAST(ROUND((julianday(l.ends_at)-julianday(l.starts_at))*1440) AS INTEGER) scheduled_minutes,c.name course_name,cl.name class_name,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? ORDER BY l.starts_at DESC LIMIT 80')
     if u['role']=='enseignant': lessonlist=[x for x in lessonlist if any(y['id']==x['course_id'] for y in courses)]
@@ -929,14 +929,14 @@ def class_details(cid):
     if current_user()['role']=='enseignant' and not one(
         'SELECT id FROM courses WHERE school_id=? AND class_id=? AND teacher_id=?',(school_id(),cid,current_user()['id'])):
         abort(403)
-    students=allrows("""SELECT DISTINCT u.id,u.name,u.email,u.active
+    students=allrows("""SELECT DISTINCT u.id,u.name,u.matricule,u.email,u.active
                         FROM enrollments e JOIN users u ON u.id=e.student_id
                         WHERE e.school_id=? AND e.class_id=? AND e.year_id=?
                         ORDER BY u.name""",(school_id(),cid,clazz['year_id']))
-    courses=allrows("""SELECT c.id,c.name,c.code,c.planned_minutes,u.id teacher_id,u.name teacher_name
+    courses=allrows("""SELECT c.id,c.name,c.code,c.planned_minutes,u.id teacher_id,u.name teacher_name,u.matricule teacher_matricule
                        FROM courses c LEFT JOIN users u ON u.id=c.teacher_id
                        WHERE c.school_id=? AND c.class_id=? ORDER BY c.name""",(school_id(),cid))
-    teachers=allrows("""SELECT DISTINCT u.id,u.name,u.email
+    teachers=allrows("""SELECT DISTINCT u.id,u.name,u.matricule,u.email
                         FROM courses c JOIN users u ON u.id=c.teacher_id
                         WHERE c.school_id=? AND c.class_id=? AND u.role='enseignant'
                         ORDER BY u.name""",(school_id(),cid))
@@ -1025,7 +1025,7 @@ def courses():
         cid=execute('INSERT INTO courses(school_id,class_id,name,code,planned_minutes,teacher_id,coefficient) VALUES (?,?,?,?,?,?,?)',(school_id(),cl,name,request.form.get('code',''),int(float(request.form.get('hours',20))*60),teacher,coefficient))
         if teacher:execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,datetime.date.today().isoformat()))
         audit('course.created',name);return redirect(url_for('courses'))
-    rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
+    rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
     return render_template('courses_manage.html',courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant'"))
 
 @app.post('/courses/bulk')
