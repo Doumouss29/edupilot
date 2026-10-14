@@ -1439,7 +1439,7 @@ def compile_class_report(class_id, student_ids=None):
                  JOIN years y ON y.id=c.year_id WHERE c.id=? AND c.school_id=?""",(class_id,school_id()))
     if not clazz:abort(404)
     courses=allrows('SELECT id,name,code,coefficient FROM courses WHERE class_id=? AND school_id=? ORDER BY name',(class_id,school_id()))
-    students=allrows("""SELECT DISTINCT u.id,u.name FROM enrollments e JOIN users u ON u.id=e.student_id
+    students=allrows("""SELECT DISTINCT u.id,u.name,u.matricule FROM enrollments e JOIN users u ON u.id=e.student_id
                 WHERE e.school_id=? AND e.class_id=? AND e.year_id=? ORDER BY u.name""",(school_id(),class_id,clazz['year_id']))
     if student_ids is not None:students=[student for student in students if student['id'] in student_ids]
     evals=allrows("""SELECT a.id,a.course_id,a.title,a.coefficient,a.max_score,a.published FROM assessments a
@@ -1572,7 +1572,7 @@ def grades():
         student_id=u['id']
         if u['role']=='parent':
             # Only an authorized parent with a child in an enabled class may see results.
-            children=allrows("""SELECT DISTINCT st.id,st.name FROM parent_links p JOIN users st ON st.id=p.student_id
+            children=allrows("""SELECT DISTINCT st.id,st.name,st.matricule FROM parent_links p JOIN users st ON st.id=p.student_id
                        JOIN enrollments e ON e.student_id=st.id JOIN classes cl ON cl.id=e.class_id
                        WHERE p.school_id=? AND p.parent_id=? AND p.active=1 AND cl.parents_enabled=1""",(school_id(),u['id']))
             request_id=request.args.get('student_id','')
@@ -1615,7 +1615,7 @@ def grade_entry(aid):
     period=one('SELECT * FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(a['class_id'],school_id()))
     if period and period['locked']:
         if not one('SELECT id FROM unlocks WHERE period_id=? AND teacher_id=? AND expires_at>?',(period['id'],u['id'],datetime.datetime.now(datetime.timezone.utc).isoformat())):abort(403,'Période verrouillée : demander une réouverture')
-    students=allrows("""SELECT DISTINCT u.id,u.name,g.value,g.comment FROM enrollments e JOIN users u ON u.id=e.student_id
+    students=allrows("""SELECT DISTINCT u.id,u.name,u.matricule,g.value,g.comment FROM enrollments e JOIN users u ON u.id=e.student_id
                         LEFT JOIN grades g ON g.student_id=u.id AND g.assessment_id=?
                         WHERE e.school_id=? AND e.class_id=? ORDER BY u.name""",(aid,school_id(),a['class_id']))
     if request.method=='POST':
@@ -1662,7 +1662,7 @@ def grade_global():
     if not selected:return render_template('grade_global.html',choices=choices,course=None,assessments=[],rows=[])
     course=one('SELECT * FROM courses WHERE id=? AND school_id=?',(selected['id'],school_id()))
     assessments=allrows('SELECT id,title,coefficient,max_score FROM assessments WHERE school_id=? AND course_id=? ORDER BY id',(school_id(),course['id']))
-    students=allrows("""SELECT DISTINCT u.id,u.name FROM enrollments e JOIN users u ON u.id=e.student_id
+    students=allrows("""SELECT DISTINCT u.id,u.name,u.matricule FROM enrollments e JOIN users u ON u.id=e.student_id
                         WHERE e.school_id=? AND e.class_id=? ORDER BY u.name""",(school_id(),course['class_id']))
     results=allrows("""SELECT g.student_id,g.assessment_id,g.value FROM grades g JOIN assessments a ON a.id=g.assessment_id
                        WHERE a.school_id=? AND a.course_id=?""",(school_id(),course['id']))
@@ -1688,7 +1688,7 @@ def class_grade_summary():
     courses=allrows('SELECT id,name,coefficient FROM courses WHERE class_id=? AND school_id=? ORDER BY name',(selected['id'],school_id()))
     if u['role']=='enseignant':
         courses=[c for c in courses if one('SELECT id FROM courses WHERE id=? AND teacher_id=?',(c['id'],u['id']))]
-    students=allrows("""SELECT DISTINCT u.id,u.name FROM enrollments e JOIN users u ON u.id=e.student_id
+    students=allrows("""SELECT DISTINCT u.id,u.name,u.matricule FROM enrollments e JOIN users u ON u.id=e.student_id
                         WHERE e.school_id=? AND e.class_id=? ORDER BY u.name""",(school_id(),selected['id']))
     course_averages={}
     for course in courses:
@@ -1798,15 +1798,15 @@ def parent_link():
 @app.route('/parents')
 @roles('admin','administratif')
 def parents():
-    linked=scoped('SELECT s.name student_name,p.name parent_name,pl.relation FROM parent_links pl JOIN users s ON s.id=pl.student_id JOIN users p ON p.id=pl.parent_id WHERE pl.school_id=? AND pl.active=1')
-    return render_template('parents.html',linked=linked,students=scoped("SELECT id,name FROM users WHERE school_id=? AND role='etudiant'"),parents=scoped("SELECT id,name FROM users WHERE school_id=? AND role='parent'"))
+    linked=scoped('SELECT s.name student_name,s.matricule student_matricule,p.name parent_name,p.matricule parent_matricule,pl.relation FROM parent_links pl JOIN users s ON s.id=pl.student_id JOIN users p ON p.id=pl.parent_id WHERE pl.school_id=? AND pl.active=1')
+    return render_template('parents.html',linked=linked,students=scoped("SELECT id,name,matricule FROM users WHERE school_id=? AND role='etudiant'"),parents=scoped("SELECT id,name,matricule FROM users WHERE school_id=? AND role='parent'"))
 
 @app.get('/attendance/<int:lid>')
 @roles('enseignant','admin','administratif')
 def attendance(lid):
     lesson=one('SELECT l.*,c.class_id,c.name course_name FROM lessons l JOIN courses c ON c.id=l.course_id WHERE l.id=? AND l.school_id=?',(lid,school_id()))
     if not lesson or (current_user()['role']=='enseignant' and lesson['teacher_id']!=current_user()['id']):abort(403)
-    students=allrows('SELECT u.id,u.name,a.status FROM enrollments e JOIN users u ON u.id=e.student_id LEFT JOIN attendance a ON a.lesson_id=? AND a.student_id=u.id WHERE e.school_id=? AND e.class_id=?',(lid,school_id(),lesson['class_id']))
+    students=allrows('SELECT u.id,u.name,u.matricule,a.status FROM enrollments e JOIN users u ON u.id=e.student_id LEFT JOIN attendance a ON a.lesson_id=? AND a.student_id=u.id WHERE e.school_id=? AND e.class_id=?',(lid,school_id(),lesson['class_id']))
     return render_template('attendance.html',lesson=lesson,students=students)
 
 @app.post('/attendance/<int:lid>')
