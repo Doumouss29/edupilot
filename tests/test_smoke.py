@@ -104,6 +104,23 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertEqual(self.client.get("/platform-logo").status_code,404)
         self.assertNotIn(b'platform-logo-mobile',self.client.get("/").data)
 
+    def test_platform_logo_accepts_original_sized_png_and_rejects_oversized(self):
+        self.login("superadmin@tests.edupilot.invalid")
+        fields={"csrf":self.token(),"support_name":"LMurbs",
+                "support_phone":"+2250711124359","powered_by":"Propulsé par LMurbs"}
+        raw=b'\x89PNG\r\n\x1a\n'+b'x'*(2*1024*1024+100)
+        result=self.client.post("/settings",data={**fields,
+            "platform_logo":(io.BytesIO(raw),"large-edupilot.png")},content_type="multipart/form-data")
+        self.assertEqual(result.status_code,302)
+        self.assertEqual(self.client.get("/platform-logo").data,raw)
+        too_large=b'\x89PNG\r\n\x1a\n'+b'y'*(5*1024*1024)
+        result=self.client.post("/settings",data={**fields,
+            "platform_logo":(io.BytesIO(too_large),"huge.png")},
+            content_type="multipart/form-data",follow_redirects=True)
+        self.assertEqual(result.status_code,200)
+        self.assertIn("5 Mo".encode(),result.data)
+        self.assertEqual(self.client.get("/platform-logo").data,raw)
+
     def test_only_superadmin_can_modify_platform_branding(self):
         self.login("admin1@tests.edupilot.invalid")
         response=self.client.post("/settings",data={"csrf":self.token(),
