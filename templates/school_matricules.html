@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block heading %}Configuration des matricules{% endblock %}
+{% block content %}
+<div class="section-intro"><span class="eyebrow">SUPER ADMIN · NUMÉROTATION</span><h2>{{school.name}}</h2><p>Définissez un préfixe et une séquence indépendante pour chaque profil. La numérotation est propre à cet établissement. Les matricules existants restent inchangés.</p></div>
+<div class="page-actions"><a class="btn outline" href="{{url_for('schools')}}">← Établissements</a><a class="btn outline" href="{{url_for('school_accounts',sid=school.id)}}">Comptes de direction</a></div>
+<section class="panel"><form method="post"><input type="hidden" name="csrf" value="{{csrf}}">
+<div class="table-scroll"><table><thead><tr><th>Profil</th><th>Préfixe</th><th>Prochain numéro</th><th>Nombre de chiffres</th><th>Exemple</th></tr></thead>
+<tbody>{% for r in rules %}<tr>
+<td><b>{{{'etudiant':'Élève / Étudiant','enseignant':'Enseignant','administratif':'Administratif','admin':'Direction / Admin','parent':'Parent'}.get(r.role,r.role)}}</b></td>
+<td><input name="prefix_{{r.role}}" value="{{r.prefix}}" maxlength="15" required pattern="[A-Za-z0-9][A-Za-z0-9_/-]{0,14}"></td>
+<td><input name="next_{{r.role}}" type="number" min="1" max="999999999" value="{{r.next_number}}" required></td>
+<td><input name="padding_{{r.role}}" type="number" min="2" max="10" value="{{r.padding}}" required></td>
+<td><strong>{{r.prefix}}{{('%0*d' % (r.padding,r.next_number))}}</strong></td>
+</tr>{% endfor %}</tbody></table></div>
+<p class="muted">Exemple : préfixe ETU-, premier numéro 1 et 5 chiffres → ETU-00001. Un matricule ne peut pas être attribué deux fois dans le même établissement. Les matricules modifiés manuellement sont conservés.</p>
+<div class="form-actions"><button class="btn primary" type="submit">Enregistrer la configuration</button></div>
+</form></section>
+{% endblock %}
