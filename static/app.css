@@ -317,3 +317,26 @@ img,video,iframe,canvas{max-width:100%}
  .mobile-school-brand img,.mobile-school-fallback{width:40px;height:40px;flex-basis:40px}
 }
 @media print{.mobile-brand-banner{display:none!important}}
+
+
+/* Identité visuelle personnalisable de la plateforme EduPilot. */
+.platform-logo-sidebar{display:block;width:100%;max-width:188px;height:130px;object-fit:contain;object-position:center;background:#fff;border-radius:13px;padding:8px;box-sizing:border-box}
+.sidebar .brand:has(.platform-logo-sidebar){justify-content:center;padding:0 6px 24px;min-height:0}
+.platform-logo-mobile{display:block;width:104px;height:83px;max-width:100%;object-fit:contain;object-position:left center}
+.mobile-edupilot-brand:has(.platform-logo-mobile){min-height:83px}
+.platform-logo-login{display:block;width:190px;height:155px;object-fit:contain;background:#fff;border-radius:15px;padding:8px;box-sizing:border-box}
+.hero-logo:has(.platform-logo-login){display:flex;align-items:center}
+.platform-logo-login-mobile{width:120px;height:100px;max-width:100%;object-fit:contain;object-position:left center}
+.platform-brand-editor{grid-column:1 / -1;display:grid;gap:11px;padding:16px;border:1px solid #e4ebef;border-radius:13px;background:#fafbfc}
+.platform-brand-editor h3,.platform-brand-editor p{margin:0}
+.platform-brand-preview{width:100%;max-width:340px;min-height:155px;padding:14px;display:grid;place-items:center;border:1px solid #e8edf3;background:#fff;border-radius:12px}
+.platform-brand-preview img{display:block;width:100%;max-width:290px;height:150px;object-fit:contain}
+.platform-brand-preview span{color:#77899a;text-align:center}
+@media(max-width:720px){
+ .mobile-edupilot-brand:has(.platform-logo-mobile){min-height:75px}
+ .platform-logo-mobile{width:104px;height:75px}
+ .mobile-brand-banner:has(.platform-logo-mobile){gap:8px}
+ .login-panel .platform-logo-login-mobile{height:90px}
+ .platform-brand-editor{padding:12px}
+ .platform-brand-preview{max-width:100%}
+}
