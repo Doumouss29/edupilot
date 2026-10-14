@@ -285,6 +285,33 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertEqual(deleted.status_code,200)
         self.assertIsNone(project.one("SELECT id FROM push_subscriptions WHERE endpoint=?",(valid["endpoint"],)))
 
+    def test_mobile_navigation_contains_logout_and_no_duplicate_alerts(self):
+        self.login("admin1@tests.edupilot.invalid")
+        response=self.client.get("/")
+        self.assertEqual(response.status_code,200)
+        page=response.data.decode()
+        self.assertIn('id="mobile-menu-button"',page)
+        self.assertIn('id="main-sidebar"',page)
+        self.assertIn('id="mobile-menu-close"',page)
+        self.assertIn('id="mobile-backdrop"',page)
+        self.assertIn('id="edupilot-logout"',page)
+        self.assertIn('id="notification-bell"',page)
+        self.assertNotIn("Dernières alertes",page)
+        # The authenticated users menu includes logout on all screen sizes.
+        self.assertIn("Se déconnecter",page)
+        self.assertIn("Modifier mon mot de passe",page)
+        self.assertEqual(self.client.get('/static/mobile-navigation.js').status_code,200)
+
+    def test_student_mobile_dashboard_no_duplicate_notifications(self):
+        self.login("eleve1_1@tests.edupilot.invalid")
+        response=self.client.get("/")
+        self.assertEqual(response.status_code,200)
+        page=response.data.decode()
+        self.assertIn('id="mobile-menu-button"',page)
+        self.assertIn('id="notification-bell"',page)
+        self.assertNotIn("Mes notifications</b>",page)
+        self.assertIn("Se déconnecter",page)
+
     def test_notification_bell_api_and_clear(self):
         self.login("admin1@tests.edupilot.invalid")
         user=project.one("SELECT id FROM users WHERE school_id=1 AND role='admin' LIMIT 1")
