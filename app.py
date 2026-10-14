@@ -383,9 +383,11 @@ def restricted():
 
 @app.post('/logout')
 def logout():
-    # Prevent sensitive alerts from reaching a device after account logout.
+    # Revoke this device only, not all phones subscribed by the same user.
     uid=session.get('uid')
-    if uid:execute('DELETE FROM push_subscriptions WHERE user_id=?',(uid,))
+    endpoint=request.form.get('push_endpoint','')
+    if uid and endpoint and len(endpoint)<=2048:
+        execute('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?',(uid,endpoint))
     session.clear()
     return redirect(url_for('login'))
 
