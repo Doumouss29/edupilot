@@ -8,10 +8,7 @@
 <label>Adresse e-mail<input type="email" name="email" value="{{account.email}}" required></label>
 <label>Téléphone / contact<input type="tel" name="phone" maxlength="40" value="{{account.phone or ''}}" required></label>
 <label>Profil<select name="role"><option value="admin" {% if account.role=='admin' %}selected{% endif %}>Admin établissement</option><option value="administratif" {% if account.role=='administratif' %}selected{% endif %}>Administratif établissement</option></select></label>
-<div class="password-field"><label>Réinitialiser le mot de passe (facultatif)<input type="text" name="temporary_password" id="reset-pass" autocomplete="off" minlength="12" placeholder="Laisser vide pour ne pas modifier"></label><div class="password-actions"><button class="btn outline sm" id="reset-gen" type="button">Générer</button><button class="btn outline sm" id="reset-copy" type="button">Copier</button></div><small class="muted">Si un mot de passe est défini ici, son changement sera obligatoire à la prochaine connexion. Copiez-le avant d'enregistrer.</small></div>
+<p class="muted">Pour réinitialiser son accès, envoyez un lien personnel par e-mail depuis la gestion des comptes.</p>
 <div class="form-actions"><button type="submit" class="btn primary">Enregistrer les modifications</button></div>
 </form></section>
-<script>
-const p=document.getElementById('reset-pass');document.getElementById('reset-gen').onclick=()=>{const abc='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';const rand=new Uint32Array(20);crypto.getRandomValues(rand);let word=Array.from(rand,v=>abc[v%abc.length]).join('');if(!/[0-9]/.test(word))word='7'+word.slice(1);p.value=word};
-document.getElementById('reset-copy').onclick=async()=>{if(!p.value)return;try{await navigator.clipboard.writeText(p.value);alert('Mot de passe temporaire copié.')}catch(e){p.select()}};
-</script>{% endblock %}
+{% endblock %}
