@@ -77,6 +77,42 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertIn(b"Tableau de bord", result.data)
 
+    def test_superadmin_can_upload_and_replace_platform_logo(self):
+        png=b'\\x89PNG\\r\\n\\x1a\\n'+b'logo-payload-for-testing'
+        jpeg=b'\\xff\\xd8\\xff'+b'jpg-payload-for-testing'
+        self.login("superadmin@tests.edupilot.invalid")
+        fields={"csrf":self.token(),"support_name":"LMurbs",
+                "support_phone":"+2250711124359","powered_by":"Propulsé par LMurbs"}
+        result=self.client.post("/settings",data={**fields,
+            "platform_logo":(io.BytesIO(png),"edupilot.png")},content_type="multipart/form-data")
+        self.assertEqual(result.status_code,302)
+        logo=self.client.get("/platform-logo")
+        self.assertEqual(logo.status_code,200)
+        self.assertEqual(logo.data,png)
+        self.assertEqual(logo.mimetype,"image/png")
+        root=self.client.get("/")
+        self.assertIn(b'platform-logo-sidebar',root.data)
+        self.assertIn(b'platform-logo-mobile',root.data)
+        login_page=self.client.get("/login")
+        self.assertIn(b'platform-logo-login',login_page.data)
+        result=self.client.post("/settings",data={**fields,
+            "platform_logo":(io.BytesIO(jpeg),"edupilot.jpg")},content_type="multipart/form-data")
+        self.assertEqual(result.status_code,302)
+        self.assertEqual(self.client.get("/platform-logo").mimetype,"image/jpeg")
+        result=self.client.post("/settings",data={**fields,"remove_platform_logo":"1"})
+        self.assertEqual(result.status_code,302)
+        self.assertEqual(self.client.get("/platform-logo").status_code,404)
+        self.assertNotIn(b'platform-logo-mobile',self.client.get("/").data)
+
+    def test_only_superadmin_can_modify_platform_branding(self):
+        self.login("admin1@tests.edupilot.invalid")
+        response=self.client.post("/settings",data={"csrf":self.token(),
+            "support_name":"other","support_phone":"other","powered_by":"other",
+            "platform_logo":(io.BytesIO(b'\\x89PNG\\r\\n\\x1a\\nX'),"bad.png")},
+            content_type="multipart/form-data")
+        self.assertEqual(response.status_code,403)
+        self.assertIsNone(project.one('SELECT id FROM platform_branding WHERE id=1'))
+
     def test_superadmin_settings(self):
         self.login("superadmin@tests.edupilot.invalid")
         r = self.client.post("/settings", data={
