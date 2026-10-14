@@ -1214,6 +1214,7 @@ def courses_bulk():
             if not value.isdigit() or not one("SELECT id FROM users WHERE id=? AND school_id=? AND role='enseignant' AND active=1",(value,school_id())):abort(403)
             teacher_id=int(value)
     try:
+        with db() as c:
             c.execute('BEGIN IMMEDIATE')
             rows=c.execute(f'SELECT id,teacher_id FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids)).fetchall()
             if len(rows)!=len(ids):abort(403)
