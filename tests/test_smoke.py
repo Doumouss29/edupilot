@@ -165,7 +165,7 @@ class EduPilotSmoke(unittest.TestCase):
             self.assertEqual(len(captures),1)
             self.assertEqual(captures[0]["to"][0]["email"],"invite.student@example.test")
             msg=captures[0]["textContent"]
-            found=re.search(r"https://[^\\s]+/activate/([A-Za-z0-9_-]+)",msg)
+            found=re.search(r"https://\S+/activate/([A-Za-z0-9_-]+)",msg)
             self.assertIsNotNone(found)
             self.assertNotIn("Temporary2026Secret!",msg)
             token=found.group(1)
