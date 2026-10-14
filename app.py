@@ -517,12 +517,10 @@ def school_accounts(sid):
         email=request.form.get('email','').strip().lower()
         phone=request.form.get('phone','').strip()
         role=request.form.get('role','')
-        password=request.form.get('password','')
+        password=secrets.token_urlsafe(32)
         if not first or not last or not phone or not email or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400,'Informations obligatoires manquantes')
         if len(first)>90 or len(last)>90 or len(phone)>40 or len(email)>254:abort(400)
         if role not in ('admin','administratif'):abort(400)
-        if len(password)<12 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
-            abort(400,'Mot de passe temporaire non conforme')
         if one('SELECT id FROM users WHERE email=?',(email,)):
             flash('Cette adresse e-mail est déjà utilisée.','error')
         else:
@@ -530,11 +528,12 @@ def school_accounts(sid):
                 with db() as c:
                     c.execute('BEGIN IMMEDIATE')
                     matricule=requested_matricule(c,sid,role,request.form.get('matricule'))
-                    c.execute('INSERT INTO users(school_id,name,first_name,last_name,email,phone,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,1)',(sid,first+' '+last,first,last,email,phone,generate_password_hash(password),role,matricule))
+                    uid=c.execute('INSERT INTO users(school_id,name,first_name,last_name,email,phone,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,1)',(sid,first+' '+last,first,last,email,phone,generate_password_hash(password),role,matricule)).lastrowid
             except (ValueError,sqlite3.IntegrityError) as exc:
                 flash(str(exc),'error')
                 return redirect(url_for('school_accounts',sid=sid))
-            flash('Compte créé. Transmettez le mot de passe temporaire au destinataire par un canal sécurisé.','success')
+            sent=create_invite(uid)
+            flash('Compte créé. '+('Invitation envoyée par e-mail.' if sent else 'E-mail non envoyé : vérifiez Brevo et renvoyez l’invitation.'),'success' if sent else 'error')
             return redirect(url_for('school_accounts',sid=sid))
     accounts=allrows("SELECT id,first_name,last_name,name,email,phone,role,matricule,active,must_change_password FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
     return render_template('school_accounts.html',school=school,accounts=accounts,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(sid,))},base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
@@ -799,10 +798,7 @@ def people():
             clause=','.join('?' for _ in vals)
             selected=allrows(f'SELECT id FROM courses WHERE school_id=? AND id IN ({clause})',(school_id(),*vals))
             if len(selected)!=len(vals):abort(403)
-        password=request.form.get('password','')
-        if len(password)<12 or not any(x.isalpha() for x in password) or not any(x.isdigit() for x in password):
-            flash('Mot de passe temporaire : 12 caractères minimum, avec des lettres et des chiffres.','error')
-            return redirect(url_for('people'))
+        password=secrets.token_urlsafe(32)
         with db() as c:
             if c.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone():
                 flash('Adresse e-mail déjà utilisée.','error')
@@ -820,7 +816,8 @@ def people():
                 c.execute('INSERT INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school_id(),uid,int(class_id),clazz['year_id']))
         if course_ids:assign_courses_to_teacher(uid,course_ids)
         audit('person.created',email)
-        flash('Utilisateur créé. Communiquez son mot de passe temporaire par un canal sécurisé.','success')
+        sent=create_invite(uid)
+        flash('Compte créé. '+('Lien d’activation envoyé par e-mail.' if sent else 'Invitation non envoyée : vérifiez la configuration Brevo.'),'success' if sent else 'error')
         return redirect(url_for('people'))
     users=scoped('SELECT * FROM users WHERE school_id=? ORDER BY role,name')
     classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name')
@@ -975,7 +972,7 @@ def people_import():
         return redirect(url_for('people'))
     # Invitations can be requested later; avoid thousands of synchronous outbound email calls.
     audit('students.imported',str(len(hashes)))
-    flash(f'{len(hashes)} étudiants importés et inscrits dans '+(selected_class['name'] if selected_class else 'leurs classes')+'. Invitations à envoyer ultérieurement.','success')
+    flash(f'{len(hashes)} étudiants importés et inscrits dans '+(selected_class['name'] if selected_class else 'leurs classes')+'. Invitations disponibles via l’action d’envoi groupé.','success')
     return redirect(url_for('people'))
 
 def create_invite(uid):
