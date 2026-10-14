@@ -207,6 +207,7 @@ class EduPilotSmoke(unittest.TestCase):
         student=project.one("SELECT id FROM users WHERE school_id=1 AND role='etudiant' LIMIT 1")
         admin=project.one("SELECT id FROM users WHERE school_id=1 AND role='admin' LIMIT 1")
         parent=project.one("SELECT id FROM users WHERE school_id=1 AND role='parent' LIMIT 1")
+        project.execute("UPDATE classes SET parents_enabled=0 WHERE id=?",(course['class_id'],))
         recipients=project.event_recipients([course['id']],[course['teacher_id']])
         self.assertIn(student['id'],recipients)
         self.assertIn(admin['id'],recipients)
