@@ -557,10 +557,6 @@ def school_account_edit(sid,uid):
         if duplicate:
             flash('Adresse e-mail déjà utilisée.','error')
             return redirect(url_for('school_account_edit',sid=sid,uid=uid))
-        reset=request.form.get('temporary_password','')
-        if reset and (len(reset)<12 or not any(ch.isalpha() for ch in reset) or not any(ch.isdigit() for ch in reset)):
-            flash('Le mot de passe temporaire doit avoir au moins 12 caractères, avec lettres et chiffres.','error')
-            return redirect(url_for('school_account_edit',sid=sid,uid=uid))
         try:
             with db() as c:
                 c.execute('BEGIN IMMEDIATE')
@@ -573,9 +569,6 @@ def school_account_edit(sid,uid):
             flash(str(exc),'error')
             return redirect(url_for('school_account_edit',sid=sid,uid=uid))
         with db() as c:
-            if reset:
-                c.execute('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=? AND school_id=?',
-                          (generate_password_hash(reset),uid,sid))
             c.execute('INSERT INTO audit(school_id,user_id,action,details) VALUES (?,?,?,?)',
                       (sid,current_user()['id'],'account.updated',str(uid)))
         flash('Compte modifié avec succès.','success')
