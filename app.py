@@ -382,7 +382,12 @@ def restricted():
     return render_template('restricted.html')
 
 @app.post('/logout')
-def logout():session.clear();return redirect(url_for('login'))
+def logout():
+    # Prevent sensitive alerts from reaching a device after account logout.
+    uid=session.get('uid')
+    if uid:execute('DELETE FROM push_subscriptions WHERE user_id=?',(uid,))
+    session.clear()
+    return redirect(url_for('login'))
 
 @app.get('/')
 @login_required
