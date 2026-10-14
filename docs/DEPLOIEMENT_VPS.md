@@ -105,3 +105,40 @@ sudo rm data/backup.db
 - Le déploiement n'importe **pas** les données déjà saisies sur Render. Il faut obtenir le fichier SQLite Render avant toute migration de ces données, si leur conservation est nécessaire.
 - Ne pas importer de données personnelles réelles avant une revue complète de sécurité, conformité et sauvegarde.
 - Aucun changement de configuration n'est nécessaire dans les autres applications tant que le réseau `proxy` et Traefik central sont en place.
+
+## Notifications sur smartphone : activation Web Push
+
+EduPilot est installable en PWA. La cloche en haut à droite fonctionne sans configuration externe, avec stockage dans SQLite. Pour activer les alertes du système Android/iPhone, configurer une paire VAPID permanente, conservée dans le volume persistant.
+
+### 1. Installer le code et générer les clés
+
+Après sauvegarde du dossier `data/`, mise à jour Git et reconstruction du conteneur :
+
+```bash
+cd /opt/apps/edupilot
+docker compose -f docker-compose.vps.yml exec edupilot python scripts/setup_push.py
+```
+
+Le script crée `/data/vapid_private.pem` s'il n'existe pas. Il ne révèle jamais la clé privée. Il affiche trois paramètres à ajouter dans le fichier `.env` du VPS : `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`. Remplacer la valeur `mailto:` par l'adresse e-mail de contact réelle de l'exploitant. **Ne pas copier la clé privée dans GitHub**. Ne pas la régénérer après l'inscription des téléphones, sinon leurs abonnements peuvent devenir invalides.
+
+```bash
+nano .env
+# Ajouter les valeurs affichées par le script, puis enregistrer.
+docker compose -f docker-compose.vps.yml config --quiet
+docker compose -f docker-compose.vps.yml up -d --no-deps --force-recreate edupilot
+curl -fsS https://edupilot.ci/api/push/config
+```
+
+L'URL `/api/push/config` requiert une session authentifiée ; utiliser le navigateur connecté pour vérifier `enabled: true`. La commande `curl` sans session peut rediriger vers la page de connexion.
+
+### 2. Activer sur les téléphones
+
+- **Android :** ouvrir `https://edupilot.ci` dans un navigateur compatible, se connecter, ouvrir la cloche et toucher « Activer les notifications sur ce téléphone », puis autoriser.
+- **iPhone iOS 16.4+ :** ouvrir le site dans Safari, utiliser Partager → Sur l'écran d'accueil, lancer EduPilot depuis l'icône installée, se connecter, puis activer les notifications dans la cloche.
+- Les autorisations sont accordées appareil par appareil et peuvent être révoquées dans les réglages système.
+- Les notifications push nécessitent Internet. Leur distribution finale dépend du navigateur et du système d'exploitation.
+- Les alertes déjà présentes dans le panneau système du téléphone ne peuvent pas être effacées à distance par « Tout effacer » dans EduPilot.
+
+### 3. Maintenance
+
+La base `data/edupilot.db` contient les notifications et les abonnements Web Push. Sauvegarder aussi `data/vapid_private.pem` **hors du VPS, dans un stockage chiffré et à accès restreint**. Les envois e-mail Brevo restent indépendants. Pour des campagnes à grand volume, prévoir une file d'attente asynchrone dédiée : les envois Web Push actuels ont lieu pendant le traitement de l'événement.
