@@ -349,6 +349,11 @@ def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True):
         notify(recipients,message,href)
 
 
+@app.template_filter('statut_seance')
+def statut_seance(value):
+    return {'programmee':'Programmée','realisee':'Réalisée','partielle':'Partiellement réalisée',
+            'non_effectuee':'Non effectuée','annulee':'Annulée','reportee':'Reportée'}.get(value,value.replace('_',' ').capitalize() if value else '—')
+
 def slugify(s):
     s=unicodedata.normalize('NFKD',s).encode('ascii','ignore').decode().lower()
     return re.sub(r'^_+|_+$','',re.sub(r'[^a-z0-9]+','_',s))
@@ -467,10 +472,18 @@ def dashboard():
     if u['role']=='enseignant': courses=[x for x in courses if x['teacher_id']==u['id']]
     lessonlist=scoped('SELECT l.*,CAST(ROUND((julianday(l.ends_at)-julianday(l.starts_at))*1440) AS INTEGER) scheduled_minutes,c.name course_name,cl.name class_name,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? ORDER BY l.starts_at DESC LIMIT 80')
     if u['role']=='enseignant': lessonlist=[x for x in lessonlist if any(y['id']==x['course_id'] for y in courses)]
+    upcoming=scoped("""SELECT l.*,c.name course_name,cl.name class_name
+        FROM lessons l JOIN courses c ON c.id=l.course_id
+        JOIN classes cl ON cl.id=c.class_id
+        WHERE l.school_id=? AND l.starts_at>=? AND l.status='programmee'
+        ORDER BY l.starts_at ASC LIMIT 80""",(datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),))
+    if u['role']=='enseignant':
+        upcoming=[x for x in upcoming if x['teacher_id']==u['id']]
+    upcoming=upcoming[:8]
     total=sum(x['planned_minutes'] for x in courses)
     actual=sum(x['actual_minutes'] for x in lessonlist if x['status'] in ('realisee','partielle'))
     stats={'classes':len(classes),'courses':len(courses),'lessons':len(lessonlist),'total':total//60,'actual':round(actual/60,1),'percent':round(actual/total*100,1) if total else 0}
-    return render_template('dashboard.html',stats=stats,classes=classes,events=lessonlist,schools=[],courses=courses)
+    return render_template('dashboard.html',stats=stats,classes=classes,events=upcoming,schools=[],courses=courses)
 
 @app.get('/schools')
 @roles('superadmin')
