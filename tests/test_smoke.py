@@ -333,6 +333,40 @@ class EduPilotSmoke(unittest.TestCase):
             self.assertNotIn(admin['id'],user_ids)  # Actor does not receive a duplicate alert.
             self.assertNotIn(other['id'],user_ids)
 
+    def test_teacher_change_updates_only_future_sessions_and_calendar(self):
+        import datetime
+        from werkzeug.security import generate_password_hash
+        self.login("admin1@tests.edupilot.invalid")
+        course=project.one("SELECT * FROM courses WHERE school_id=1 LIMIT 1")
+        previous=course["teacher_id"]
+        new_teacher=project.execute("INSERT INTO users(school_id,name,email,password_hash,role) VALUES (1,?,?,?,'enseignant')",
+            ("Nouvelle enseignante","new.teacher@example.test",generate_password_hash("Test2026!")))
+        today=datetime.datetime.now().replace(second=0,microsecond=0)
+        tomorrow=(today+datetime.timedelta(days=2)).replace(hour=15,minute=0)
+        yesterday=(today-datetime.timedelta(days=3)).replace(hour=15,minute=0)
+        fmt=lambda d:d.strftime("%Y-%m-%dT%H:%M")
+        future=project.execute("INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room,status) VALUES (?,?,?,?,?,?,'programmee')",
+            (1,course["id"],previous,fmt(tomorrow),fmt(tomorrow+datetime.timedelta(hours=1)),"Test B"))
+        past=project.execute("INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room,status) VALUES (?,?,?,?,?,?,'realisee')",
+            (1,course["id"],previous,fmt(yesterday),fmt(yesterday+datetime.timedelta(hours=1)),"Test A"))
+        resp=self.client.post(f"/courses/{course['id']}/edit",data={
+            "csrf":self.token(),"name":course["name"],"class_id":course["class_id"],
+            "teacher_id":str(new_teacher),"hours":"40","coefficient":"1","code":course["code"]})
+        self.assertEqual(resp.status_code,302)
+        self.assertEqual(project.one("SELECT teacher_id FROM lessons WHERE id=?",(future,))["teacher_id"],new_teacher)
+        self.assertEqual(project.one("SELECT teacher_id FROM lessons WHERE id=?",(past,))["teacher_id"],previous)
+        self.assertEqual(project.one("SELECT teacher_id FROM courses WHERE id=?",(course["id"],))["teacher_id"],new_teacher)
+        self.client.post("/logout",data={"csrf":self.token()})
+        self.login("new.teacher@example.test")
+        response=self.client.get("/api/planning")
+        self.assertEqual(response.status_code,200)
+        self.assertIn(future,{e["id"] for e in response.json})
+        self.assertNotIn(past,{e["id"] for e in response.json})
+        dashboard=self.client.get("/")
+        self.assertEqual(dashboard.status_code,200)
+        self.assertIn("Prochaines séances".encode(),dashboard.data)
+        self.assertIn("Programmée".encode(),dashboard.data)
+
     def test_teacher_can_receive_several_courses(self):
         self.login("admin1@tests.edupilot.invalid")
         cl=project.one("SELECT id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
