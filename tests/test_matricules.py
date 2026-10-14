@@ -56,12 +56,14 @@ class MatriculeTests(unittest.TestCase):
             data["next_"+role]="12"
         response=self.client.post("/schools/1/matricules",data=data)
         self.assertEqual(response.status_code,302)
+        self.assertEqual(self.client.get("/schools/1/matricules").status_code,200)
         self.assertEqual(self.client.get("/api/schools/1/matricule/next?role=etudiant").json["matricule"],"ELV-00012")
         self.client.get("/logout")
         # CSRF protected logout is POST.
         token=self.login("admin-alpha@tests.invalid")
         self.assertEqual(self.client.get("/api/matricule/next?role=etudiant").json["matricule"],"ELV-00012")
         self.assertEqual(self.client.get("/api/schools/2/matricule/next?role=etudiant").status_code,403)
+        self.assertEqual(self.client.get("/people").status_code,200)
 
 if __name__=="__main__":
     unittest.main()
