@@ -140,3 +140,11 @@ a:not(.nav):hover{color:#dc722b}
 #courses-bulk .table-scroll,#print-bulletins .table-scroll{max-height:640px;overflow:auto}
 #courses-bulk .page-actions,#print-bulletins .page-actions{align-items:flex-end}
 @media print{.sidebar,.topbar,.page-actions,.app-footer{display:none!important}body{background:white}.content{padding:0}.panel{box-shadow:none;border:none;break-inside:avoid}}
+
+/* Logos des établissements : format portrait compact, identique partout */
+.school-table-identity{display:flex;align-items:center;gap:12px;min-width:160px}
+.school-table-identity b{overflow-wrap:anywhere;line-height:1.35}
+.school-logo-thumb,.school-logo{width:48px!important;height:60px!important;min-width:48px;max-width:48px;max-height:60px;box-sizing:border-box;flex:0 0 48px;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:8px;background:#f5f7f8;border:1px solid #e4e9ec}
+.school-logo-thumb img,.school-logo img{display:block;width:100%!important;height:100%!important;max-width:100%;max-height:100%;object-fit:contain;object-position:center}
+.school-logo-thumb>span{font-size:20px}
+.school-card-header{align-items:center}
