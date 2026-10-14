@@ -5,6 +5,7 @@ from flask import Response
 from contextlib import contextmanager
 from pathlib import Path
 import requests
+from urllib.parse import urlsplit
 from flask import Flask, request, redirect, url_for, render_template, flash, session, abort, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS grade_history(id INTEGER PRIMARY KEY, grade_id INTEGE
 CREATE TABLE IF NOT EXISTS periods(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), class_id INTEGER NOT NULL REFERENCES classes(id), name TEXT NOT NULL, locked INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS unlocks(id INTEGER PRIMARY KEY, period_id INTEGER NOT NULL REFERENCES periods(id), teacher_id INTEGER NOT NULL REFERENCES users(id), expires_at TEXT NOT NULL, reason TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), user_id INTEGER NOT NULL REFERENCES users(id), message TEXT NOT NULL, href TEXT DEFAULT '', read INTEGER NOT NULL DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS push_subscriptions(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL UNIQUE, subscription_json TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, school_id INTEGER, user_id INTEGER, action TEXT NOT NULL, details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id), student_id INTEGER NOT NULL REFERENCES users(id), filename TEXT NOT NULL, filepath TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(assessment_id,student_id));
 CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
@@ -233,13 +235,33 @@ def audit(action,details=''):
     execute('INSERT INTO audit(school_id,user_id,action,details) VALUES (?,?,?,?)',(u['school_id'],u['id'],action,details))
 
 def notify(ids,message,href=''):
-    for uid in set(ids):
-        execute('INSERT INTO notifications(school_id,user_id,message,href) VALUES (?,?,?,?)',(school_id(),uid,message,href))
+    # Persist first: an external push or email error cannot erase an internal alert.
+    sid=school_id()
+    candidate=set(ids)
+    recipients=[r['id'] for r in allrows('SELECT id FROM users WHERE school_id=? AND active=1',(sid,)) if r['id'] in candidate]
+    for uid in recipients:
+        execute('INSERT INTO notifications(school_id,user_id,message,href) VALUES (?,?,?,?)',(sid,uid,message,href))
+    if recipients and all(os.getenv(k) for k in ('VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_SUBJECT')):
+        try:
+            from pywebpush import webpush, WebPushException
+            subscriptions=allrows('SELECT id,user_id,subscription_json FROM push_subscriptions WHERE user_id IN ('+','.join('?' for _ in recipients)+')',tuple(recipients))
+            for subscription in subscriptions:
+                try:
+                    webpush(subscription_info=json.loads(subscription['subscription_json']),
+                        data=json.dumps({'title':'EduPilot','body':message[:350],'url':href if href.startswith('/') and not href.startswith('//') else '/'}),
+                        vapid_private_key=os.getenv('VAPID_PRIVATE_KEY'),
+                        vapid_claims={'sub':os.getenv('VAPID_SUBJECT')},timeout=3)
+                except WebPushException as exc:
+                    if getattr(getattr(exc,'response',None),'status_code',None) in (404,410):
+                        execute('DELETE FROM push_subscriptions WHERE id=?',(subscription['id'],))
+                    else:app.logger.warning('Échec push: %s',type(exc).__name__)
+                except Exception as exc:app.logger.warning('Échec push: %s',type(exc).__name__)
+        except ImportError:app.logger.warning('Module pywebpush indisponible')
     api_key=os.getenv('BREVO_API_KEY')
     sender=os.getenv('BREVO_SENDER_EMAIL')
     if api_key and sender:
-        for uid in set(ids):
-            user=one('SELECT email FROM users WHERE id=? AND school_id=?',(uid,school_id()))
+        for uid in recipients:
+            user=one('SELECT email FROM users WHERE id=? AND school_id=?',(uid,sid))
             if not user: continue
             try:
                 requests.post('https://api.brevo.com/v3/smtp/email',json={'sender':{'email':sender,'name':os.getenv('BREVO_SENDER_NAME','EduPilot')},'to':[{'email':user['email']}],'subject':'Notification EduPilot','textContent':message},headers={'api-key':api_key,'Content-Type':'application/json'},timeout=6).raise_for_status()
@@ -551,6 +573,7 @@ def school_accounts_bulk(sid):
             for uid in ids:
                 c.execute('DELETE FROM invites WHERE user_id=?',(uid,))
                 c.execute('DELETE FROM notifications WHERE user_id=?',(uid,))
+                c.execute('DELETE FROM push_subscriptions WHERE user_id=?',(uid,))
                 c.execute('UPDATE audit SET user_id=NULL WHERE user_id=?',(uid,))
             c.execute(f"DELETE FROM users WHERE school_id=? AND id IN ({placeholders})",(sid,*ids))
         elif action in ('activate','suspend'):
@@ -591,6 +614,7 @@ def school_update(sid):
             c.execute('DELETE FROM years WHERE school_id=?',(sid,))
             c.execute('DELETE FROM campuses WHERE school_id=?',(sid,))
             c.execute('DELETE FROM notifications WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM push_subscriptions WHERE user_id IN (SELECT id FROM users WHERE school_id=?)',(sid,))
             c.execute('DELETE FROM audit WHERE school_id=?',(sid,))
             c.execute('DELETE FROM invites WHERE user_id IN (SELECT id FROM users WHERE school_id=?)',(sid,))
             c.execute('DELETE FROM users WHERE school_id=?',(sid,))
@@ -1792,13 +1816,79 @@ def periods():
         audit('period.'+action,str(pid));flash('Période mise à jour.','success');return redirect(url_for('periods'))
     return render_template('periods.html',periods=scoped('SELECT p.*,c.name class_name FROM periods p JOIN classes c ON c.id=p.class_id WHERE p.school_id=?'))
 
-@app.route('/notifications')
+@app.get('/api/notifications')
 @login_required
-def notifications():
-    u=current_user()
-    rows=allrows('SELECT * FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 100',(u['id'],))
-    execute('UPDATE notifications SET read=1 WHERE user_id=?',(u['id'],))
-    return render_template('list.html',title='Notifications',columns=['Date','Message'],rows=[(x['created_at'],x['message']) for x in rows])
+def notifications_api():
+    uid=current_user()['id']
+    rows=allrows('SELECT id,message,href,read,created_at FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 60',(uid,))
+    count=one('SELECT count(*) total FROM notifications WHERE user_id=? AND read=0',(uid,))['total']
+    return jsonify(notifications=[dict(row) for row in rows],unread=count)
+
+@app.post('/api/notifications/read')
+@login_required
+def notifications_read():
+    uid=current_user()['id']
+    ids=(request.get_json(silent=True) or {}).get('ids',[])
+    if not isinstance(ids,list) or len(ids)>100 or any(not isinstance(i,int) for i in ids):abort(400)
+    with db() as c:
+        if ids:
+            c.execute('UPDATE notifications SET read=1 WHERE user_id=? AND id IN ('+','.join('?' for _ in ids)+')',(uid,*ids))
+        else:
+            c.execute('UPDATE notifications SET read=1 WHERE user_id=?',(uid,))
+    return jsonify(ok=True)
+
+@app.post('/api/notifications/delete')
+@login_required
+def notifications_delete():
+    uid=current_user()['id']
+    payload=request.get_json(silent=True) or {}
+    if payload.get('all') is True:
+        execute('DELETE FROM notifications WHERE user_id=?',(uid,))
+    else:
+        ids=payload.get('ids',[])
+        if not isinstance(ids,list) or not ids or len(ids)>100 or any(not isinstance(i,int) for i in ids):abort(400)
+        with db() as c:
+            c.execute('DELETE FROM notifications WHERE user_id=? AND id IN ('+','.join('?' for _ in ids)+')',(uid,*ids))
+    return jsonify(ok=True)
+
+@app.get('/api/push/config')
+@login_required
+def push_config():
+    key=os.getenv('VAPID_PUBLIC_KEY','').strip()
+    return jsonify(enabled=bool(key and os.getenv('VAPID_PRIVATE_KEY') and os.getenv('VAPID_SUBJECT')),public_key=key)
+
+@app.post('/api/push/subscribe')
+@login_required
+def push_subscribe():
+    sub=request.get_json(silent=True)
+    if not isinstance(sub,dict):abort(400)
+    endpoint=sub.get('endpoint','')
+    keys=sub.get('keys',{})
+    if not isinstance(endpoint,str) or len(endpoint)>2048 or not isinstance(keys,dict):abort(400)
+    parsed=urlsplit(endpoint)
+    if (parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password
+        or not all(isinstance(keys.get(k),str) and 8<=len(keys[k])<=512 for k in ('p256dh','auth'))):
+        abort(400,'Abonnement push invalide')
+    raw=json.dumps({'endpoint':endpoint,'keys':{'p256dh':keys['p256dh'],'auth':keys['auth']}},separators=(',',':'))
+    with db() as c:
+        c.execute('INSERT INTO push_subscriptions(user_id,endpoint,subscription_json) VALUES (?,?,?) ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription_json=excluded.subscription_json',(current_user()['id'],endpoint,raw))
+    return jsonify(ok=True)
+
+@app.post('/api/push/unsubscribe')
+@login_required
+def push_unsubscribe():
+    endpoint=(request.get_json(silent=True) or {}).get('endpoint','')
+    if not isinstance(endpoint,str) or len(endpoint)>2048:abort(400)
+    execute('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?',(current_user()['id'],endpoint))
+    return jsonify(ok=True)
+
+@app.get('/sw.js')
+def service_worker():
+    return send_file(ROOT/'static'/'sw.js',mimetype='application/javascript',max_age=0)
+
+@app.get('/manifest.webmanifest')
+def webmanifest():
+    return send_file(ROOT/'static'/'manifest.webmanifest',mimetype='application/manifest+json')
 
 @app.get('/reports')
 @roles('admin','administratif')
