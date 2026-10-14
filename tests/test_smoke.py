@@ -285,6 +285,24 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertEqual(deleted.status_code,200)
         self.assertIsNone(project.one("SELECT id FROM push_subscriptions WHERE endpoint=?",(valid["endpoint"],)))
 
+    def test_mobile_brand_banner_visible_to_school_user_and_superadmin(self):
+        self.login("admin1@tests.edupilot.invalid")
+        response=self.client.get("/")
+        self.assertEqual(response.status_code,200)
+        html=response.data.decode()
+        self.assertIn('class="mobile-brand-banner"',html)
+        self.assertIn('class="mobile-edupilot-brand"',html)
+        self.assertIn('class="mobile-school-brand"',html)
+        self.assertIn('class="mobile-school-name"',html)
+        self.assertIn("Groupe Scolaire Excellence",html)
+        self.assertIn('id="mobile-menu-button"',html)
+        self.assertIn('id="notification-bell"',html)
+        self.client.post("/logout",data={"csrf":self.token()})
+        self.login("superadmin@tests.edupilot.invalid")
+        html=self.client.get("/").data.decode()
+        self.assertIn('class="mobile-brand-banner"',html)
+        self.assertNotIn('class="mobile-school-brand"',html)
+
     def test_mobile_navigation_contains_logout_and_no_duplicate_alerts(self):
         self.login("admin1@tests.edupilot.invalid")
         response=self.client.get("/")
