@@ -1,0 +1,18 @@
+{
+  "name": "EduPilot — Gestion académique",
+  "short_name": "EduPilot",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fafaf7",
+  "theme_color": "#203950",
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "/static/edupilot-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
