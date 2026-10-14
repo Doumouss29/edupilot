@@ -130,10 +130,14 @@ def next_matricule(c, sid, role, advance=True):
 
 def requested_matricule(c,sid,role,raw):
     raw=(raw or '').strip()
-    candidate=validate_matricule(raw) if raw else next_matricule(c,sid,role)
-    if c.execute('SELECT 1 FROM users WHERE school_id=? AND matricule=?',(sid,candidate)).fetchone():
-        raise ValueError('Ce matricule existe déjà dans cet établissement.')
-    return candidate
+    if raw:
+        candidate=validate_matricule(raw)
+        if c.execute('SELECT 1 FROM users WHERE school_id=? AND matricule=?',(sid,candidate)).fetchone():
+            raise ValueError('Ce matricule existe déjà dans cet établissement.')
+        if candidate==next_matricule(c,sid,role,advance=False):
+            next_matricule(c,sid,role,advance=True)
+        return candidate
+    return next_matricule(c,sid,role)
 
 # Migration non destructive : attribuer les numéros manquants aux comptes existants.
 with db() as c:
@@ -608,6 +612,16 @@ def matricule_preview():
     if role not in MATRICULE_PROFILES:abort(400)
     with db() as c:
         value=next_matricule(c,school_id(),role,advance=False)
+    return jsonify(matricule=value)
+
+@app.get('/api/schools/<int:sid>/matricule/next')
+@roles('superadmin')
+def school_matricule_preview(sid):
+    if not one('SELECT id FROM schools WHERE id=?',(sid,)):abort(404)
+    role=request.args.get('role','admin')
+    if role not in MATRICULE_PROFILES:abort(400)
+    with db() as c:
+        value=next_matricule(c,sid,role,advance=False)
     return jsonify(matricule=value)
 
 @app.route('/schools/<int:sid>/matricules',methods=['GET','POST'])
