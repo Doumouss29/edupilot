@@ -452,9 +452,9 @@ def school_account_edit(sid,uid):
             flash('Le mot de passe temporaire doit avoir au moins 12 caractères, avec lettres et chiffres.','error')
             return redirect(url_for('school_account_edit',sid=sid,uid=uid))
         try:
-            matricule=validate_matricule(request.form.get('matricule') or account['matricule'])
             with db() as c:
                 c.execute('BEGIN IMMEDIATE')
+                matricule=validate_matricule(request.form.get('matricule') or account['matricule']) if (request.form.get('matricule') or account['matricule']) else next_matricule(c,sid,role)
                 if c.execute('SELECT 1 FROM users WHERE school_id=? AND matricule=? AND id<>?',(sid,matricule,uid)).fetchone():
                     raise ValueError('Matricule déjà utilisé dans cet établissement')
                 c.execute('UPDATE users SET name=?,first_name=?,last_name=?,email=?,phone=?,role=?,matricule=? WHERE id=? AND school_id=?',
@@ -547,6 +547,7 @@ def school_update(sid):
             c.execute('DELETE FROM audit WHERE school_id=?',(sid,))
             c.execute('DELETE FROM invites WHERE user_id IN (SELECT id FROM users WHERE school_id=?)',(sid,))
             c.execute('DELETE FROM users WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM matricule_rules WHERE school_id=?',(sid,))
             c.execute('DELETE FROM schools WHERE id=?',(sid,))
         flash('Établissement et données associés supprimés définitivement.','success')
     elif action in ('activate','deactivate'):
