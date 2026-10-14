@@ -1210,7 +1210,7 @@ def planning():
                     return redirect(url_for('planning'))
                 cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room))
                 created.append(cur.lastrowid)
-        notify(classmates(course_id)+[course['teacher_id']],f'{len(created)} séance(s) programmée(s) : '+course['name'],'/planning')
+        notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']])
         audit('lesson.created',','.join(str(x) for x in created))
         flash(f'{len(created)} séance(s) ajoutée(s) au planning.','success')
         return redirect(url_for('planning'))
@@ -1285,8 +1285,8 @@ def lesson_edit(lid):
         assert_lesson_schedule_available(c,[item],{lid})
         c.execute('UPDATE lessons SET course_id=?,teacher_id=?,starts_at=?,ends_at=?,room=? WHERE id=? AND school_id=?',
                   (course_id,course['teacher_id'],item['start'],item['end'],room,lid,school_id()))
-    notify(list(set(classmates(lesson['course_id'])+classmates(course_id)+[lesson['teacher_id'],course['teacher_id']])),
-           'Une séance du planning a été modifiée.','/planning')
+    notify_event([lesson['course_id'],course_id],
+           'Planning modifié : séance du '+lesson['starts_at']+' déplacée au '+item['start']+'.','/planning',teacher_ids=[lesson['teacher_id'],course['teacher_id']])
     audit('lesson.updated',str(lid))
     flash('Séance modifiée. Les personnes concernées ont été notifiées.','success')
     return redirect(url_for('planning'))
@@ -1333,11 +1333,7 @@ def lessons_bulk():
                           (item['start'],item['end'],item['room'],item['id'],school_id()))
         else:
             c.execute(f'DELETE FROM lessons WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
-    notified=set()
-    for row in rows:
-        notified.update(classmates(row['course_id']))
-        notified.add(row['teacher_id'])
-    notify(list(notified),'Séances '+('supprimées' if action=='delete' else 'modifiées')+' dans votre planning.','/planning')
+    notify_event([row['course_id'] for row in rows],str(len(ids))+' séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+' dans le planning.','/planning',teacher_ids=[row['teacher_id'] for row in rows])
     audit('lessons.bulk.'+action,','.join(map(str,ids)))
     flash(f'{len(ids)} séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+'.','success')
     return redirect(url_for('planning'))
@@ -1357,6 +1353,10 @@ def declare(lid):
     if (status!='non_effectuee' and mins<=0) or mins>24*60:abort(400)
     if status=='non_effectuee' and not request.form.get('comment','').strip():abort(400,'Motif obligatoire')
     execute('UPDATE lessons SET status=?,actual_minutes=?,comment=? WHERE id=?',(status,mins,request.form.get('comment',''),lid))
+    if status=='non_effectuee':
+        notify_event([les['course_id']],'Séance non effectuée : '+les['starts_at']+' — '+request.form.get('comment','').strip()[:350],'/planning',teacher_ids=[les['teacher_id']])
+    elif status=='partielle':
+        notify_event([les['course_id']],'Séance partiellement réalisée : '+les['starts_at']+'.','/planning',teacher_ids=[les['teacher_id']])
     audit('lesson.declared',str(lid)+':'+status)
     flash('Séance déclarée.','success');return redirect(url_for('planning'))
 
@@ -1370,8 +1370,7 @@ def cancel_lesson(lid):
     if not reason or len(reason)>1500:abort(400,'Motif d’annulation obligatoire')
     if lesson['status'] in ('realisee','partielle'):abort(400,'Impossible d’annuler une séance déjà déclarée')
     execute("UPDATE lessons SET status='annulee',actual_minutes=0,comment=? WHERE id=? AND school_id=?",(reason,lid,school_id()))
-    members=classmates(lesson['course_id'])
-    notify(members+[lesson['teacher_id']],'Séance annulée : '+lesson['starts_at']+' — '+reason,'/planning')
+    notify_event([lesson['course_id']],'Séance annulée : '+lesson['starts_at']+' — '+reason[:350],'/planning',teacher_ids=[lesson['teacher_id']])
     audit('lesson.cancelled',f'{lid}:{reason}')
     flash('Séance annulée. Les étudiants ont été notifiés.','success')
     return redirect(url_for('planning'))
@@ -1414,6 +1413,7 @@ def assessment_edit(aid):
         except ValueError:abort(400)
         if not title or len(title)>200 or len(description)>10000 or kind not in ('Devoir','Contrôle continu','Examen','Projet'):abort(400)
         execute('UPDATE assessments SET title=?,kind=?,due_date=?,description=?,coefficient=? WHERE id=? AND school_id=?',(title,kind,due,description,coef,aid,school_id()))
+        notify_event([item['course_id']],'Évaluation modifiée : '+title+' ('+item['course_name']+').','/assessments',teacher_ids=[item['teacher_id']])
         audit('assessment.updated',str(aid))
         flash('Évaluation modifiée.','success')
         return redirect(url_for('assessments'))
@@ -1475,7 +1475,7 @@ def assessments():
                 VALUES (?,?,?,?,?,?,?)''',(school_id(),course_id,title,request.form.get('kind','Devoir'),request.form.get('due_date') or None,description,coeff)).lastrowid
             for filename,mime,data in prepared:
                 c.execute('INSERT INTO assessment_files(assessment_id,filename,mime,content) VALUES (?,?,?,?)',(aid,filename,mime,data))
-        notify(classmates(course_id),'Nouvelle évaluation : '+title,'/assessments')
+        notify_event([course_id],'Nouvelle évaluation : '+title+' ('+course['name']+').','/assessments',teacher_ids=[course['teacher_id']])
         audit('assessment.created',title);flash('Évaluation créée.','success')
         return redirect(url_for('assessments'))
     sql='''SELECT a.id,a.school_id,a.course_id,a.title,a.kind,a.due_date,a.coefficient,a.description,a.attachment_name,c.name course_name,cl.name class_name,c.teacher_id
