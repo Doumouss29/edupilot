@@ -200,6 +200,18 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertEqual(response.status_code,302)
         self.assertIsNotNone(project.one("SELECT id FROM users WHERE email='fatou.bulk@example.test'"))
 
+    def test_logout_revokes_only_current_device_push(self):
+        self.login("admin1@tests.edupilot.invalid")
+        uid=project.one("SELECT id FROM users WHERE email='admin1@tests.edupilot.invalid'")["id"]
+        a="https://fcm.googleapis.com/fcm/send/device-a"
+        b="https://fcm.googleapis.com/fcm/send/device-b"
+        for endpoint in (a,b):
+            project.execute("INSERT INTO push_subscriptions(user_id,endpoint,subscription_json) VALUES (?,?,?)",(uid,endpoint,'{}'))
+        response=self.client.post("/logout",data={"csrf":self.token(),"push_endpoint":a})
+        self.assertEqual(response.status_code,302)
+        self.assertIsNone(project.one("SELECT id FROM push_subscriptions WHERE endpoint=?",(a,)))
+        self.assertIsNotNone(project.one("SELECT id FROM push_subscriptions WHERE endpoint=?",(b,)))
+
     def test_web_push_registration_validation_and_user_scope(self):
         self.login("admin1@tests.edupilot.invalid")
         token=self.token()
