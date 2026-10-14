@@ -1,5 +1,5 @@
 """EduPilot — plateforme de gestion scolaire multi-établissements."""
-import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib, csv, io
+import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib, csv, io, hashlib, time
 from openpyxl import load_workbook
 from flask import Response
 from contextlib import contextmanager
@@ -234,6 +234,46 @@ def audit(action,details=''):
     u=current_user()
     execute('INSERT INTO audit(school_id,user_id,action,details) VALUES (?,?,?,?)',(u['school_id'],u['id'],action,details))
 
+def send_brevo_email(address,subject,message):
+    """Email transactionnel Brevo. Ne journalise ni identifiants ni liens secrets."""
+    api_key=os.getenv('BREVO_API_KEY','').strip()
+    sender=os.getenv('BREVO_SENDER_EMAIL','').strip()
+    if not api_key or not sender:
+        app.logger.warning('Brevo non configuré : e-mail non envoyé')
+        return False
+    try:
+        response=requests.post('https://api.brevo.com/v3/smtp/email',
+            json={'sender':{'email':sender,'name':os.getenv('BREVO_SENDER_NAME','EduPilot')},
+                  'to':[{'email':address}],'subject':subject,'textContent':message},
+            headers={'api-key':api_key,'Content-Type':'application/json'},timeout=8)
+        response.raise_for_status()
+        return True
+    except requests.RequestException as exc:
+        app.logger.warning('Échec e-mail Brevo : %s',type(exc).__name__)
+        return False
+
+def send_account_link(uid,purpose='activation'):
+    """Émet un lien à usage unique, valable 48 h pour activation, 30 min pour réinitialisation."""
+    user=one('SELECT u.id,u.name,u.email,u.active,u.school_id,s.name school_name FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.id=?',(uid,))
+    if not user or not user['active']:return False
+    token=secrets.token_urlsafe(32)
+    token_hash=hashlib.sha256(token.encode()).hexdigest()
+    expiration=datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(minutes=30 if purpose=='reset' else 48*60)
+    with db() as c:
+        c.execute('DELETE FROM invites WHERE user_id=? AND used=0',(uid,))
+        c.execute('INSERT INTO invites(user_id,token_hash,expires_at) VALUES (?,?,?)',(uid,token_hash,expiration.isoformat()))
+    base=os.getenv('PUBLIC_BASE_URL','https://edupilot.ci').rstrip('/')
+    url=base+url_for('activate',token=token)
+    if purpose=='reset':
+        subject='EduPilot — Réinitialisation de votre mot de passe'
+        content=f"Bonjour {user['name']},\n\nPour définir un nouveau mot de passe EduPilot, ouvrez ce lien personnel :\n{url}\n\nCe lien expire dans 30 minutes et ne peut servir qu'une fois. Si vous n'avez rien demandé, ignorez ce message.\n\nEduPilot"
+    else:
+        subject='Bienvenue sur EduPilot — Activez votre compte'
+        content=f"Bonjour {user['name']},\n\nVotre compte EduPilot ({user['role'] if 'role' in user.keys() else 'utilisateur'}) pour {user['school_name'] or 'la plateforme'} a été créé.\n\nPour choisir votre mot de passe et activer votre accès :\n{url}\n\nCe lien personnel expire dans 48 heures. Ne le transférez à personne.\n\nEduPilot"
+    sent=send_brevo_email(user['email'],subject,content)
+    # Ne pas enregistrer les URL contenant un jeton dans les notifications internes.
+    return sent
+
 def notify(ids,message,href=''):
     # Persist first: an external push or email error cannot erase an internal alert.
     sid=school_id()
@@ -257,16 +297,10 @@ def notify(ids,message,href=''):
                     else:app.logger.warning('Échec push: %s',type(exc).__name__)
                 except Exception as exc:app.logger.warning('Échec push: %s',type(exc).__name__)
         except ImportError:app.logger.warning('Module pywebpush indisponible')
-    api_key=os.getenv('BREVO_API_KEY')
-    sender=os.getenv('BREVO_SENDER_EMAIL')
-    if api_key and sender:
-        for uid in recipients:
-            user=one('SELECT email FROM users WHERE id=? AND school_id=?',(uid,sid))
-            if not user: continue
-            try:
-                requests.post('https://api.brevo.com/v3/smtp/email',json={'sender':{'email':sender,'name':os.getenv('BREVO_SENDER_NAME','EduPilot')},'to':[{'email':user['email']}],'subject':'Notification EduPilot','textContent':message},headers={'api-key':api_key,'Content-Type':'application/json'},timeout=6).raise_for_status()
-            except Exception as e:
-                app.logger.warning('Échec envoi courriel: %s',type(e).__name__)
+    for uid in recipients:
+        user=one('SELECT email FROM users WHERE id=? AND school_id=?',(uid,sid))
+        if user:send_brevo_email(user['email'],'EduPilot — Nouvelle notification',message)
+
 
 def classmates(course_id):
     return [r['student_id'] for r in scoped('SELECT e.student_id FROM enrollments e JOIN courses c ON c.class_id=e.class_id WHERE e.school_id=? AND c.id=?',(course_id,))]
@@ -945,27 +979,45 @@ def people_import():
     return redirect(url_for('people'))
 
 def create_invite(uid):
-    import hashlib
-    token=secrets.token_urlsafe(32)
-    expiry=(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=2)).isoformat()
-    execute('INSERT INTO invites(user_id,token_hash,expires_at) VALUES (?,?,?)',(uid,hashlib.sha256(token.encode()).hexdigest(),expiry))
-    url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/'))+'/activate/'+token
-    notify([uid],'Activez votre compte EduPilot : '+url)
+    return send_account_link(uid,'activation')
 
 @app.route('/activate/<token>',methods=['GET','POST'])
 def activate(token):
-    import hashlib
-    invitation=one('SELECT * FROM invites WHERE token_hash=? AND used=0',(hashlib.sha256(token.encode()).hexdigest(),))
-    if not invitation or invitation['expires_at'] < datetime.datetime.now(datetime.timezone.utc).isoformat():abort(404)
+    hashed=hashlib.sha256(token.encode()).hexdigest()
+    invitation=one('SELECT * FROM invites WHERE token_hash=? AND used=0',(hashed,))
+    now=datetime.datetime.now(datetime.timezone.utc).isoformat()
+    if not invitation or invitation['expires_at']<now:abort(404,'Lien expiré ou déjà utilisé.')
     if request.method=='POST':
         password=request.form.get('password','')
-        if len(password)<10:flash('Mot de passe : 10 caractères minimum.','error')
+        confirm=request.form.get('confirm_password','')
+        if not valid_password(password):
+            flash('Au moins 12 caractères, avec lettres et chiffres.','error')
+        elif password!=confirm:
+            flash('Les deux mots de passe ne correspondent pas.','error')
         else:
-            execute('UPDATE users SET password_hash=? WHERE id=?',(generate_password_hash(password),invitation['user_id']))
-            execute('UPDATE invites SET used=1 WHERE id=?',(invitation['id'],))
-            flash('Compte activé. Vous pouvez vous connecter.','success')
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                claim=c.execute('UPDATE invites SET used=1 WHERE id=? AND used=0 AND expires_at>=?',(invitation['id'],datetime.datetime.now(datetime.timezone.utc).isoformat()))
+                if claim.rowcount!=1:abort(404,'Lien expiré ou déjà utilisé.')
+                c.execute('UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?',(generate_password_hash(password),invitation['user_id']))
+                c.execute('DELETE FROM invites WHERE user_id=? AND id<>?',(invitation['user_id'],invitation['id']))
+            flash('Mot de passe défini. Connectez-vous à EduPilot.','success')
             return redirect(url_for('login'))
     return render_template('activate.html')
+
+def valid_password(value):
+    return len(value)>=12 and any(c.isalpha() for c in value) and any(c.isdigit() for c in value)
+
+@app.route('/forgot-password',methods=['GET','POST'])
+def forgot_password():
+    if request.method=='POST':
+        email=request.form.get('email','').strip().lower()
+        if len(email)>254:abort(400)
+        user=one('SELECT id FROM users WHERE email=? AND active=1',(email,))
+        if user:send_account_link(user['id'],'reset')
+        flash('Si cette adresse correspond à un compte actif, un lien de réinitialisation vient d’être envoyé.','success')
+        return redirect(url_for('forgot_password'))
+    return render_template('forgot_password.html')
 
 @app.route('/classes',methods=['GET','POST'])
 @roles('admin','administratif')
