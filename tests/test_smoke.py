@@ -160,6 +160,36 @@ class EduPilotSmoke(unittest.TestCase):
             self.assertIsNotNone(student)
             self.assertIsNotNone(project.one("SELECT id FROM enrollments WHERE student_id=? AND class_id=?",(student["id"],cl["id"])))
 
+    def test_bulk_csv_students_selected_class_overrides_file(self):
+        self.login("admin1@tests.edupilot.invalid")
+        own=project.one("SELECT id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
+        foreign=project.one("SELECT id FROM classes WHERE school_id=2 ORDER BY id LIMIT 1")
+        content=("prenom;nom;email;classe\nAwa;Kone;awa.override@example.test;"+str(foreign["id"])+"\n").encode("utf-8")
+        response=self.client.post("/people/import",data={"csrf":self.token(),"import_class_id":str(own["id"]),"file":(io.BytesIO(content),"students.csv")},content_type="multipart/form-data")
+        self.assertEqual(response.status_code,302)
+        student=project.one("SELECT id,matricule FROM users WHERE email='awa.override@example.test'")
+        self.assertIsNotNone(student)
+        self.assertTrue(student["matricule"])
+        self.assertIsNotNone(project.one("SELECT id FROM enrollments WHERE student_id=? AND class_id=?",(student["id"],own["id"])))
+
+    def test_bulk_csv_students_without_class_column(self):
+        self.login("admin1@tests.edupilot.invalid")
+        own=project.one("SELECT id FROM classes WHERE school_id=1 ORDER BY id LIMIT 1")
+        content="prenom;nom;email\nMariam;Traore;mariam.import@example.test\n".encode("utf-8")
+        response=self.client.post("/people/import",data={"csrf":self.token(),"import_class_id":str(own["id"]),"file":(io.BytesIO(content),"students.csv")},content_type="multipart/form-data")
+        self.assertEqual(response.status_code,302)
+        student=project.one("SELECT id FROM users WHERE email='mariam.import@example.test'")
+        self.assertIsNotNone(student)
+        self.assertIsNotNone(project.one("SELECT id FROM enrollments WHERE student_id=? AND class_id=?",(student["id"],own["id"])))
+
+    def test_bulk_csv_rejects_foreign_selected_class(self):
+        self.login("admin1@tests.edupilot.invalid")
+        foreign=project.one("SELECT id FROM classes WHERE school_id=2 ORDER BY id LIMIT 1")
+        content="prenom;nom;email\nAminata;Bamba;aminata.foreign@example.test\n".encode("utf-8")
+        response=self.client.post("/people/import",data={"csrf":self.token(),"import_class_id":str(foreign["id"]),"file":(io.BytesIO(content),"students.csv")},content_type="multipart/form-data")
+        self.assertEqual(response.status_code,302)
+        self.assertIsNone(project.one("SELECT id FROM users WHERE email='aminata.foreign@example.test'"))
+
     def test_bulk_xlsx_students_enrolled(self):
         from openpyxl import Workbook
         self.login("admin1@tests.edupilot.invalid")
