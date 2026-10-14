@@ -1233,10 +1233,34 @@ def courses_bulk():
                 if course['teacher_id']==teacher_id:continue
                 c.execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,course['id']))
                 if teacher_id:c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(course['id'],teacher_id,now))
+                sync_course_future_teacher(c,course['id'],teacher_id)
                 c.execute('UPDATE courses SET teacher_id=? WHERE id=? AND school_id=?',(teacher_id,course['id'],school_id()))
     audit('courses.bulk.'+action,','.join(map(str,ids)))
     flash(f'{len(ids)} cours : modifications enregistrées.','success')
     return redirect(url_for('courses'))
+
+def sync_course_future_teacher(conn,course_id,teacher_id):
+    """Synchroniser uniquement les séances futures, programmées et sans historique.
+    Une incompatibilité d'horaire bloque le transfert au lieu de créer un double cours.
+    """
+    now=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M')
+    lessons=conn.execute("""SELECT l.* FROM lessons l WHERE l.course_id=? AND l.starts_at>=?
+        AND l.status='programmee' AND COALESCE(l.actual_minutes,0)=0
+        AND COALESCE(l.validated,0)=0
+        AND NOT EXISTS(SELECT 1 FROM attendance a WHERE a.lesson_id=l.id)
+        ORDER BY l.starts_at""",(course_id,now)).fetchall()
+    if teacher_id:
+        for lesson in lessons:
+            conflict=conn.execute("""SELECT id FROM lessons WHERE school_id=? AND teacher_id=?
+                AND id<>? AND course_id<>?
+                AND status NOT IN ('annulee','reportee')
+                AND starts_at<? AND ends_at>? LIMIT 1""",
+                (lesson['school_id'],teacher_id,lesson['id'],course_id,lesson['ends_at'],lesson['starts_at'])).fetchone()
+            if conflict:
+                raise ValueError('Conflit de planning : le nouvel enseignant a déjà une séance prévue. Affectation annulée.')
+    for lesson in lessons:
+        conn.execute('UPDATE lessons SET teacher_id=? WHERE id=?',(teacher_id,lesson['id']))
+    return len(lessons)
 
 @app.route('/courses/<int:cid>/edit',methods=['GET','POST'])
 @roles('admin','administratif')
@@ -1260,12 +1284,20 @@ def course_edit(cid):
             return redirect(url_for('course_edit',cid=cid))
         now=datetime.datetime.now(datetime.timezone.utc).isoformat()
         changed_teacher=item['teacher_id']!=(int(teacher) if teacher else None)
-        with db() as c:
-            if changed_teacher:
-                c.execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,cid))
-                if teacher:c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,now))
-            c.execute('UPDATE courses SET name=?,code=?,class_id=?,teacher_id=?,planned_minutes=?,coefficient=? WHERE id=? AND school_id=?',(name,request.form.get('code','').strip(),class_id,teacher,minutes,coefficient,cid,school_id()))
-        audit('course.updated',str(cid));flash('Cours mis à jour ; les séances existantes gardent leur enseignant initial.','success')
+        try:
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                moved=sync_course_future_teacher(c,cid,int(teacher) if teacher else None)
+                if changed_teacher:
+                    c.execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,cid))
+                    if teacher:c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,now))
+                c.execute('UPDATE courses SET name=?,code=?,class_id=?,teacher_id=?,planned_minutes=?,coefficient=? WHERE id=? AND school_id=?',(name,request.form.get('code','').strip(),class_id,teacher,minutes,coefficient,cid,school_id()))
+        except ValueError as exc:
+            flash(str(exc),'error')
+            return redirect(url_for('course_edit',cid=cid))
+        if changed_teacher:
+            notify_event([cid],'Changement d’enseignant pour le cours '+name+'. '+str(moved)+' séance(s) future(s) réattribuée(s).','/planning',teacher_ids=[item['teacher_id'],int(teacher) if teacher else None])
+        audit('course.updated',str(cid));flash(f'Cours mis à jour. {moved} séance(s) future(s) synchronisée(s) ; historique conservé.','success')
         return redirect(url_for('courses'))
     return render_template('edit_academic.html',kind='course',item=item,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role='enseignant' AND active=1"))
 
@@ -2021,11 +2053,14 @@ def assign_teacher(cid):
     now=datetime.datetime.now(datetime.timezone.utc).isoformat()
     if old['teacher_id']:
         execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,cid))
-    execute('UPDATE courses SET teacher_id=? WHERE id=?',(teacher,cid))
-    execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,now))
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        sync_course_future_teacher(c,cid,int(teacher))
+        c.execute('UPDATE courses SET teacher_id=? WHERE id=?',(teacher,cid))
+        c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,now))
     audit('course.teacher.changed',str(cid))
     notify([int(teacher)],'Vous êtes affecté à un nouveau cours.','/planning')
-    flash('Enseignant affecté. Les séances déjà planifiées conservent leur affectation initiale.','success')
+    flash('Enseignant affecté. Les séances futures sont synchronisées et l’historique est conservé.','success')
     return redirect(url_for('courses'))
 
 @app.post('/parents/link')
