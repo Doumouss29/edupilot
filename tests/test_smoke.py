@@ -200,6 +200,25 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertEqual(response.status_code,302)
         self.assertIsNotNone(project.one("SELECT id FROM users WHERE email='fatou.bulk@example.test'"))
 
+    def test_web_push_registration_validation_and_user_scope(self):
+        self.login("admin1@tests.edupilot.invalid")
+        token=self.token()
+        self.assertEqual(self.client.get("/api/push/config").status_code,200)
+        invalid={"endpoint":"https://127.0.0.1:443/secret","keys":{"p256dh":"abcdefghijklmnop","auth":"abcdefghijklmnop"}}
+        result=self.client.post("/api/push/subscribe",json=invalid,headers={"X-CSRF-Token":token})
+        self.assertEqual(result.status_code,400)
+        valid={"endpoint":"https://fcm.googleapis.com/fcm/send/test-123",
+               "keys":{"p256dh":"abcdefghijklmnop","auth":"abcdefghijklmnop"}}
+        result=self.client.post("/api/push/subscribe",json=valid,headers={"X-CSRF-Token":token})
+        self.assertEqual(result.status_code,200)
+        owner=project.one("SELECT user_id FROM push_subscriptions WHERE endpoint=?",(valid["endpoint"],))
+        self.assertIsNotNone(owner)
+        blocked=self.client.post("/api/push/unsubscribe",json={"endpoint":valid["endpoint"]})
+        self.assertEqual(blocked.status_code,400)
+        deleted=self.client.post("/api/push/unsubscribe",json={"endpoint":valid["endpoint"]},headers={"X-CSRF-Token":token})
+        self.assertEqual(deleted.status_code,200)
+        self.assertIsNone(project.one("SELECT id FROM push_subscriptions WHERE endpoint=?",(valid["endpoint"],)))
+
     def test_notification_bell_api_and_clear(self):
         self.login("admin1@tests.edupilot.invalid")
         user=project.one("SELECT id FROM users WHERE school_id=1 AND role='admin' LIMIT 1")
