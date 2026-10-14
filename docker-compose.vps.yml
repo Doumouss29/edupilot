@@ -12,6 +12,9 @@ services:
       DATABASE_PATH: /data/edupilot.db
       UPLOAD_DIR: /data/uploads
       PUBLIC_BASE_URL: https://edupilot.ci
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
       SECRET_KEY: ${SECRET_KEY:?Configurez SECRET_KEY dans le fichier .env}
       BREVO_API_KEY: ${BREVO_API_KEY:-}
       BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL:-}
