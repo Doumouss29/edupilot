@@ -105,6 +105,7 @@ with db() as c:
             if column not in existing_columns:c.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
     c.execute('UPDATE users SET login_email=LOWER(email) WHERE login_email IS NULL')
     c.execute('CREATE INDEX IF NOT EXISTS idx_users_login_email ON users(login_email)')
+    c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_school_login_email ON users(school_id,login_email) WHERE login_email IS NOT NULL AND school_id IS NOT NULL')
     c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_school_matricule ON users(school_id,matricule) WHERE matricule IS NOT NULL')
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_name','LMurbs')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_phone','+2250711124359')")
