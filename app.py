@@ -2135,16 +2135,37 @@ def webmanifest():
 @app.get('/reports')
 @roles('admin','administratif')
 def reports():
-    rows=scoped('''SELECT c.name,cl.name class_name,c.planned_minutes,COUNT(l.id) lessons,
+    years=scoped('SELECT id,label FROM years WHERE school_id=? ORDER BY label DESC')
+    classes=scoped('SELECT cl.id,cl.name,cl.year_id FROM classes cl WHERE cl.school_id=? ORDER BY cl.name')
+    teachers=scoped("SELECT id,name FROM users WHERE school_id=? AND role IN ('enseignant','admin') ORDER BY name")
+    filters={}
+    for key,allowed in [('year_id',years),('class_id',classes),('teacher_id',teachers)]:
+        raw=request.args.get(key,'').strip()
+        if raw:
+            if not raw.isdigit() or int(raw) not in {r['id'] for r in allowed}:abort(400,'Filtre invalide')
+            filters[key]=int(raw)
+    conditions=['c.school_id=?']
+    params=[school_id()]
+    if 'year_id' in filters:
+        conditions.append('cl.year_id=?')
+        params.append(filters['year_id'])
+    if 'class_id' in filters:
+        conditions.append('cl.id=?')
+        params.append(filters['class_id'])
+    if 'teacher_id' in filters:
+        conditions.append('c.teacher_id=?')
+        params.append(filters['teacher_id'])
+    rows=allrows('''SELECT c.name,cl.name class_name,c.planned_minutes,COUNT(l.id) lessons,
       COALESCE(SUM(CASE WHEN l.status IN ('realisee','partielle') THEN l.actual_minutes ELSE 0 END),0) actual_minutes
-      FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN lessons l ON l.course_id=c.id WHERE c.school_id=? GROUP BY c.id ORDER BY cl.name,c.name''')
+      FROM courses c JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
+      LEFT JOIN lessons l ON l.course_id=c.id AND l.school_id=c.school_id
+      WHERE '''+' AND '.join(conditions)+''' GROUP BY c.id ORDER BY cl.name,c.name''',tuple(params))
     if request.args.get('format')=='csv':
         import csv,io
         b=io.StringIO();w=csv.writer(b,delimiter=';');w.writerow(['Cours','Classe','Séances planifiées','Heures prévues','Heures réalisées','Taux %'])
         for x in rows:w.writerow([x['name'],x['class_name'],x['lessons'],x['planned_minutes']/60,x['actual_minutes']/60,round(x['actual_minutes']/x['planned_minutes']*100,1) if x['planned_minutes'] else 0])
-        from flask import Response
-        return Response('\ufeff'+b.getvalue(),headers={'Content-Disposition':'attachment; filename=edupilot-rapport.csv'},mimetype='text/csv')
-    return render_template('reports.html',rows=rows)
+        return Response('\\ufeff'+b.getvalue(),headers={'Content-Disposition':'attachment; filename=edupilot-rapport.csv'},mimetype='text/csv')
+    return render_template('reports.html',rows=rows,years=years,classes=classes,teachers=teachers,filters=filters)
 
 @app.route('/campuses',methods=['GET','POST'])
 @roles('admin','administratif')
