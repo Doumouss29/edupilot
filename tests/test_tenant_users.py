@@ -60,10 +60,37 @@ class TenantUsersTest(unittest.TestCase):
         with self.client.session_transaction() as sess:
             self.assertIsNone(sess.get("uid"))
 
-    def test_general_login_ambiguous(self):
-        self.login("/login", "PasswordA123")
+    def test_modal_only_after_password_verified(self):
+        response=self.login("/login","PasswordA123")
         with self.client.session_transaction() as sess:
+            self.assertIsNotNone(sess.get("uid"))
+        self.assertNotIn(b"school-choice-modal",response.data)
+
+    def test_select_tenant_from_modal(self):
+        with project.db() as con:
+            con.execute("UPDATE users SET password_hash=? WHERE school_id=2",
+                        (generate_password_hash("PasswordA123"),))
+        response=self.login("/login","PasswordA123")
+        self.assertIn(b"school-choice-modal",response.data)
+        with self.client.session_transaction() as sess:
+            token=sess["csrf"]
             self.assertIsNone(sess.get("uid"))
+        result=self.client.post("/login/choose-school",data={"csrf":token,"school_id":"2"})
+        self.assertEqual(result.status_code,302)
+        with self.client.session_transaction() as sess:
+            uid=sess["uid"]
+        self.assertEqual(project.one("SELECT school_id FROM users WHERE id=?",(uid,))["school_id"],2)
+
+    def test_reject_unrelated_tenant(self):
+        with project.db() as con:
+            con.execute("UPDATE users SET password_hash=? WHERE school_id=2",
+                        (generate_password_hash("PasswordA123"),))
+            con.execute("INSERT INTO schools(id,name,slug) VALUES (3,'C','ecole-c')")
+        self.login("/login","PasswordA123")
+        with self.client.session_transaction() as sess:
+            token=sess["csrf"]
+        result=self.client.post("/login/choose-school",data={"csrf":token,"school_id":"3"})
+        self.assertEqual(result.status_code,403)
 
 
 class MigrationTest(unittest.TestCase):
