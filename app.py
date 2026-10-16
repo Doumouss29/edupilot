@@ -475,7 +475,7 @@ def dashboard():
         for item in lessons:
             index=(datetime.date.fromisoformat(item['starts_at'][:10])-monday).days
             if 0<=index<7:week_days[index]['lessons'].append(item)
-        return render_template('dashboard_student.html',week_days=week_days,
+        return render_template('dashboard_student.html',today=datetime.date.today(),week_days=week_days,
                                monday=monday,prev_week=(monday-datetime.timedelta(days=7)).isoformat(),
                                next_week=(monday+datetime.timedelta(days=7)).isoformat(),
                                week_end=monday+datetime.timedelta(days=6),lesson_count=len(lessons))
