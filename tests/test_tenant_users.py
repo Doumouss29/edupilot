@@ -47,7 +47,7 @@ class TenantUsersTest(unittest.TestCase):
         with self.client.session_transaction() as sess:
             uid_a=sess.get("uid")
         self.assertIsNotNone(uid_a)
-        self.client.get("/logout")
+        with self.client.session_transaction() as sess:\n            sess.clear()
         self.login("/ecole-b/login", "PasswordB123")
         with self.client.session_transaction() as sess:
             uid_b=sess.get("uid")
