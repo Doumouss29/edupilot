@@ -38,6 +38,7 @@ def seed_test_data():
             c.execute('INSERT INTO periods(school_id,class_id,name) VALUES (?,?,?)',(school,cls,'Trimestre 1' if school==1 else 'Semestre 1'))
             for i,st in enumerate(students):c.execute('INSERT INTO grades(assessment_id,student_id,value) VALUES (?,?,?)',(assessment,st,10+i))
         c.execute('INSERT INTO users(school_id,name,email,password_hash,role) VALUES (NULL,?,?,?,?)',('Éditeur EduPilot','superadmin@tests.edupilot.invalid',generate_password_hash('Test2026!'),'superadmin'))
+        c.execute('UPDATE users SET login_email=LOWER(email) WHERE login_email IS NULL')
 
 class EduPilotSmoke(unittest.TestCase):
     def setUp(self):
