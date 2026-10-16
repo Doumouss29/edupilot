@@ -388,32 +388,64 @@ def tenant_signin(slug):
     if not school:abort(404)
     return handle_login(school)
 
+def finish_login(u):
+    session.clear()
+    session['uid']=u['id']
+    session['csrf']=secrets.token_urlsafe(24)
+    if u['must_change_password']:
+        return redirect(url_for('change_password'))
+    return redirect(url_for('dashboard'))
+
+
 def handle_login(school=None):
     email=request.form.get('email','').strip().lower()
-    # A general login must not silently pick an arbitrary tenant account.
+    password=request.form.get('password','')
     if school:
         candidates=allrows('SELECT * FROM users WHERE email=? AND school_id=? AND active=1',(email,school['id']))
     else:
         candidates=allrows('SELECT * FROM users WHERE email=? AND active=1',(email,))
-    valid=[u for u in candidates if check_password_hash(u['password_hash'],request.form.get('password',''))]
-    if not school and len(candidates)>1:
-        flash('Plusieurs établissements utilisent cette adresse. Connectez-vous depuis la page de connexion de votre établissement.','error')
-        return redirect(url_for('login'))
-    u=valid[0] if len(valid)==1 else None
-    if u and (school is None or (u['school_id']==school['id'] and u['role']!='superadmin')):
-        session.clear()
-        session['uid']=u['id']
-        session['csrf']=secrets.token_urlsafe(24)
-        if u['must_change_password']:return redirect(url_for('change_password'))
-        return redirect(url_for('dashboard'))
+    valid=[u for u in candidates if check_password_hash(u['password_hash'],password)]
+    if school:
+        valid=[u for u in valid if u['role']!='superadmin']
+    if len(valid)==1:
+        return finish_login(valid[0])
+    if not school and len(valid)>1:
+        ids=[u['id'] for u in valid if u['school_id'] is not None]
+        schools=allrows('SELECT s.id,s.name,s.slug FROM schools s JOIN users u ON u.school_id=s.id WHERE u.id IN ('+','.join('?' for _ in ids)+') AND s.active=1 ORDER BY s.name',tuple(ids)) if ids else []
+        if len(schools)>1:
+            # Only offer schools for which the supplied password was verified.
+            session['pending_school_choice']={'ids':ids,'at':int(time.time())}
+            return render_template('login.html',login_school=None,login_action=url_for('login'),school_choices=schools)
     flash('Identifiants incorrects.','error')
     if school:return redirect(url_for('tenant_login',slug=school['slug']))
     return redirect(url_for('login'))
 
+
+@app.post('/login/choose-school')
+def choose_login_school():
+    pending=session.pop('pending_school_choice',None)
+    try:
+        school_id=int(request.form.get('school_id',''))
+    except (ValueError,TypeError):
+        abort(400)
+    if not pending or int(time.time())-pending.get('at',0)>120:
+        flash('Sélection expirée. Veuillez vous reconnecter.','error')
+        return redirect(url_for('login'))
+    ids=pending.get('ids',[])
+    if not ids:
+        abort(403)
+    u=one('SELECT * FROM users WHERE school_id=? AND id IN ('+','.join('?' for _ in ids)+') AND active=1',(school_id,*ids))
+    if not u or u['role']=='superadmin' or not one('SELECT id FROM schools WHERE id=? AND active=1',(school_id,)):
+        abort(403)
+    return finish_login(u)
+
+
 @app.route('/login',methods=['GET','POST'])
 def login():
     if request.method=='POST':return handle_login()
+    session.pop('pending_school_choice',None)
     return render_template('login.html',login_school=None,login_action=url_for('login'))
+
 
 @app.route('/change-password',methods=['GET','POST'])
 @login_required
