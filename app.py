@@ -1147,8 +1147,8 @@ def forgot_password():
                 permitted=True
                 for key in keys:
                     c.execute('INSERT INTO password_reset_limits(key_hash,attempted_at) VALUES (?,?) ON CONFLICT(key_hash) DO UPDATE SET attempted_at=excluded.attempted_at',(key,stamp))
-        user=one('SELECT id FROM users WHERE login_email=? AND active=1',(email,)) if permitted else None
-        if user:send_account_link(user['id'],'reset')
+        users=allrows('SELECT id FROM users WHERE login_email=? AND active=1 ORDER BY id LIMIT 10',(email,)) if permitted else []
+        for account in users:send_account_link(account['id'],'reset')
         flash('Si cette adresse correspond à un compte actif, un lien de réinitialisation vient d’être envoyé.','success')
         return redirect(url_for('forgot_password'))
     return render_template('forgot_password.html')
