@@ -32,7 +32,7 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS platform_branding(id INTEGER PRIMARY KEY CHECK(id=1),logo BLOB NOT NULL,logo_mime TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1, subscription_end TEXT, logo BLOB, logo_mime TEXT);
 CREATE TABLE IF NOT EXISTS campuses(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), name TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL, matricule TEXT, active INTEGER NOT NULL DEFAULT 1, first_name TEXT, last_name TEXT, phone TEXT, must_change_password INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL, matricule TEXT, active INTEGER NOT NULL DEFAULT 1, first_name TEXT, last_name TEXT, phone TEXT, must_change_password INTEGER NOT NULL DEFAULT 0, first_login_at TEXT);
 CREATE TABLE IF NOT EXISTS years(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), label TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS classes(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), year_id INTEGER NOT NULL REFERENCES years(id), campus_id INTEGER REFERENCES campuses(id), name TEXT NOT NULL, cycle TEXT NOT NULL DEFAULT 'semestre', parents_enabled INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS enrollments(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), student_id INTEGER NOT NULL REFERENCES users(id), class_id INTEGER NOT NULL REFERENCES classes(id), year_id INTEGER NOT NULL REFERENCES years(id), status TEXT NOT NULL DEFAULT 'inscrit', UNIQUE(student_id,class_id,year_id));
@@ -95,7 +95,7 @@ with db() as c:
     for name,definition in [('subscription_end','TEXT'),('logo','BLOB'),('logo_mime','TEXT')]:
         if name not in existing: c.execute(f'ALTER TABLE schools ADD COLUMN {name} {definition}')
     columns={r['name'] for r in c.execute('PRAGMA table_info(users)').fetchall()}
-    for name,definition in [('first_name','TEXT'),('last_name','TEXT'),('phone','TEXT'),('must_change_password','INTEGER NOT NULL DEFAULT 0'),('matricule','TEXT')]:
+    for name,definition in [('first_name','TEXT'),('last_name','TEXT'),('phone','TEXT'),('must_change_password','INTEGER NOT NULL DEFAULT 0'),('matricule','TEXT'),('first_login_at','TEXT')]:
         if name not in columns:c.execute(f'ALTER TABLE users ADD COLUMN {name} {definition}')
     for table, additions in {'courses':[('coefficient','REAL NOT NULL DEFAULT 1')],
         'assessments':[('attachment_name','TEXT'),('attachment_blob','BLOB'),('attachment_mime','TEXT')],
@@ -389,6 +389,8 @@ def tenant_signin(slug):
     return handle_login(school)
 
 def finish_login(u):
+    # A successful authentication, not opening an invitation link, validates it.
+    execute("UPDATE users SET first_login_at=CURRENT_TIMESTAMP WHERE id=? AND first_login_at IS NULL",(u['id'],))
     session.clear()
     session['uid']=u['id']
     session['csrf']=secrets.token_urlsafe(24)
@@ -607,7 +609,7 @@ def school_accounts(sid):
             sent=create_invite(uid)
             flash('Compte créé. '+('Invitation envoyée par e-mail.' if sent else 'E-mail non envoyé : vérifiez Brevo et renvoyez l’invitation.'),'success' if sent else 'error')
             return redirect(url_for('school_accounts',sid=sid))
-    accounts=allrows("SELECT id,first_name,last_name,name,email,phone,role,matricule,active,must_change_password FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
+    accounts=allrows("SELECT id,first_name,last_name,name,email,phone,role,matricule,active,must_change_password,first_login_at FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
     return render_template('school_accounts.html',school=school,accounts=accounts,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(sid,))},base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
 
 @app.route('/schools/<int:sid>/accounts/<int:uid>/edit',methods=['GET','POST'])
