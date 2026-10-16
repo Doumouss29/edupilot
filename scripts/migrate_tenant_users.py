@@ -33,9 +33,13 @@ def migrate(path):
         )]
         # Rename would rewrite foreign-key definitions in dependent tables.
         # Rebuild in-place instead, preserving every integer user ID.
-        new_ddl = old.replace("CREATE TABLE IF NOT EXISTS users", "CREATE TABLE users_tenant_new", 1).replace(
-            "CREATE TABLE users", "CREATE TABLE users_tenant_new", 1).replace(
-            "email TEXT NOT NULL UNIQUE", "email TEXT NOT NULL", 1)
+        if "CREATE TABLE IF NOT EXISTS users" in old:
+            new_ddl = old.replace("CREATE TABLE IF NOT EXISTS users", "CREATE TABLE users_tenant_new", 1)
+        elif "CREATE TABLE users" in old:
+            new_ddl = old.replace("CREATE TABLE users", "CREATE TABLE users_tenant_new", 1)
+        else:
+            raise RuntimeError("Unexpected CREATE TABLE statement")
+        new_ddl = new_ddl.replace("email TEXT NOT NULL UNIQUE", "email TEXT NOT NULL", 1)
         if new_ddl == old or "users_tenant_new" not in new_ddl:
             raise RuntimeError("Unexpected CREATE TABLE format")
         con.execute(new_ddl)
