@@ -467,10 +467,10 @@ def dashboard():
         lessons=allrows("""SELECT l.id,l.starts_at,l.ends_at,l.room,l.status,c.name course_name,cl.name class_name,t.name teacher_name
                          FROM lessons l JOIN courses c ON c.id=l.course_id
                          JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id
-                         WHERE l.school_id=? AND l.starts_at>=? AND l.starts_at<?
+                         WHERE l.school_id=? AND l.ends_at>? AND l.starts_at<?
                          AND EXISTS (SELECT 1 FROM enrollments e
                            WHERE e.school_id=l.school_id AND e.student_id=? AND e.class_id=c.class_id)
-                         ORDER BY l.starts_at,c.name""",(u['school_id'],week_start,week_end,u['id']))
+                         ORDER BY l.starts_at,c.name""",(u['school_id'],max(datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),week_start),week_end,u['id']))
         week_days=[{'date':monday+datetime.timedelta(days=n),'lessons':[]} for n in range(7)]
         for item in lessons:
             index=(datetime.date.fromisoformat(item['starts_at'][:10])-monday).days
