@@ -584,14 +584,14 @@ def school_accounts(sid):
         if not first or not last or not phone or not email or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400,'Informations obligatoires manquantes')
         if len(first)>90 or len(last)>90 or len(phone)>40 or len(email)>254:abort(400)
         if role not in ('admin','administratif'):abort(400)
-        if one('SELECT id FROM users WHERE email=?',(email,)):
+        if one('SELECT id FROM users WHERE login_email=? AND school_id=?',(email,sid)):
             flash('Cette adresse e-mail est déjà utilisée.','error')
         else:
             try:
                 with db() as c:
                     c.execute('BEGIN IMMEDIATE')
                     matricule=requested_matricule(c,sid,role,request.form.get('matricule'))
-                    uid=c.execute('INSERT INTO users(school_id,name,first_name,last_name,email,phone,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,1)',(sid,first+' '+last,first,last,email,phone,generate_password_hash(password),role,matricule)).lastrowid
+                    uid=c.execute('INSERT INTO users(school_id,name,first_name,last_name,email,login_email,phone,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,?,1)',(sid,first+' '+last,first,last,email_for_storage(email),email,phone,generate_password_hash(password),role,matricule)).lastrowid
             except (ValueError,sqlite3.IntegrityError) as exc:
                 flash(str(exc),'error')
                 return redirect(url_for('school_accounts',sid=sid))
@@ -615,7 +615,7 @@ def school_account_edit(sid,uid):
         role=request.form.get('role','')
         if not first or not last or not phone or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400)
         if len(first)>90 or len(last)>90 or len(phone)>40 or len(email)>254 or role not in ('admin','administratif'):abort(400)
-        duplicate=one('SELECT id FROM users WHERE email=? AND id<>?',(email,uid))
+        duplicate=one('SELECT id FROM users WHERE login_email=? AND school_id=? AND id<>?',(email,sid,uid))
         if duplicate:
             flash('Adresse e-mail déjà utilisée.','error')
             return redirect(url_for('school_account_edit',sid=sid,uid=uid))
@@ -625,8 +625,8 @@ def school_account_edit(sid,uid):
                 matricule=validate_matricule(request.form.get('matricule') or account['matricule']) if (request.form.get('matricule') or account['matricule']) else next_matricule(c,sid,role)
                 if c.execute('SELECT 1 FROM users WHERE school_id=? AND matricule=? AND id<>?',(sid,matricule,uid)).fetchone():
                     raise ValueError('Matricule déjà utilisé dans cet établissement')
-                c.execute('UPDATE users SET name=?,first_name=?,last_name=?,email=?,phone=?,role=?,matricule=? WHERE id=? AND school_id=?',
-                          (first+' '+last,first,last,email,phone,role,matricule,uid,sid))
+                c.execute('UPDATE users SET name=?,first_name=?,last_name=?,email=?,login_email=?,phone=?,role=?,matricule=? WHERE id=? AND school_id=?',
+                          (first+' '+last,first,last,email_for_storage(email,exclude_id=uid),email,phone,role,matricule,uid,sid))
         except (ValueError,sqlite3.IntegrityError) as exc:
             flash(str(exc),'error')
             return redirect(url_for('school_account_edit',sid=sid,uid=uid))
@@ -887,13 +887,13 @@ def people():
             if len(selected)!=len(vals):abort(403)
         password=secrets.token_urlsafe(32)
         with db() as c:
-            if c.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone():
+            if c.execute('SELECT id FROM users WHERE login_email=? AND school_id=?',(email,school_id())).fetchone():
                 flash('Adresse e-mail déjà utilisée.','error')
                 return redirect(url_for('people'))
             c.execute('BEGIN IMMEDIATE')
             try:
                 matricule=requested_matricule(c,school_id(),role,request.form.get('matricule'))
-                uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,1)',(school_id(),name,email,generate_password_hash(password),role,matricule)).lastrowid
+                uid=c.execute('INSERT INTO users(school_id,name,email,login_email,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,?,1)',(school_id(),name,email_for_storage(email),email,generate_password_hash(password),role,matricule)).lastrowid
             except (ValueError,sqlite3.IntegrityError) as exc:
                 flash(str(exc),'error')
                 return redirect(url_for('people'))
@@ -1060,12 +1060,12 @@ def people_import():
     try:
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
-            registered={r['email'] for r in c.execute('SELECT email FROM users WHERE email IN ('+','.join('?' for _ in prepared)+')',tuple(x[1] for x in prepared)).fetchall()}
+            registered={r['login_email'] for r in c.execute('SELECT login_email FROM users WHERE school_id=? AND login_email IN ('+','.join('?' for _ in prepared)+')',(school_id(),*tuple(x[1] for x in prepared))).fetchall()}
             if registered:
                 flash('Import annulé : comptes déjà existants : '+', '.join(sorted(registered)[:4]),'error')
                 return redirect(url_for('people'))
             for name,email,class_id,year_id in prepared:
-                uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role,matricule) VALUES (?,?,?,?,?,?)',(school_id(),name,email,generate_password_hash(secrets.token_urlsafe(24)),'etudiant',next_matricule(c,school_id(),'etudiant'))).lastrowid
+                uid=c.execute('INSERT INTO users(school_id,name,email,login_email,password_hash,role,matricule) VALUES (?,?,?,?,?,?,?)',(school_id(),name,email_for_storage(email),email,generate_password_hash(secrets.token_urlsafe(24)),'etudiant',next_matricule(c,school_id(),'etudiant'))).lastrowid
                 c.execute('INSERT INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school_id(),uid,class_id,year_id))
                 hashes.append(uid)
     except sqlite3.IntegrityError:
