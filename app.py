@@ -390,16 +390,48 @@ def tenant_signin(slug):
 
 def handle_login(school=None):
     email=request.form.get('email','').strip().lower()
-    u=one('SELECT * FROM users WHERE email=? AND active=1',(email,))
-    if u and check_password_hash(u['password_hash'],request.form.get('password','')) and (school is None or (u['school_id']==school['id'] and u['role']!='superadmin')):
+    candidates=login_candidates(email)
+    if school:
+        candidates=[u for u in candidates if u['school_id']==school['id'] and u['role']!='superadmin']
+    matching=[u for u in candidates if check_password_hash(u['password_hash'],request.form.get('password',''))]
+    if matching:
         session.clear()
-        session['uid']=u['id']
         session['csrf']=secrets.token_urlsafe(24)
+        if len(matching)>1 and school is None:
+            session['school_select_ids']=[u['id'] for u in matching]
+            session['school_select_at']=int(time.time())
+            return redirect(url_for('choose_school'))
+        u=matching[0]
+        session['uid']=u['id']
         if u['must_change_password']:return redirect(url_for('change_password'))
         return redirect(url_for('dashboard'))
     flash('Identifiants incorrects.','error')
     if school:return redirect(url_for('tenant_login',slug=school['slug']))
     return redirect(url_for('login'))
+
+@app.route('/choisir-etablissement',methods=['GET','POST'])
+def choose_school():
+    ids=session.get('school_select_ids')
+    stamp=session.get('school_select_at',0)
+    if (not isinstance(ids,list) or not ids or len(ids)>25
+        or int(time.time())-stamp>300):
+        session.pop('school_select_ids',None)
+        session.pop('school_select_at',None)
+        return redirect(url_for('login'))
+    candidates=allrows("""SELECT u.id,u.name,u.role,u.school_id,s.name school_name,s.slug school_slug,s.logo_mime
+        FROM users u LEFT JOIN schools s ON s.id=u.school_id
+        WHERE u.active=1 AND u.id IN ("""+','.join('?' for _ in ids)+') ORDER BY s.name,u.id',tuple(ids))
+    if request.method=='POST':
+        try: selected=int(request.form.get('account_id',''))
+        except (ValueError,TypeError):abort(400)
+        choice=next((u for u in candidates if u['id']==selected),None)
+        if not choice:abort(403)
+        session.clear()
+        session['uid']=choice['id']
+        session['csrf']=secrets.token_urlsafe(24)
+        user=current_user()
+        return redirect(url_for('change_password') if user['must_change_password'] else url_for('dashboard'))
+    return render_template('choose_school.html',accounts=candidates)
 
 @app.route('/login',methods=['GET','POST'])
 def login():
