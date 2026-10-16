@@ -2164,7 +2164,7 @@ def reports():
         import csv,io
         b=io.StringIO();w=csv.writer(b,delimiter=';');w.writerow(['Cours','Classe','Séances planifiées','Heures prévues','Heures réalisées','Taux %'])
         for x in rows:w.writerow([x['name'],x['class_name'],x['lessons'],x['planned_minutes']/60,x['actual_minutes']/60,round(x['actual_minutes']/x['planned_minutes']*100,1) if x['planned_minutes'] else 0])
-        return Response('\\ufeff'+b.getvalue(),headers={'Content-Disposition':'attachment; filename=edupilot-rapport.csv'},mimetype='text/csv')
+        return Response('\ufeff'+b.getvalue(),headers={'Content-Disposition':'attachment; filename=edupilot-rapport.csv'},mimetype='text/csv')
     return render_template('reports.html',rows=rows,years=years,classes=classes,teachers=teachers,filters=filters)
 
 @app.route('/campuses',methods=['GET','POST'])
