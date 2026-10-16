@@ -72,6 +72,53 @@ class EduPilotSmoke(unittest.TestCase):
     def test_login_required(self):
         self.assertEqual(self.client.get("/").status_code, 302)
 
+    def test_same_email_two_schools_requires_selection_and_isolates_session(self):
+        # Same address, distinct account IDs, roles and school context.
+        shared="admin1@tests.edupilot.invalid"
+        self.login("superadmin@tests.edupilot.invalid")
+        response=self.client.post("/schools/2/accounts",data={
+            "csrf":self.token(),"first_name":"Admin","last_name":"Multi-école",
+            "phone":"+2250700000000","email":shared,"role":"administratif"})
+        self.assertEqual(response.status_code,302)
+        other=project.one("SELECT id,school_id,login_email,email FROM users WHERE school_id=2 AND login_email=?",(shared,))
+        self.assertIsNotNone(other)
+        self.assertNotEqual(other['email'],shared)
+        self.assertEqual(other['school_id'],2)
+        self.assertEqual(project.one("SELECT COUNT(*) n FROM users WHERE school_id=1 AND login_email=?",(shared,))["n"],1)
+        # The user can sign into the first school, but must prove possession of
+        # the second school's password before opening that account.
+        project.execute("UPDATE users SET password_hash=? WHERE id=?",
+                        (generate_password_hash("OtherSchoolPassword2026"),other['id']))
+        self.client.post("/logout",data={"csrf":self.token()})
+        token=self.csrf()
+        result=self.client.post("/login",data={"csrf":token,"email":shared,"password":"Test2026!"})
+        self.assertEqual(result.status_code,302)
+        self.assertIn("/choisir-etablissement",result.headers["Location"])
+        modal=self.client.get("/choisir-etablissement")
+        self.assertEqual(modal.status_code,200)
+        self.assertIn("Groupe Scolaire Excellence".encode(),modal.data)
+        self.assertIn("Université de Bouaké test".encode(),modal.data)
+        self.assertIn("Mot de passe de cet établissement".encode(),modal.data)
+        blocked=self.client.post("/choisir-etablissement",data={"csrf":self.token(),"account_id":other['id']})
+        self.assertEqual(blocked.status_code,302)
+        self.assertEqual(self.client.get("/").status_code,302)
+        chosen=self.client.post("/choisir-etablissement",data={
+            "csrf":self.token(),"account_id":other['id'],"password":"OtherSchoolPassword2026"})
+        self.assertEqual(chosen.status_code,302)
+        dashboard=self.client.get("/")
+        self.assertEqual(dashboard.status_code,200)
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess.get('uid'),other['id'])
+            self.assertNotIn('school_select_ids',sess)
+        self.assertEqual(self.client.get("/schools").status_code,403)
+
+    def test_choose_school_rejects_forged_account_and_expired_session(self):
+        self.login("admin1@tests.edupilot.invalid")
+        other=project.one("SELECT id FROM users WHERE school_id=2 LIMIT 1")
+        result=self.client.post("/choisir-etablissement",data={
+            "csrf":self.token(),"account_id":other['id']})
+        self.assertEqual(result.status_code,302)
+
     def test_admin_login(self):
         result = self.login("admin1@tests.edupilot.invalid")
         self.assertEqual(result.status_code, 200)
