@@ -32,7 +32,7 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS platform_branding(id INTEGER PRIMARY KEY CHECK(id=1),logo BLOB NOT NULL,logo_mime TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1, subscription_end TEXT, logo BLOB, logo_mime TEXT);
 CREATE TABLE IF NOT EXISTS campuses(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), name TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, matricule TEXT, active INTEGER NOT NULL DEFAULT 1, first_name TEXT, last_name TEXT, phone TEXT, must_change_password INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL, matricule TEXT, active INTEGER NOT NULL DEFAULT 1, first_name TEXT, last_name TEXT, phone TEXT, must_change_password INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS years(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), label TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS classes(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), year_id INTEGER NOT NULL REFERENCES years(id), campus_id INTEGER REFERENCES campuses(id), name TEXT NOT NULL, cycle TEXT NOT NULL DEFAULT 'semestre', parents_enabled INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS enrollments(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), student_id INTEGER NOT NULL REFERENCES users(id), class_id INTEGER NOT NULL REFERENCES classes(id), year_id INTEGER NOT NULL REFERENCES years(id), status TEXT NOT NULL DEFAULT 'inscrit', UNIQUE(student_id,class_id,year_id));
@@ -103,6 +103,8 @@ with db() as c:
         existing_columns={x['name'] for x in c.execute(f'PRAGMA table_info({table})')}
         for column,definition in additions:
             if column not in existing_columns:c.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+    c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_school_email ON users(school_id,email) WHERE school_id IS NOT NULL')
+    c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_platform_email ON users(email) WHERE school_id IS NULL')
     c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_school_matricule ON users(school_id,matricule) WHERE matricule IS NOT NULL')
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_name','LMurbs')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_phone','+2250711124359')")
@@ -388,8 +390,17 @@ def tenant_signin(slug):
 
 def handle_login(school=None):
     email=request.form.get('email','').strip().lower()
-    u=one('SELECT * FROM users WHERE email=? AND active=1',(email,))
-    if u and check_password_hash(u['password_hash'],request.form.get('password','')) and (school is None or (u['school_id']==school['id'] and u['role']!='superadmin')):
+    # A general login must not silently pick an arbitrary tenant account.
+    if school:
+        candidates=allrows('SELECT * FROM users WHERE email=? AND school_id=? AND active=1',(email,school['id']))
+    else:
+        candidates=allrows('SELECT * FROM users WHERE email=? AND active=1',(email,))
+    valid=[u for u in candidates if check_password_hash(u['password_hash'],request.form.get('password',''))]
+    if not school and len(candidates)>1:
+        flash('Plusieurs établissements utilisent cette adresse. Connectez-vous depuis la page de connexion de votre établissement.','error')
+        return redirect(url_for('login'))
+    u=valid[0] if len(valid)==1 else None
+    if u and (school is None or (u['school_id']==school['id'] and u['role']!='superadmin')):
         session.clear()
         session['uid']=u['id']
         session['csrf']=secrets.token_urlsafe(24)
@@ -550,7 +561,7 @@ def school_accounts(sid):
         if not first or not last or not phone or not email or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400,'Informations obligatoires manquantes')
         if len(first)>90 or len(last)>90 or len(phone)>40 or len(email)>254:abort(400)
         if role not in ('admin','administratif'):abort(400)
-        if one('SELECT id FROM users WHERE email=?',(email,)):
+        if one('SELECT id FROM users WHERE school_id=? AND email=?',(sid,email)):
             flash('Cette adresse e-mail est déjà utilisée.','error')
         else:
             try:
@@ -581,7 +592,7 @@ def school_account_edit(sid,uid):
         role=request.form.get('role','')
         if not first or not last or not phone or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400)
         if len(first)>90 or len(last)>90 or len(phone)>40 or len(email)>254 or role not in ('admin','administratif'):abort(400)
-        duplicate=one('SELECT id FROM users WHERE email=? AND id<>?',(email,uid))
+        duplicate=one('SELECT id FROM users WHERE school_id=? AND email=? AND id<>?',(sid,email,uid))
         if duplicate:
             flash('Adresse e-mail déjà utilisée.','error')
             return redirect(url_for('school_account_edit',sid=sid,uid=uid))
@@ -853,7 +864,7 @@ def people():
             if len(selected)!=len(vals):abort(403)
         password=secrets.token_urlsafe(32)
         with db() as c:
-            if c.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone():
+            if c.execute('SELECT id FROM users WHERE school_id=? AND email=?',(school_id(),email)).fetchone():
                 flash('Adresse e-mail déjà utilisée.','error')
                 return redirect(url_for('people'))
             c.execute('BEGIN IMMEDIATE')
@@ -1026,7 +1037,7 @@ def people_import():
     try:
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
-            registered={r['email'] for r in c.execute('SELECT email FROM users WHERE email IN ('+','.join('?' for _ in prepared)+')',tuple(x[1] for x in prepared)).fetchall()}
+            registered={r['email'] for r in c.execute('SELECT email FROM users WHERE school_id=? AND email IN ('+','.join('?' for _ in prepared)+')',(school_id(),*tuple(x[1] for x in prepared))).fetchall()}
             if registered:
                 flash('Import annulé : comptes déjà existants : '+', '.join(sorted(registered)[:4]),'error')
                 return redirect(url_for('people'))
@@ -1091,8 +1102,9 @@ def forgot_password():
                 permitted=True
                 for key in keys:
                     c.execute('INSERT INTO password_reset_limits(key_hash,attempted_at) VALUES (?,?) ON CONFLICT(key_hash) DO UPDATE SET attempted_at=excluded.attempted_at',(key,stamp))
-        user=one('SELECT id FROM users WHERE email=? AND active=1',(email,)) if permitted else None
-        if user:send_account_link(user['id'],'reset')
+        users=allrows('SELECT id FROM users WHERE email=? AND active=1',(email,)) if permitted else []
+        # All accounts with this verified mailbox receive their own distinct reset link.
+        for user in users:send_account_link(user['id'],'reset')
         flash('Si cette adresse correspond à un compte actif, un lien de réinitialisation vient d’être envoyé.','success')
         return redirect(url_for('forgot_password'))
     return render_template('forgot_password.html')
