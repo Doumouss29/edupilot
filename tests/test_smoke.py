@@ -552,6 +552,46 @@ class EduPilotSmoke(unittest.TestCase):
         self.assertIn("Cours de la classe".encode(),r.data)
         self.assertEqual(self.client.get(f"/classes/{foreign['id']}/details").status_code,404)
 
+    def test_instant_filters_courses_users_and_calendar(self):
+        self.login("admin1@tests.edupilot.invalid")
+        courses=self.client.get("/courses")
+        self.assertEqual(courses.status_code,200)
+        self.assertIn(b'data-filter-target="courses-list"',courses.data)
+        self.assertIn(b'data-filter="teacher"',courses.data)
+        self.assertIn(b'data-filter="class"',courses.data)
+        people=self.client.get("/people")
+        self.assertEqual(people.status_code,200)
+        for name in (b'data-filter="year"',b'data-filter="class"',b'data-filter="role"',b'data-filter="search"'):
+            self.assertIn(name,people.data)
+        self.assertIn(b'data-filter-target="users-list"',people.data)
+        planning=self.client.get("/planning")
+        self.assertEqual(planning.status_code,200)
+        self.assertIn(b'id="calendar-filter-class"',planning.data)
+        self.assertIn(b'id="calendar-filter-teacher"',planning.data)
+        self.assertIn(b'live-filters.js',planning.data)
+        events=self.client.get("/api/planning").json
+        self.assertTrue(events)
+        self.assertIn("classId",events[0]["extendedProps"])
+        self.assertIn("teacherId",events[0]["extendedProps"])
+
+    def test_student_upcoming_preview_excludes_past_dates(self):
+        import datetime
+        student_email="eleve1_1@tests.edupilot.invalid"
+        self.login(student_email)
+        today=datetime.date.today()
+        yesterday=(today-datetime.timedelta(days=1)).strftime('%d/%m')
+        rendered=self.client.get("/")
+        self.assertEqual(rendered.status_code,200)
+        text=rendered.data.decode("utf-8")
+        self.assertIn("Mes prochaines séances — à partir du",text)
+        self.assertIn(today.strftime("%d/%m/%Y"),text)
+        # The seven cards start today, even when today is Friday.
+        self.assertNotIn("<small>"+yesterday+"</small>",text)
+        self.assertEqual(text.count('class="student-day"'),7)
+        self.assertNotIn('aria-label="Période précédente"',text)
+        historical=self.client.get("/api/planning").json
+        self.assertTrue(historical) # Full calendar continues to include older sessions.
+
     def test_student_dashboard_week_and_privacy(self):
         self.login("eleve1_1@tests.edupilot.invalid")
         week=self.client.get("/?week=2026-10-12")
