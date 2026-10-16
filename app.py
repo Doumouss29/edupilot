@@ -95,7 +95,7 @@ with db() as c:
     for name,definition in [('subscription_end','TEXT'),('logo','BLOB'),('logo_mime','TEXT')]:
         if name not in existing: c.execute(f'ALTER TABLE schools ADD COLUMN {name} {definition}')
     columns={r['name'] for r in c.execute('PRAGMA table_info(users)').fetchall()}
-    for name,definition in [('first_name','TEXT'),('last_name','TEXT'),('phone','TEXT'),('must_change_password','INTEGER NOT NULL DEFAULT 0'),('matricule','TEXT')]:
+    for name,definition in [('first_name','TEXT'),('last_name','TEXT'),('phone','TEXT'),('must_change_password','INTEGER NOT NULL DEFAULT 0'),('matricule','TEXT'),('login_email','TEXT')]:
         if name not in columns:c.execute(f'ALTER TABLE users ADD COLUMN {name} {definition}')
     for table, additions in {'courses':[('coefficient','REAL NOT NULL DEFAULT 1')],
         'assessments':[('attachment_name','TEXT'),('attachment_blob','BLOB'),('attachment_mime','TEXT')],
@@ -103,6 +103,8 @@ with db() as c:
         existing_columns={x['name'] for x in c.execute(f'PRAGMA table_info({table})')}
         for column,definition in additions:
             if column not in existing_columns:c.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+    c.execute('UPDATE users SET login_email=LOWER(email) WHERE login_email IS NULL')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_users_login_email ON users(login_email)')
     c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_school_matricule ON users(school_id,matricule) WHERE matricule IS NOT NULL')
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_name','LMurbs')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_phone','+2250711124359')")
@@ -267,7 +269,7 @@ def send_brevo_email(address,subject,message):
 
 def send_account_link(uid,purpose='activation'):
     """Émet un lien à usage unique, valable 48 h pour activation, 30 min pour réinitialisation."""
-    user=one('SELECT u.id,u.name,u.email,u.active,u.role,u.school_id,s.name school_name FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.id=?',(uid,))
+    user=one('SELECT u.id,u.name,u.login_email AS email,u.active,u.role,u.school_id,s.name school_name FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.id=?',(uid,))
     if not user or not user['active']:return False
     token=secrets.token_urlsafe(32)
     token_hash=hashlib.sha256(token.encode()).hexdigest()
@@ -311,7 +313,7 @@ def notify(ids,message,href=''):
                 except Exception as exc:app.logger.warning('Échec push: %s',type(exc).__name__)
         except ImportError:app.logger.warning('Module pywebpush indisponible')
     for uid in recipients:
-        user=one('SELECT email FROM users WHERE id=? AND school_id=?',(uid,sid))
+        user=one('SELECT login_email AS email FROM users WHERE id=? AND school_id=?',(uid,sid))
         if user:send_brevo_email(user['email'],'EduPilot — Nouvelle notification',message)
 
 
@@ -506,7 +508,7 @@ def schools():
     records=allrows('SELECT id,name,slug,plan,active,subscription_end,logo_mime FROM schools ORDER BY id DESC')
     counts=allrows("SELECT school_id,COUNT(*) n FROM users WHERE role IN ('admin','administratif') GROUP BY school_id")
     account_counts={r['school_id']:r['n'] for r in counts}
-    admins=allrows("SELECT school_id,first_name,last_name,name,email,phone,role,active,must_change_password FROM users WHERE role IN ('admin','administratif') ORDER BY id DESC")
+    admins=allrows("SELECT school_id,first_name,last_name,name,login_email AS email,phone,role,active,must_change_password FROM users WHERE role IN ('admin','administratif') ORDER BY id DESC")
     return render_template('schools.html',schools=records,admin_accounts=admins,account_counts=account_counts,today=datetime.date.today().isoformat(),base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
 
 @app.route('/schools/new',methods=['GET','POST'])
@@ -564,7 +566,7 @@ def school_accounts(sid):
             sent=create_invite(uid)
             flash('Compte créé. '+('Invitation envoyée par e-mail.' if sent else 'E-mail non envoyé : vérifiez Brevo et renvoyez l’invitation.'),'success' if sent else 'error')
             return redirect(url_for('school_accounts',sid=sid))
-    accounts=allrows("SELECT id,first_name,last_name,name,email,phone,role,matricule,active,must_change_password FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
+    accounts=allrows("SELECT id,first_name,last_name,name,login_email AS email,phone,role,matricule,active,must_change_password FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
     return render_template('school_accounts.html',school=school,accounts=accounts,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(sid,))},base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
 
 @app.route('/schools/<int:sid>/accounts/<int:uid>/edit',methods=['GET','POST'])
@@ -876,7 +878,7 @@ def people():
     classes=scoped('SELECT id,name,year_id FROM classes WHERE school_id=? ORDER BY name')
     years=scoped('SELECT id,label FROM years WHERE school_id=? ORDER BY label DESC')
     courses=scoped('SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? ORDER BY cl.name,c.name')
-    rows=allrows("""SELECT u.id,u.name,u.email,u.role,u.matricule,u.active,u.must_change_password,
+    rows=allrows("""SELECT u.id,u.name,u.login_email AS email,u.role,u.matricule,u.active,u.must_change_password,
                      GROUP_CONCAT(DISTINCT cl.name) class_names,
                      TRIM(COALESCE(GROUP_CONCAT(DISTINCT cl.id),'') || ',' ||
                        COALESCE((SELECT GROUP_CONCAT(DISTINCT c2.class_id) FROM courses c2 WHERE c2.school_id=u.school_id AND c2.teacher_id=u.id),''), ',') class_ids,
@@ -1069,6 +1071,21 @@ def activate(token):
             return redirect(url_for('login'))
     return render_template('activate.html')
 
+def email_for_storage(email,school=None,exclude_id=None):
+    """Conserver l'unicité technique historique sans rendre l'adresse réelle unique entre écoles."""
+    duplicate=one('SELECT id,school_id FROM users WHERE email=? COLLATE NOCASE'+(' AND id<>?' if exclude_id else ''),
+                  (email,exclude_id) if exclude_id else (email,))
+    if not duplicate:
+        return email
+    return 'account-'+secrets.token_hex(15)+'@accounts.edupilot.invalid'
+
+def login_candidates(email):
+    return allrows('''SELECT u.*,s.name school_name,s.slug school_slug,s.logo_mime school_logo_mime
+        FROM users u LEFT JOIN schools s ON s.id=u.school_id
+        WHERE u.login_email=? AND u.active=1 AND
+        (u.school_id IS NULL OR s.id IS NOT NULL)
+        ORDER BY s.name COLLATE NOCASE,u.id''',(email,))
+
 def valid_password(value):
     return len(value)>=12 and any(c.isalpha() for c in value) and any(c.isdigit() for c in value)
 
@@ -1091,7 +1108,7 @@ def forgot_password():
                 permitted=True
                 for key in keys:
                     c.execute('INSERT INTO password_reset_limits(key_hash,attempted_at) VALUES (?,?) ON CONFLICT(key_hash) DO UPDATE SET attempted_at=excluded.attempted_at',(key,stamp))
-        user=one('SELECT id FROM users WHERE email=? AND active=1',(email,)) if permitted else None
+        user=one('SELECT id FROM users WHERE login_email=? AND active=1',(email,)) if permitted else None
         if user:send_account_link(user['id'],'reset')
         flash('Si cette adresse correspond à un compte actif, un lien de réinitialisation vient d’être envoyé.','success')
         return redirect(url_for('forgot_password'))
@@ -1143,14 +1160,14 @@ def class_details(cid):
     if current_user()['role']=='enseignant' and not one(
         'SELECT id FROM courses WHERE school_id=? AND class_id=? AND teacher_id=?',(school_id(),cid,current_user()['id'])):
         abort(403)
-    students=allrows("""SELECT DISTINCT u.id,u.name,u.matricule,u.email,u.active
+    students=allrows("""SELECT DISTINCT u.id,u.name,u.matricule,u.login_email AS email,u.active
                         FROM enrollments e JOIN users u ON u.id=e.student_id
                         WHERE e.school_id=? AND e.class_id=? AND e.year_id=?
                         ORDER BY u.name""",(school_id(),cid,clazz['year_id']))
     courses=allrows("""SELECT c.id,c.name,c.code,c.planned_minutes,u.id teacher_id,u.name teacher_name,u.matricule teacher_matricule
                        FROM courses c LEFT JOIN users u ON u.id=c.teacher_id
                        WHERE c.school_id=? AND c.class_id=? ORDER BY c.name""",(school_id(),cid))
-    teachers=allrows("""SELECT DISTINCT u.id,u.name,u.matricule,u.email
+    teachers=allrows("""SELECT DISTINCT u.id,u.name,u.matricule,u.login_email AS email
                         FROM courses c JOIN users u ON u.id=c.teacher_id
                         WHERE c.school_id=? AND c.class_id=? AND u.role IN ('enseignant','admin')
                         ORDER BY u.name""",(school_id(),cid))
