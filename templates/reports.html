@@ -1,1 +1,27 @@
-{% extends 'base.html' %}{% block heading %}Rapports pédagogiques{% endblock %}{% block content %}<div class="section-intro"><span class="eyebrow">PILOTAGE DES ENSEIGNEMENTS</span><h2>Réalisation des cours</h2><p>Volume horaire réellement dispensé et avancement par cours.</p></div><section class="panel"><div class="panel-title"><h3>Suivi des volumes horaires</h3><a class="btn outline" href="{{url_for('reports',format='csv')}}">↓ Exporter CSV / Excel</a></div><div class="table-scroll"><table><thead><tr><th>Cours</th><th>Classe</th><th>Séances</th><th>Volume prévu</th><th>Réalisé</th><th>Progression</th></tr></thead><tbody>{% for c in rows %}<tr><td><b>{{c.name}}</b></td><td>{{c.class_name}}</td><td>{{c.lessons}}</td><td>{{(c.planned_minutes/60)|round(1)}} h</td><td>{{(c.actual_minutes/60)|round(1)}} h</td><td style="min-width:160px"><div class="bar"><div style="width:{{[100,(c.actual_minutes/c.planned_minutes*100 if c.planned_minutes else 0)]|min}}%"></div></div><small>{{(c.actual_minutes/c.planned_minutes*100 if c.planned_minutes else 0)|round(1)}} %</small></td></tr>{% endfor %}</tbody></table></div></section>{% endblock %}
+{% extends 'base.html' %}{% block heading %}Rapports pédagogiques{% endblock %}{% block content %}<div class="section-intro"><span class="eyebrow">PILOTAGE DES ENSEIGNEMENTS</span><h2>Réalisation des cours</h2><p>Volume horaire réellement dispensé et avancement par cours.</p></div><section class="panel"><div class="panel-title"><h3>Suivi des volumes horaires</h3><a class="btn outline" id="reports-export" href="{{url_for('reports',format='csv',year_id=filters.get('year_id',''),class_id=filters.get('class_id',''),teacher_id=filters.get('teacher_id',''))}}">↓ Exporter CSV / Excel</a></div><div class="reports-filters" style="display:flex;gap:14px;flex-wrap:wrap;margin:18px 0 20px">
+<label style="flex:1;min-width:180px">Année académique<select id="reports-year"><option value="">Toutes les années</option>{% for y in years %}<option value="{{y.id}}" {% if filters.get('year_id')==y.id %}selected{% endif %}>{{y.label}}</option>{% endfor %}</select></label>
+<label style="flex:1;min-width:180px">Classe<select id="reports-class"><option value="">Toutes les classes</option>{% for cl in classes %}<option value="{{cl.id}}" data-year="{{cl.year_id}}" {% if filters.get('class_id')==cl.id %}selected{% endif %}>{{cl.name}}</option>{% endfor %}</select></label>
+<label style="flex:1;min-width:180px">Enseignant<select id="reports-teacher"><option value="">Tous les enseignants</option>{% for t in teachers %}<option value="{{t.id}}" {% if filters.get('teacher_id')==t.id %}selected{% endif %}>{{t.name}}</option>{% endfor %}</select></label>
+</div><div class="table-scroll"><table><thead><tr><th>Cours</th><th>Classe</th><th>Séances</th><th>Volume prévu</th><th>Réalisé</th><th>Progression</th></tr></thead><tbody>{% for c in rows %}<tr><td><b>{{c.name}}</b></td><td>{{c.class_name}}</td><td>{{c.lessons}}</td><td>{{(c.planned_minutes/60)|round(1)}} h</td><td>{{(c.actual_minutes/60)|round(1)}} h</td><td style="min-width:160px"><div class="bar"><div style="width:{{[100,(c.actual_minutes/c.planned_minutes*100 if c.planned_minutes else 0)]|min}}%"></div></div><small>{{(c.actual_minutes/c.planned_minutes*100 if c.planned_minutes else 0)|round(1)}} %</small></td></tr>{% else %}<tr><td colspan="6" class="muted">Aucun cours pour ces critères.</td></tr>{% endfor %}</tbody></table></div></section>
+<script>
+(function(){
+const year=document.getElementById('reports-year'),cls=document.getElementById('reports-class'),teacher=document.getElementById('reports-teacher');
+function updateClasses(){
+  for(const option of cls.options){
+    if(!option.value)continue;
+    option.hidden=!!year.value && option.dataset.year!==year.value;
+  }
+  if(cls.selectedOptions[0]?.hidden)cls.value='';
+}
+function apply(){
+ updateClasses();
+ const params=new URLSearchParams();
+ if(year.value)params.set('year_id',year.value);
+ if(cls.value)params.set('class_id',cls.value);
+ if(teacher.value)params.set('teacher_id',teacher.value);
+ window.location.assign(window.location.pathname+(params.toString()?'?'+params.toString():''));
+}
+updateClasses();
+[year,cls,teacher].forEach(select=>select.addEventListener('change',apply));
+})();
+</script>{% endblock %}
