@@ -5,7 +5,7 @@
 <label>Prénom<input name="first_name" maxlength="90" required value="{{account.first_name or account.name.split(' ')[0]}}"></label>
 <label>Nom<input name="last_name" maxlength="90" required value="{{account.last_name or account.name.partition(' ')[2] or account.name}}"></label>
 <label>Matricule<input name="matricule" maxlength="40" required value="{{account.matricule or ''}}"></label>
-<label>Adresse e-mail<input type="email" name="email" value="{{account.email}}" required></label>
+<label>Adresse e-mail<input type="email" name="email" value="{{account.login_email or account.email}}" required></label>
 <label>Téléphone / contact<input type="tel" name="phone" maxlength="40" value="{{account.phone or ''}}" required></label>
 <label>Profil<select name="role"><option value="admin" {% if account.role=='admin' %}selected{% endif %}>Admin établissement</option><option value="administratif" {% if account.role=='administratif' %}selected{% endif %}>Administratif établissement</option></select></label>
 <p class="muted">Pour réinitialiser son accès, envoyez un lien personnel par e-mail depuis la gestion des comptes.</p>
