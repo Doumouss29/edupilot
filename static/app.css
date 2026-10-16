@@ -404,3 +404,24 @@ img,video,iframe,canvas{max-width:100%}
   .live-filter-count{grid-column:1/-1;margin:0}
 }
 @media(max-width:360px){.live-filter-bar{grid-template-columns:1fr}}
+
+
+/* Choix d'établissement après authentification, accessible sur smartphone. */
+.school-select-backdrop{min-height:100dvh;padding:24px 12px;display:flex;justify-content:center;align-items:center;background:rgba(20,40,58,.08)}
+.school-select-modal{width:min(100%,560px);max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contain;background:#fff;border:1px solid #e0e8f0;box-shadow:0 22px 70px #182e4224;border-radius:20px;padding:25px}
+.school-select-modal h1{margin:12px 0 8px;font-size:26px;line-height:1.2;color:#24394d}
+.school-select-modal header p{font-size:14px;color:#7b8996;line-height:1.5}
+.school-select-list{display:grid;gap:14px;margin-top:20px}
+.school-select-row{border:1px solid #e2e8ed;border-radius:14px;padding:14px;display:grid;gap:12px}
+.school-select-card{display:flex;gap:13px;align-items:center;min-width:0}
+.school-select-card img,.school-select-icon{width:62px;height:62px;flex:0 0 62px;object-fit:contain;border:1px solid #e8edf1;border-radius:10px;padding:4px;background:#fff}
+.school-select-icon{display:grid;place-items:center;font-size:26px}
+.school-select-info{min-width:0;flex:1;display:grid;gap:5px}
+.school-select-info strong{font-size:15px;color:#253a49;overflow-wrap:anywhere}
+.school-select-info small{font-size:12px;color:#7b8996}
+.school-select-row .btn{justify-content:center;width:100%;min-height:44px}
+.school-select-password{display:grid;gap:7px;font-size:12px;color:#586e80}
+.school-select-password input{width:100%;min-height:44px;font-size:16px}
+.school-select-modal footer{padding-top:17px;text-align:center}
+.school-select-modal footer a{color:#ad6229;font-size:13px}
+@media(max-width:720px){.school-select-backdrop{padding:env(safe-area-inset-top,12px) 10px env(safe-area-inset-bottom,12px)}.school-select-modal{border-radius:15px;padding:17px;max-height:calc(100dvh - 24px)}.school-select-modal h1{font-size:22px}.school-select-row{padding:11px}}
