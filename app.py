@@ -878,8 +878,10 @@ def people():
     courses=scoped('SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? ORDER BY cl.name,c.name')
     rows=allrows("""SELECT u.id,u.name,u.email,u.role,u.matricule,u.active,u.must_change_password,
                      GROUP_CONCAT(DISTINCT cl.name) class_names,
-                     GROUP_CONCAT(DISTINCT cl.id) class_ids,
-                     GROUP_CONCAT(DISTINCT e.year_id) year_ids,
+                     TRIM(COALESCE(GROUP_CONCAT(DISTINCT cl.id),'') || ',' ||
+                       COALESCE((SELECT GROUP_CONCAT(DISTINCT c2.class_id) FROM courses c2 WHERE c2.school_id=u.school_id AND c2.teacher_id=u.id),''), ',') class_ids,
+                     TRIM(COALESCE(GROUP_CONCAT(DISTINCT e.year_id),'') || ',' ||
+                       COALESCE((SELECT GROUP_CONCAT(DISTINCT cl2.year_id) FROM courses c2 JOIN classes cl2 ON cl2.id=c2.class_id WHERE c2.school_id=u.school_id AND c2.teacher_id=u.id),''), ',') year_ids,
                      (SELECT GROUP_CONCAT(c.name||' ('||cl2.name||')',', ') FROM courses c JOIN classes cl2 ON cl2.id=c.class_id WHERE c.teacher_id=u.id AND c.school_id=u.school_id) teacher_courses
                   FROM users u LEFT JOIN enrollments e ON e.student_id=u.id AND e.school_id=u.school_id
                   LEFT JOIN classes cl ON cl.id=e.class_id
