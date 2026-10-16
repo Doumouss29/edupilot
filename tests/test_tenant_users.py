@@ -35,6 +35,16 @@ class TenantUsersTest(unittest.TestCase):
             token = sess.get("csrf")
         return self.client.post(url, data={"email":"same@example.test", "password":password, "csrf":token})
 
+    def test_invitation_status_changes_on_first_login(self):
+        before=project.one("SELECT first_login_at FROM users WHERE school_id=1")
+        self.assertIsNone(before["first_login_at"])
+        self.login("/ecole-a/login", "PasswordA123")
+        after=project.one("SELECT first_login_at FROM users WHERE school_id=1")
+        self.assertIsNotNone(after["first_login_at"])
+        self.login("/ecole-a/login", "PasswordA123")
+        again=project.one("SELECT first_login_at FROM users WHERE school_id=1")
+        self.assertEqual(again["first_login_at"],after["first_login_at"])
+
     def test_duplicate_mail_across_schools_but_not_within_school(self):
         with project.db() as con:
             self.assertEqual(con.execute("SELECT count(*) FROM users WHERE email='same@example.test'").fetchone()[0], 2)
