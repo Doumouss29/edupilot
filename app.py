@@ -457,9 +457,12 @@ def dashboard():
             today=datetime.date.fromisoformat(ref) if ref else datetime.date.today()
         except ValueError:
             today=datetime.date.today()
-        monday=today-datetime.timedelta(days=today.weekday())
-        sunday=monday+datetime.timedelta(days=7)
-        week_start=monday.isoformat()
+        # Dashboard = rolling seven-day preview, never show dates before today.
+        # Full /planning calendar keeps complete historical navigation.
+        today=max(today,datetime.date.today())
+        monday=today
+        sunday=today+datetime.timedelta(days=7)
+        week_start=today.isoformat()
         week_end=sunday.isoformat()
         lessons=allrows("""SELECT l.id,l.starts_at,l.ends_at,l.room,l.status,c.name course_name,cl.name class_name,t.name teacher_name
                          FROM lessons l JOIN courses c ON c.id=l.course_id
@@ -470,8 +473,8 @@ def dashboard():
                          ORDER BY l.starts_at,c.name""",(u['school_id'],week_start,week_end,u['id']))
         week_days=[{'date':monday+datetime.timedelta(days=n),'lessons':[]} for n in range(7)]
         for item in lessons:
-            index=datetime.date.fromisoformat(item['starts_at'][:10]).weekday()
-            week_days[index]['lessons'].append(item)
+            index=(datetime.date.fromisoformat(item['starts_at'][:10])-monday).days
+            if 0<=index<7:week_days[index]['lessons'].append(item)
         return render_template('dashboard_student.html',week_days=week_days,
                                monday=monday,prev_week=(monday-datetime.timedelta(days=7)).isoformat(),
                                next_week=(monday+datetime.timedelta(days=7)).isoformat(),
@@ -870,15 +873,18 @@ def people():
         flash('Compte créé. '+('Lien d’activation envoyé par e-mail.' if sent else 'Invitation non envoyée : vérifiez la configuration Brevo.'),'success' if sent else 'error')
         return redirect(url_for('people'))
     users=scoped('SELECT * FROM users WHERE school_id=? ORDER BY role,name')
-    classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name')
+    classes=scoped('SELECT id,name,year_id FROM classes WHERE school_id=? ORDER BY name')
+    years=scoped('SELECT id,label FROM years WHERE school_id=? ORDER BY label DESC')
     courses=scoped('SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? ORDER BY cl.name,c.name')
     rows=allrows("""SELECT u.id,u.name,u.email,u.role,u.matricule,u.active,u.must_change_password,
                      GROUP_CONCAT(DISTINCT cl.name) class_names,
+                     GROUP_CONCAT(DISTINCT cl.id) class_ids,
+                     GROUP_CONCAT(DISTINCT e.year_id) year_ids,
                      (SELECT GROUP_CONCAT(c.name||' ('||cl2.name||')',', ') FROM courses c JOIN classes cl2 ON cl2.id=c.class_id WHERE c.teacher_id=u.id AND c.school_id=u.school_id) teacher_courses
                   FROM users u LEFT JOIN enrollments e ON e.student_id=u.id AND e.school_id=u.school_id
                   LEFT JOIN classes cl ON cl.id=e.class_id
                   WHERE u.school_id=? GROUP BY u.id ORDER BY u.role,u.name""",(school_id(),))
-    return render_template('list.html',title='Utilisateurs',columns=['Matricule','Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['matricule'],x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,courses=courses,user_rows=rows,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(school_id(),))})
+    return render_template('list.html',title='Utilisateurs',columns=['Matricule','Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['matricule'],x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,years=years,courses=courses,user_rows=rows,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(school_id(),))})
 
 @app.post('/people/bulk')
 @roles('admin','administratif')
