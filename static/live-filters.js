@@ -9,8 +9,19 @@
     tables.add(table);
     const selects=[...bar.querySelectorAll('[data-filter]')];
     const rows=[...table.querySelectorAll('tbody tr[data-filter-row]')];
+    const allOptions=new Map(selects.filter(el=>el.tagName==='SELECT').map(el=>[el,[...el.options].map(o=>({value:o.value,label:o.textContent}))]));
     const counter=bar.querySelector('.live-filter-count');
     function update(){
+      // Cascade: available choices reflect all *other* selected criteria.
+      const current=Object.fromEntries(selects.map(el=>[el.dataset.filter,String(el.value||'')]));
+      for(const [select,options] of allOptions){
+        const key=select.dataset.filter;
+        const allowed=new Set(rows.filter(row=>Object.entries(current).every(([other,val])=>!val||other===key||(other==='search'?norm(row.textContent).includes(norm(val)):tokens(row.dataset[other]).includes(val)))).flatMap(row=>tokens(row.dataset[key])));
+        const previous=select.value;
+        for(const option of select.options){option.disabled=!!option.value&&!allowed.has(option.value);}
+        // Keep selected value visible if it becomes temporarily incompatible.
+        if(previous)for(const option of select.options)if(option.value===previous)option.disabled=false;
+      }
       let visible=0;
       const values=Object.fromEntries(selects.map(input=>[input.dataset.filter,String(input.value||'')]));
       rows.forEach(row=>{
@@ -29,6 +40,10 @@
     }
     selects.forEach(input=>{input.addEventListener('input',update);input.addEventListener('change',update);});
     update();
+  });
+  // GET filters update immediately without a dedicated Apply button.
+  document.querySelectorAll('form[data-auto-submit-filters]').forEach(form=>{
+    form.querySelectorAll('select').forEach(select=>select.addEventListener('change',()=>form.requestSubmit()));
   });
   // Every ordinary tabular listing also offers immediate keyword search.
   // Forms and action columns are left intact; hidden rows are unselected.
