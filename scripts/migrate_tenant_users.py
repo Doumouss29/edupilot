@@ -4,7 +4,6 @@ Stop the EduPilot container and back up the database before running.
 Usage: python scripts/migrate_tenant_users.py /path/to/edupilot.db
 """
 import sqlite3
-import re
 import sys
 from pathlib import Path
 
@@ -34,7 +33,8 @@ def migrate(path):
         )]
         # Rename would rewrite foreign-key definitions in dependent tables.
         # Rebuild in-place instead, preserving every integer user ID.
-        new_ddl = re.sub(r'(?i)^(CREATE\\s+TABLE\\s+)(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:["\\`\\[]?users["\\`\\]]?)', r'\\1users_tenant_new', old, count=1).replace(
+        new_ddl = old.replace("CREATE TABLE IF NOT EXISTS users", "CREATE TABLE users_tenant_new", 1).replace(
+            "CREATE TABLE users", "CREATE TABLE users_tenant_new", 1).replace(
             "email TEXT NOT NULL UNIQUE", "email TEXT NOT NULL", 1)
         if new_ddl == old or "users_tenant_new" not in new_ddl:
             raise RuntimeError("Unexpected CREATE TABLE format")
