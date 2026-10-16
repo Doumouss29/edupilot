@@ -397,8 +397,9 @@ def handle_login(school=None):
     if matching:
         session.clear()
         session['csrf']=secrets.token_urlsafe(24)
-        if len(matching)>1 and school is None:
-            session['school_select_ids']=[u['id'] for u in matching]
+        if len(candidates)>1 and school is None:
+            session['school_select_ids']=[u['id'] for u in candidates]
+            session['school_verified_ids']=[u['id'] for u in matching]
             session['school_select_at']=int(time.time())
             return redirect(url_for('choose_school'))
         u=matching[0]
@@ -426,12 +427,18 @@ def choose_school():
         except (ValueError,TypeError):abort(400)
         choice=next((u for u in candidates if u['id']==selected),None)
         if not choice:abort(403)
+        if selected not in session.get('school_verified_ids',[]):
+            password=request.form.get('password','')
+            account=one('SELECT password_hash FROM users WHERE id=? AND active=1',(selected,))
+            if not account or not password or not check_password_hash(account['password_hash'],password):
+                flash('Mot de passe incorrect pour cet établissement.','error')
+                return redirect(url_for('choose_school'))
         session.clear()
         session['uid']=choice['id']
         session['csrf']=secrets.token_urlsafe(24)
         user=current_user()
         return redirect(url_for('change_password') if user['must_change_password'] else url_for('dashboard'))
-    return render_template('choose_school.html',accounts=candidates)
+    return render_template('choose_school.html',accounts=candidates,verified_ids=session.get('school_verified_ids',[]))
 
 @app.route('/login',methods=['GET','POST'])
 def login():
