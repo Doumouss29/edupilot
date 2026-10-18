@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Installer EduPilot sur votre téléphone</title>
+<link rel="manifest" href="{{url_for('webmanifest')}}">
+<link rel="apple-touch-icon" sizes="180x180" href="{{url_for('static',filename='edupilot-180.png')}}">
+<link rel="icon" href="{{url_for('static',filename='edupilot-icon.svg')}}">
+<meta name="theme-color" content="#203950">
+<style>body{margin:0;background:#f3f6fa;color:#203950;font:16px system-ui,-apple-system,Arial,sans-serif}main{max-width:530px;margin:5vh auto;padding:28px}section{background:white;padding:30px;border-radius:22px;box-shadow:0 12px 35px #20395016}h1{margin:10px 0}p{line-height:1.6}img{width:84px;height:84px;border-radius:20px}button,a.primary{display:block;box-sizing:border-box;width:100%;background:#203950;color:white;border:0;border-radius:12px;padding:15px;text-align:center;font:600 16px system-ui;text-decoration:none;cursor:pointer;margin-top:17px}.muted{color:#596a7b;font-size:14px}.steps{background:#eef4fa;padding:16px 20px;border-radius:12px;line-height:1.8}#ios,#android-help,#installed{display:none}</style>
+</head><body><main><section>
+<img src="{{url_for('static',filename='edupilot-180.png')}}" alt="Logo EduPilot">
+<h1>Installer EduPilot</h1><p>Accédez à votre établissement, vos cours, notes et notifications depuis l'écran d'accueil de votre téléphone.</p>
+<div id="ios"><div class="steps"><b>Sur iPhone (Safari)</b><br>1. Appuyez sur le bouton <b>Partager</b> de Safari.<br>2. Choisissez <b>Sur l’écran d’accueil</b> (ou « Ajouter à l’écran d’accueil »).<br>3. Confirmez avec <b>Ajouter</b>.</div><p class="muted">Si vous utilisez un autre navigateur, ouvrez d'abord ce lien dans Safari.</p></div>
+<div id="android-help"><div class="steps"><b>Sur Android (Chrome)</b><br>Ouvrez le menu ⋮ puis appuyez sur <b>Installer l’application</b> ou <b>Ajouter à l’écran d’accueil</b>.</div></div>
+<div id="installed"><p>EduPilot semble déjà ouvert en mode application.</p></div>
+<button type="button" id="install" hidden>Installer EduPilot</button>
+<a class="primary" href="{{url_for('login')}}">Se connecter à EduPilot</a>
+<p class="muted">Après installation et connexion, ouvrez la cloche 🔔 pour activer les notifications. L'autorisation vous sera demandée uniquement si vous choisissez de les activer.</p>
+</section></main>
+<script>
+let deferredInstall=null;
+const ios=/iPhone|iPad|iPod/.test(navigator.userAgent),standalone=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+if(standalone)document.getElementById('installed').style.display='block';
+else if(ios)document.getElementById('ios').style.display='block';
+else document.getElementById('android-help').style.display='block';
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstall=event;document.getElementById('install').hidden=false;});
+document.getElementById('install').addEventListener('click',async()=>{if(!deferredInstall)return;const prompt=deferredInstall;deferredInstall=null;document.getElementById('install').hidden=true;await prompt.prompt();});
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js',{scope:'/'}).catch(()=>{});
+</script></body></html>
