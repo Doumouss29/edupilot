@@ -142,7 +142,10 @@ def validate_matricule(value):
 
 def next_matricule(c, sid, role, advance=True):
     ensure_matricule_rules(c,sid)
-    rule=c.execute('SELECT prefix,next_number,padding FROM matricule_rules WHERE school_id=? AND role=?',(sid,role)).fetchone()
+    rule_sql='SELECT prefix,next_number,padding FROM matricule_rules WHERE school_id=? AND role=?'
+    if DB_ENGINE == 'postgresql' and advance:
+        rule_sql+=' FOR UPDATE'
+    rule=c.execute(rule_sql,(sid,role)).fetchone()
     if not rule:raise ValueError('Profil non configuré')
     number=rule['next_number']
     while True:
