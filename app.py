@@ -576,8 +576,9 @@ def superadmin_users_report():
     if 'school_id' in values:where.append('u.school_id=?');args.append(values['school_id'])
     if 'year_id' in values:
         where.append("""(EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=u.id AND e.school_id=u.school_id AND e.year_id=?)
-        OR EXISTS (SELECT 1 FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.teacher_id=u.id AND c.school_id=u.school_id AND cl.year_id=?))""")
-        args.extend([values['year_id']]*2)
+        OR EXISTS (SELECT 1 FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.teacher_id=u.id AND c.school_id=u.school_id AND cl.year_id=?)
+        OR EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id AND e.school_id=p.school_id WHERE p.parent_id=u.id AND p.school_id=u.school_id AND e.year_id=?))""")
+        args.extend([values['year_id']]*3)
     if 'class_id' in values:
         where.append("""(EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=u.id AND e.school_id=u.school_id AND e.class_id=?)
         OR EXISTS (SELECT 1 FROM courses c WHERE c.teacher_id=u.id AND c.school_id=u.school_id AND c.class_id=?)
