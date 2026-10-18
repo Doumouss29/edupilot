@@ -305,10 +305,15 @@ def notify(ids,message,href=''):
     recipients=[r['id'] for r in allrows('SELECT id FROM users WHERE school_id=? AND active=1',(sid,)) if r['id'] in candidate]
     for uid in recipients:
         execute('INSERT INTO notifications(school_id,user_id,message,href) VALUES (?,?,?,?)',(sid,uid,message,href))
-    if recipients and all(os.getenv(k) for k in ('VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_SUBJECT')):
+    push_ready=all(os.getenv(k) for k in ('VAPID_PRIVATE_KEY','VAPID_PUBLIC_KEY','VAPID_SUBJECT'))
+    if recipients and not push_ready:
+        app.logger.warning('Push non configuré pour %d destinataire(s) : vérifiez les variables VAPID',len(recipients))
+    if recipients and push_ready:
         try:
             from pywebpush import webpush, WebPushException
             subscriptions=allrows('SELECT id,user_id,subscription_json FROM push_subscriptions WHERE user_id IN ('+','.join('?' for _ in recipients)+')',tuple(recipients))
+            if not subscriptions:
+                app.logger.warning('Aucun abonnement push enregistré pour les %d destinataire(s)',len(recipients))
             for subscription in subscriptions:
                 try:
                     webpush(subscription_info=json.loads(subscription['subscription_json']),
@@ -674,13 +679,10 @@ def logout():
     endpoint=request.form.get('push_endpoint','')
     if uid and endpoint and len(endpoint)<=2048:
         execute('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?',(uid,endpoint))
-    token=request.cookies.get('edupilot_trusted','')
-    if uid and token and len(token)<=180:
-        execute('DELETE FROM mfa_trusted_devices WHERE user_id=? AND token_hash=?',(uid,hashlib.sha256(token.encode()).hexdigest()))
+    # End the login session, but retain an explicitly trusted device until
+    # its 30/90-day expiry. A later login still requires the password.
     session.clear()
-    response=make_response(redirect(url_for('login')))
-    response.delete_cookie('edupilot_trusted',path='/')
-    return response
+    return redirect(url_for('login'))
 
 @app.get('/')
 @login_required
