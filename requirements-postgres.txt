@@ -1,0 +1,2 @@
+# EduPilot PostgreSQL rehearsal tools; independent of production Flask.
+psycopg[binary]>=3.2,<4
