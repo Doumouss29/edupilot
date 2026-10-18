@@ -4,3 +4,4 @@ gunicorn>=22,<25
 requests>=2.31,<3
 openpyxl>=3.1,<4
 pywebpush>=2.0,<3
+qrcode[pil]>=8,<9
