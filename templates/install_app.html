@@ -9,7 +9,7 @@
 </head><body><main><section>
 <img src="{{url_for('static',filename='edupilot-180.png')}}" alt="Logo EduPilot">
 <h1>Installer EduPilot</h1><p>Accédez à votre établissement, vos cours, notes et notifications depuis l'écran d'accueil de votre téléphone.</p>
-<div id="ios"><div class="steps"><b>Sur iPhone (Safari)</b><br>1. Ouvrez ce lien dans <b>Safari</b> (depuis WhatsApp : menu de partage ou « Ouvrir dans le navigateur »).<br>2. Appuyez sur <b>Partager</b> dans Safari.<br>3. Choisissez <b>Sur l’écran d’accueil</b> (ou « Ajouter à l’écran d’accueil »).<br>4. Confirmez avec <b>Ajouter</b>.</div><p class="muted">Sur iPhone, l’installation automatique n’est pas autorisée depuis cette page. Si vous êtes dans Chrome ou WhatsApp, copiez l’adresse et collez-la dans Safari.</p></div>
+<div id="ios"><div class="steps"><b>Installation sur iPhone</b><br>1. Ouvrez cette page dans Safari si vous venez de WhatsApp.<br>2. Appuyez sur le bouton ci-dessous pour afficher <b>l’application EduPilot</b>.<br>3. Sur cette page EduPilot, appuyez sur <b>Partager → Sur l’écran d’accueil → Ajouter</b>.<br><b>Important :</b> n’ajoutez pas cette page d’explication à votre écran d’accueil.</div><a class="primary" id="ios-open-app" href="{{url_for('login',installation=1)}}">Ouvrir EduPilot pour l’installer →</a><p class="muted">L’icône créée sera celle d’EduPilot et l’application démarrera dans son propre espace.</p></div>
 <div id="android-help"><div class="steps"><b>Sur Android (Chrome)</b><br>Ouvrez le menu ⋮ puis appuyez sur <b>Installer l’application</b> ou <b>Ajouter à l’écran d’accueil</b>.</div></div>
 <div id="installed"><p>EduPilot semble déjà ouvert en mode application.</p></div>
 <button type="button" id="install" hidden>Installer EduPilot</button>
