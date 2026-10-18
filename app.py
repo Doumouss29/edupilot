@@ -409,7 +409,7 @@ def complete_login(u, trusted_cookie=None):
 
 def mfa_role(u):
     if u['role']=='superadmin':return 'totp'
-    if u['role'] in ('admin','administratif','etudiant'):return 'email'
+    if u['role'] in ('admin','administratif','etudiant','enseignant','parent'):return 'email'
     return None
 
 
