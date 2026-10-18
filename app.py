@@ -402,7 +402,7 @@ def complete_login(u, trusted_cookie=None):
         return redirect(url_for('change_password'))
     response=make_response(redirect(url_for('dashboard')))
     if trusted_cookie:
-        response.set_cookie('edupilot_trusted',trusted_cookie,max_age=90*86400,secure=True,httponly=True,samesite='Lax',path='/')
+        response.set_cookie('edupilot_trusted',trusted_cookie,max_age=(30 if u['role'] in ('admin','administratif') else 90)*86400,secure=True,httponly=True,samesite='Lax',path='/')
     return response
 
 
