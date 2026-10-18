@@ -24,8 +24,11 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=90),
 )
 app.config['MAX_CONTENT_LENGTH'] = 12 * 1024 * 1024
-if os.getenv('DB_ENGINE', 'sqlite').lower() != 'sqlite':
-    raise RuntimeError('Moteur PostgreSQL non activé : compatibilité et recette à finaliser avant bascule.')
+DB_ENGINE = os.getenv('DB_ENGINE', 'sqlite').lower()
+if DB_ENGINE not in ('sqlite', 'postgresql'):
+    raise RuntimeError('DB_ENGINE doit être sqlite ou postgresql.')
+if DB_ENGINE == 'postgresql' and os.getenv('PGSCHEMA') != 'edupilot_recette':
+    raise RuntimeError('Seul le schéma edupilot_recette est actuellement autorisé pour PostgreSQL.')
 DB = os.getenv('DATABASE_PATH', '/tmp/edupilot.db')
 UPLOAD_DIR = Path(os.getenv('UPLOAD_DIR', '/tmp/edupilot_uploads'))
 UPLOAD_DIR.mkdir(parents=True,exist_ok=True)
@@ -66,6 +69,9 @@ CREATE TABLE IF NOT EXISTS matricule_rules(school_id INTEGER NOT NULL REFERENCES
 """
 
 def connection():
+    if DB_ENGINE == 'postgresql':
+        from postgres_rehearsal import pg_connection
+        return pg_connection()
     c=sqlite3.connect(DB,timeout=30)
     c.row_factory=sqlite3.Row
     c.execute('PRAGMA foreign_keys=ON')
@@ -95,8 +101,10 @@ def execute(sql,args=()):
         cur=c.execute(sql,args)
         return cur.lastrowid
 
-Path(DB).parent.mkdir(parents=True,exist_ok=True)
-with db() as c:
+if DB_ENGINE == 'sqlite':
+    Path(DB).parent.mkdir(parents=True,exist_ok=True)
+if DB_ENGINE == 'sqlite':
+  with db() as c:
     c.executescript(SCHEMA)
     existing={r['name'] for r in c.execute('PRAGMA table_info(schools)').fetchall()}
     for name,definition in [('subscription_end','TEXT'),('logo','BLOB'),('logo_mime','TEXT'),('campus_enabled','INTEGER NOT NULL DEFAULT 0')]:
@@ -154,7 +162,8 @@ def requested_matricule(c,sid,role,raw):
     return next_matricule(c,sid,role)
 
 # Migration non destructive : attribuer les numéros manquants aux comptes existants.
-with db() as c:
+if DB_ENGINE == 'sqlite':
+ with db() as c:
     c.execute('BEGIN IMMEDIATE')
     for school in c.execute('SELECT id FROM schools').fetchall():
         sid=school['id']
