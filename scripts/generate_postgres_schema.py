@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Generate a REVIEW-ONLY PostgreSQL schema from a consistent EduPilot SQLite snapshot.
+
+Never connects to PostgreSQL or modifies either database.
+Usage: python3 scripts/generate_postgres_schema.py SNAPSHOT.sqlite3 --output /tmp/edupilot_schema.sql
+"""
+import argparse
+import re
+import sqlite3
+from pathlib import Path
+
+SCHEMA = "edupilot"
+
+def quoted(identifier):
+    return '"' + identifier.replace('"', '""') + '"'
+
+def convert_type(source):
+    return {"INTEGER": "BIGINT", "TEXT": "TEXT", "REAL": "DOUBLE PRECISION",
+            "BLOB": "BYTEA", "NUMERIC": "NUMERIC"}.get(source.upper(), source.upper())
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("snapshot", type=Path)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    if not args.snapshot.is_file():
+        parser.error("Sauvegarde SQLite introuvable")
+    source = sqlite3.connect(f"file:{args.snapshot.resolve()}?mode=ro", uri=True)
+    source.row_factory = sqlite3.Row
+    try:
+        if source.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise SystemExit("Sauvegarde SQLite non intègre")
+        tables = [dict(r) for r in source.execute(
+            "SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        lines = [
+            "-- EduPilot PostgreSQL schema, generated from a consistent SQLite snapshot.",
+            "-- REVIEW ONLY: do not execute on production before migration rehearsal.",
+            "BEGIN;",
+            "SET LOCAL search_path TO edupilot;",
+            "-- Precondition: empty schema edupilot exists and is owned by the EduPilot role.",
+            "DO $$ BEGIN",
+            " IF EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname='edupilot') THEN",
+            "  RAISE EXCEPTION 'Refus: le schema edupilot contient deja des tables';",
+            " END IF;",
+            "END $$;",
+        ]
+        fk_statements = []
+        for table in tables:
+            name = table["name"]
+            columns = [dict(r) for r in source.execute(f"PRAGMA table_info({quoted(name)})")]
+            pk = [c["name"] for c in sorted(columns, key=lambda x: x["pk"]) if c["pk"]]
+            parts = []
+            for c in columns:
+                sql_type = convert_type(c["type"])
+                # Preserve INTEGER flags and ISO date/time strings to avoid lossy
+                # transformation during the first round-trip migration.
+                definition = quoted(c["name"]) + " " + sql_type
+                if c["notnull"] or c["pk"]:
+                    definition += " NOT NULL"
+                default = c["dflt_value"]
+                if default is not None:
+                    definition += " DEFAULT " + default
+                parts.append(definition)
+            if pk:
+                parts.append("PRIMARY KEY (" + ", ".join(map(quoted, pk)) + ")")
+            # SQLite inline/table UNIQUE constraints may not appear in PRAGMA columns.
+            # Use SQLite's definitive unique autoindexes to preserve them.
+            for idx in source.execute(f"PRAGMA index_list({quoted(name)})"):
+                if idx["unique"] and idx["origin"] == "u":
+                    idxcols = [r["name"] for r in source.execute(f"PRAGMA index_info({quoted(idx['name'])})")]
+                    if not all(idxcols):
+                        raise RuntimeError(f"Expression-based unique index unsupported: {idx['name']}")
+                    parts.append("UNIQUE (" + ", ".join(map(quoted, idxcols)) + ")")
+            lines.append(f"CREATE TABLE {quoted(SCHEMA)}.{quoted(name)} (\n  " +
+                         ",\n  ".join(parts) + "\n);")
+            for fk in source.execute(f"PRAGMA foreign_key_list({quoted(name)})"):
+                if fk["seq"] != 0:
+                    raise RuntimeError("Composite FK requires explicit adaptation: " + name)
+                action = fk["on_delete"]
+                if action not in ("NO ACTION", "RESTRICT", "CASCADE", "SET NULL", "SET DEFAULT"):
+                    raise RuntimeError("Unknown FK action")
+                fk_statements.append(
+                    f"ALTER TABLE {quoted(SCHEMA)}.{quoted(name)} "
+                    f"ADD FOREIGN KEY ({quoted(fk['from'])}) REFERENCES "
+                    f"{quoted(SCHEMA)}.{quoted(fk['table'])} ({quoted(fk['to'])}) ON DELETE {action};"
+                )
+            # Explicit SQLite indexes including partial unique indexes on users.
+            indexes = source.execute(
+                "SELECT name,sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL", (name,)
+            ).fetchall()
+            for index in indexes:
+                statement = index["sql"]
+                m = re.fullmatch(
+                    r"CREATE\s+(UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+                    r"([\w]+)\s+ON\s+(?:[\w\"]+)\s*\((.+?)\)\s*(WHERE\s+.+)?",
+                    statement.strip(), flags=re.I | re.S
+                )
+                if not m:
+                    raise RuntimeError(f"Index SQL to review manually: {index['name']}: {statement}")
+                unique, idxname, cols, where = m.groups()
+                lines.append(
+                    f"CREATE {'UNIQUE ' if unique else ''}INDEX {quoted(idxname)} "
+                    f"ON {quoted(SCHEMA)}.{quoted(name)} ({cols})" +
+                    (" " + where if where else "") + ";"
+                )
+        lines.extend(fk_statements)
+        # Reset sequences only after import. Bigint PKs are currently not auto-generated,
+        # therefore identity/sequence setup must be completed before application cutover.
+        lines.append("COMMIT;")
+        output = args.output.resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        output.chmod(0o600)
+        print(f"Fichier SQL genere pour revue : {output}")
+        print(f"Tables : {len(tables)}; contraintes FK : {len(fk_statements)}")
+        print("Aucune connexion a PostgreSQL; aucune donnee modifiee.")
+    finally:
+        source.close()
+
+if __name__ == "__main__":
+    main()
