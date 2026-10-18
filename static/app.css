@@ -410,3 +410,10 @@ img,video,iframe,canvas{max-width:100%}
 .hero-login .platform-logo-login{display:block;width:100%;max-width:560px;height:auto;max-height:270px;object-fit:contain;object-position:left center;background:transparent;border-radius:0;padding:0}
 .login-panel .platform-logo-login-mobile{width:min(240px,100%);height:auto;max-height:130px;object-fit:contain}
 @media(max-width:800px){.hero-login .platform-logo-login{max-width:320px;max-height:180px}.login-panel .platform-logo-login-mobile{width:min(220px,100%)}}
+
+/* Official artwork fills the former white brand panels; the artwork itself stays proportional. */
+.sidebar .brand{padding-left:0;padding-right:0}
+.sidebar .platform-logo-sidebar{display:block;width:100%;max-width:220px;height:auto;max-height:none;object-fit:contain;border-radius:16px;background:white;padding:0}
+.mobile-edupilot-brand .platform-logo-mobile{display:block;width:145px;max-width:100%;height:auto;max-height:none;object-fit:contain}
+.hero-login .platform-logo-login{width:min(100%,360px);max-width:360px;height:auto;max-height:none;object-fit:contain;background:transparent;padding:0}
+.login-panel .platform-logo-login-mobile{width:min(190px,100%);height:auto;max-height:none}
