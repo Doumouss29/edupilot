@@ -39,7 +39,49 @@ def pg_connection():
         if row["current_database"] != "edupilot" or row["current_schema"] != ALLOWED_SCHEMA:
             conn.close()
             raise RuntimeError("Unexpected PostgreSQL database/schema")
-    return conn
+    return CompatConnection(conn)
+
+class CompatCursor:
+    def __init__(self, cursor, lastrowid=None):
+        self.cursor = cursor
+        self.lastrowid = lastrowid
+        self.rowcount = cursor.rowcount
+    def fetchone(self):
+        return self.cursor.fetchone()
+    def fetchall(self):
+        return self.cursor.fetchall()
+    def __iter__(self):
+        return iter(self.cursor)
+
+class CompatConnection:
+    def __init__(self, connection):
+        self.raw = connection
+    def execute(self, statement, args=()):
+        import re
+        from postgres_sql import placeholders
+        sql = statement.strip()
+        if sql.upper() == "BEGIN IMMEDIATE":
+            sql = "SELECT pg_advisory_xact_lock(20261018)"
+        if re.match(r"INSERT\\s+OR\\s+IGNORE\\s+INTO", sql, re.I):
+            sql = re.sub(r"INSERT\\s+OR\\s+IGNORE\\s+INTO", "INSERT INTO", sql, count=1, flags=re.I)
+            sql = sql.rstrip(";") + " ON CONFLICT DO NOTHING"
+        insert = bool(re.match(r"INSERT\\s+INTO", sql, re.I))
+        if insert and "RETURNING" not in sql.upper():
+            if re.match(r"INSERT\\s+INTO\\s+(users|schools|years|classes|campuses|courses|lessons|assessments|grades|notifications|audit|invites|enrollments|periods|parent_links|teacher_history|grade_history|push_subscriptions|mfa_trusted_devices|email_delivery_log|assessment_files|attendance|submissions|unlocks)\\b", sql, re.I):
+                sql = sql.rstrip(";") + " RETURNING id"
+        cursor = self.raw.execute(placeholders(sql), args)
+        lastrowid = None
+        if insert and "RETURNING id" in sql:
+            item = cursor.fetchone()
+            if item:
+                lastrowid = item["id"]
+        return CompatCursor(cursor, lastrowid)
+    def commit(self):
+        self.raw.commit()
+    def rollback(self):
+        self.raw.rollback()
+    def close(self):
+        self.raw.close()
 
 @contextmanager
 def rehearsal_db():
