@@ -6,8 +6,10 @@
 {% if mode=='totp' %}
 <h3>Application Authenticator obligatoire</h3>
 {% if setup_secret %}
-<p>Dans Google Authenticator, Microsoft Authenticator ou une application TOTP compatible, ajoutez un compte manuellement avec cette clé :</p>
-<code style="display:block;word-break:break-all;font-size:18px;padding:16px;background:#edf4fa;border-radius:9px">{{setup_secret}}</code>
+<p>Scannez ce QR code avec Google Authenticator, Microsoft Authenticator ou une autre application TOTP compatible.</p>
+<div style="text-align:center;margin:20px 0"><img src="{{setup_qr}}" alt="QR code de configuration de l'application Authenticator" width="240" height="240" style="max-width:100%;border:1px solid #dde6ef;border-radius:12px"></div>
+<details><summary>Impossible de scanner ? Afficher la clé manuelle</summary><p>Ajoutez un compte basé sur l’heure dans votre application :</p>
+<code style="display:block;word-break:break-all;font-size:18px;padding:16px;background:#edf4fa;border-radius:9px">{{setup_secret}}</code></details>
 <p class="muted">Type : basé sur l’heure (TOTP), code à 6 chiffres renouvelé toutes les 30 secondes. Conservez l’accès à votre application : sans elle, une procédure de récupération administrateur sera nécessaire.</p>
 {% else %}<p>Saisissez le code de votre application Authenticator ou un code de récupération inutilisé.</p>{% endif %}
 {% else %}
@@ -19,6 +21,14 @@
 {% if mode=='email' %}<label class="checkline"><input type="checkbox" name="trust_device" value="1"> Faire confiance à cet appareil pendant {{trust_days}} jours</label>{% endif %}
 <button type="submit" class="btn primary">Vérifier et continuer →</button>
 </form>
+{% if mode=='totp' and not setup_secret %}
+<form method="post" style="margin-top:16px">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<input type="hidden" name="action" value="email_send">
+<button type="submit" class="btn outline">Recevoir un code de secours par e-mail</button>
+</form>
+{% if email_fallback %}<p class="muted">Un code de secours a été demandé par e-mail. Saisissez-le dans le champ ci-dessus. Cette utilisation sera enregistrée.</p>{% endif %}
+{% endif %}
 {% if mode=='email' %}<form method="post" style="margin-top:16px"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="action" value="resend"><button type="submit" class="btn outline">Renvoyer le code</button></form>{% endif %}
 <a class="table-link" href="{{url_for('login')}}">Revenir à la connexion</a>
 </section>
