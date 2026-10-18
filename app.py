@@ -1622,7 +1622,7 @@ with db() as c:
         JOIN courses c ON c.id=l.course_id
         WHERE l.starts_at>=? AND l.status='programmee'
         AND COALESCE(l.actual_minutes,0)=0 AND COALESCE(l.validated,0)=0
-        AND l.teacher_id IS NOT c.teacher_id
+        AND l.teacher_id IS DISTINCT FROM c.teacher_id
         AND NOT EXISTS(SELECT 1 FROM attendance a WHERE a.lesson_id=l.id)""",
         (datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),)).fetchall()
     for item in stale:
