@@ -1,12 +1,12 @@
 """EduPilot — plateforme de gestion scolaire multi-établissements."""
-import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib, csv, io, hashlib, time
+import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib, csv, io, hashlib, time, hmac, base64, struct
 from openpyxl import load_workbook
 from flask import Response
 from contextlib import contextmanager
 from pathlib import Path
 import requests
-from urllib.parse import urlsplit
-from flask import Flask, request, redirect, url_for, render_template, flash, session, abort, jsonify
+from urllib.parse import urlsplit, quote
+from flask import Flask, request, redirect, url_for, render_template, flash, session, abort, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS push_subscriptions(id INTEGER PRIMARY KEY, user_id IN
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, school_id INTEGER, user_id INTEGER, action TEXT NOT NULL, details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id), student_id INTEGER NOT NULL REFERENCES users(id), filename TEXT NOT NULL, filepath TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(assessment_id,student_id));
 CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS mfa_settings(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, totp_secret TEXT, totp_last_step INTEGER NOT NULL DEFAULT -1, email_code_hash TEXT, email_expires INTEGER, email_attempts INTEGER NOT NULL DEFAULT 0, email_last_sent INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS mfa_trusted_devices(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS email_delivery_log(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), recipient_user_id INTEGER REFERENCES users(id), sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS password_reset_limits(key_hash TEXT PRIMARY KEY, attempted_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS assessment_files(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE, filename TEXT NOT NULL, mime TEXT NOT NULL, content BLOB NOT NULL);
@@ -390,7 +392,7 @@ def tenant_signin(slug):
     if not school:abort(404)
     return handle_login(school)
 
-def finish_login(u):
+def complete_login(u, trusted_cookie=None):
     # A successful authentication, not opening an invitation link, validates it.
     execute("UPDATE users SET first_login_at=CURRENT_TIMESTAMP WHERE id=? AND first_login_at IS NULL",(u['id'],))
     session.clear()
@@ -398,7 +400,115 @@ def finish_login(u):
     session['csrf']=secrets.token_urlsafe(24)
     if u['must_change_password']:
         return redirect(url_for('change_password'))
-    return redirect(url_for('dashboard'))
+    response=make_response(redirect(url_for('dashboard')))
+    if trusted_cookie:
+        response.set_cookie('edupilot_trusted',trusted_cookie,max_age=90*86400,secure=True,httponly=True,samesite='Lax',path='/')
+    return response
+
+
+def mfa_role(u):
+    if u['role']=='superadmin':return 'totp'
+    if u['role'] in ('admin','administratif','etudiant'):return 'email'
+    return None
+
+
+def mfa_valid_totp(secret,code,previous=-1):
+    try:
+        key=base64.b32decode(secret+'='*((-len(secret))%8))
+        if not (len(code)==6 and code.isascii() and code.isdigit()):return None
+        current=int(time.time())//30
+        for step in (current-1,current,current+1):
+            if step<=previous:continue
+            digest=hmac.new(key,struct.pack('>Q',step),hashlib.sha1).digest()
+            p=digest[-1]&15
+            value=(struct.unpack('>I',digest[p:p+4])[0]&0x7fffffff)%1000000
+            if hmac.compare_digest(f'{value:06d}',code):return step
+    except (ValueError,TypeError):pass
+    return None
+
+
+def mfa_trusted_user(u):
+    token=request.cookies.get('edupilot_trusted','')
+    if not token or len(token)>180:return False
+    digest=hashlib.sha256(token.encode()).hexdigest()
+    return bool(one('SELECT id FROM mfa_trusted_devices WHERE user_id=? AND token_hash=? AND expires_at>?',(u['id'],digest,int(time.time()))))
+
+
+def start_second_factor(u):
+    mode=mfa_role(u)
+    if not mode or (mode=='email' and mfa_trusted_user(u)):
+        return complete_login(u)
+    session.clear()
+    session['csrf']=secrets.token_urlsafe(24)
+    session['mfa_pending_uid']=u['id']
+    session['mfa_pending_at']=int(time.time())
+    if mode=='email':
+        send_mfa_email(u)
+    return redirect(url_for('mfa_verify'))
+
+
+def send_mfa_email(u):
+    now=int(time.time())
+    with db() as c:
+        c.execute('INSERT OR IGNORE INTO mfa_settings(user_id) VALUES (?)',(u['id'],))
+        row=c.execute('SELECT email_last_sent FROM mfa_settings WHERE user_id=?',(u['id'],)).fetchone()
+        if now-row['email_last_sent']<60:return False
+        code=f'{secrets.randbelow(1000000):06d}'
+        digest=hmac.new(app.secret_key.encode(),f"{u['id']}:{code}".encode(),hashlib.sha256).hexdigest()
+        c.execute('UPDATE mfa_settings SET email_code_hash=?,email_expires=?,email_attempts=0,email_last_sent=? WHERE user_id=?',(digest,now+600,now,u['id']))
+    return send_brevo_email(u['email'],'EduPilot — Code de connexion',f'Votre code de connexion EduPilot : {code}\\nIl expire dans 10 minutes. Si vous n’avez rien demandé, ignorez ce message.',u['school_id'],u['id'])
+
+
+@app.route('/mfa',methods=['GET','POST'])
+def mfa_verify():
+    uid=session.get('mfa_pending_uid')
+    stamp=session.get('mfa_pending_at',0)
+    u=one('SELECT * FROM users WHERE id=? AND active=1',(uid,)) if uid and int(time.time())-stamp<600 else None
+    if not u:return redirect(url_for('login'))
+    mode=mfa_role(u)
+    if mode not in ('totp','email'):abort(403)
+    config=one('SELECT * FROM mfa_settings WHERE user_id=?',(u['id'],))
+    if mode=='totp' and (not config or not config['totp_secret']):
+        if 'mfa_setup_secret' not in session:
+            session['mfa_setup_secret']=base64.b32encode(secrets.token_bytes(20)).decode().rstrip('=')
+        secret=session['mfa_setup_secret']
+        uri='otpauth://totp/'+quote('EduPilot:'+u['email'])+'?secret='+secret+'&issuer=EduPilot&digits=6&period=30'
+    else:
+        secret=None
+        uri=None
+    if request.method=='POST':
+        if mode=='email' and request.form.get('action')=='resend':
+            send_mfa_email(u)
+            flash('Si l’envoi est disponible, un nouveau code a été envoyé.','success')
+            return redirect(url_for('mfa_verify'))
+        code=request.form.get('code','').strip()
+        if mode=='totp':
+            step=mfa_valid_totp(secret or config['totp_secret'],code,config['totp_last_step'] if config else -1)
+            if step is not None:
+                with db() as c:
+                    c.execute('INSERT OR IGNORE INTO mfa_settings(user_id) VALUES (?)',(u['id'],))
+                    if secret:
+                        c.execute('UPDATE mfa_settings SET totp_secret=?,totp_last_step=? WHERE user_id=?',(secret,step,u['id']))
+                    else:
+                        changed=c.execute('UPDATE mfa_settings SET totp_last_step=? WHERE user_id=? AND totp_last_step<?',(step,u['id'],step))
+                        if changed.rowcount!=1:abort(403)
+                session.pop('mfa_setup_secret',None)
+                return complete_login(u)
+        elif config and config['email_expires'] and config['email_expires']>=int(time.time()) and config['email_attempts']<5 and len(code)==6:
+            digest=hmac.new(app.secret_key.encode(),f"{u['id']}:{code}".encode(),hashlib.sha256).hexdigest()
+            with db() as c:
+                c.execute('UPDATE mfa_settings SET email_attempts=email_attempts+1 WHERE user_id=?',(u['id'],))
+                if hmac.compare_digest(config['email_code_hash'] or '',digest):
+                    c.execute('UPDATE mfa_settings SET email_code_hash=NULL,email_expires=NULL WHERE user_id=?',(u['id'],))
+                    cookie=None
+                    if request.form.get('trust_device')=='1':
+                        cookie=secrets.token_urlsafe(32)
+                        days=30 if u['role'] in ('admin','administratif') else 90
+                        c.execute('DELETE FROM mfa_trusted_devices WHERE user_id=? AND expires_at<?',(u['id'],int(time.time())))
+                        c.execute('INSERT INTO mfa_trusted_devices(user_id,token_hash,expires_at) VALUES (?,?,?)',(u['id'],hashlib.sha256(cookie.encode()).hexdigest(),int(time.time())+days*86400))
+                    return complete_login(u,cookie)
+        flash('Code incorrect ou expiré.','error')
+    return render_template('mfa.html',mode=mode,setup_secret=secret,setup_uri=uri,trust_days=30 if u['role'] in ('admin','administratif') else 90)
 
 
 def handle_login(school=None):
@@ -412,7 +522,7 @@ def handle_login(school=None):
     if school:
         valid=[u for u in valid if u['role']!='superadmin']
     if len(valid)==1:
-        return finish_login(valid[0])
+        return start_second_factor(valid[0])
     if not school and len(valid)>1:
         ids=[u['id'] for u in valid if u['school_id'] is not None]
         schools=allrows('SELECT s.id,s.name,s.slug FROM schools s JOIN users u ON u.school_id=s.id WHERE u.id IN ('+','.join('?' for _ in ids)+') AND s.active=1 ORDER BY s.name',tuple(ids)) if ids else []
@@ -441,7 +551,7 @@ def choose_login_school():
     u=one('SELECT * FROM users WHERE school_id=? AND id IN ('+','.join('?' for _ in ids)+') AND active=1',(school_id,*ids))
     if not u or u['role']=='superadmin' or not one('SELECT id FROM schools WHERE id=? AND active=1',(school_id,)):
         abort(403)
-    return finish_login(u)
+    return start_second_factor(u)
 
 
 @app.route('/login',methods=['GET','POST'])
