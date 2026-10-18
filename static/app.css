@@ -417,3 +417,17 @@ img,video,iframe,canvas{max-width:100%}
 .mobile-edupilot-brand .platform-logo-mobile{display:block;width:145px;max-width:100%;height:auto;max-height:none;object-fit:contain}
 .hero-login .platform-logo-login{width:min(100%,360px);max-width:360px;height:auto;max-height:none;object-fit:contain;background:transparent;padding:0}
 .login-panel .platform-logo-login-mobile{width:min(190px,100%);height:auto;max-height:none}
+
+/* School-branded hierarchy: the institution is primary, EduPilot is secondary. */
+.sidebar.tenant-sidebar .brand{justify-content:center;padding:0 10px 8px}
+.sidebar.tenant-sidebar .platform-logo-sidebar{width:112px!important;max-width:112px!important;height:112px!important;max-height:112px!important;border-radius:13px;padding:2px!important;object-fit:contain}
+.sidebar.tenant-sidebar .tenant-identity{display:flex;flex-direction:column;align-items:stretch;text-align:center;gap:10px;margin:8px 0 17px;padding:18px 12px;background:#ffffff14;border:1px solid #ffffff36;border-radius:16px}
+.sidebar.tenant-sidebar .tenant-identity img,.sidebar.tenant-sidebar .tenant-identity>span{width:112px;height:112px;flex:0 0 112px;object-fit:contain;margin:0 auto;background:#fff;padding:8px;border-radius:15px}
+.sidebar.tenant-sidebar .tenant-identity b{font-size:17px;line-height:1.3;font-weight:800;overflow-wrap:anywhere}
+.sidebar.tenant-sidebar .tenant-identity small{font-size:12px;letter-spacing:.1px}
+@media(max-width:800px){
+.mobile-brand-banner:has(.mobile-school-brand) .platform-logo-mobile{width:68px!important;height:56px!important}
+.mobile-brand-banner .mobile-school-brand{min-height:74px;padding:10px;gap:12px}
+.mobile-brand-banner .mobile-school-brand img,.mobile-brand-banner .mobile-school-fallback{width:60px;height:60px;flex:0 0 60px}
+.mobile-brand-banner .mobile-school-name strong{font-size:15px;line-height:1.25;overflow-wrap:anywhere}
+}
