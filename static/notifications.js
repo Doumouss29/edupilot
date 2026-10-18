@@ -107,6 +107,37 @@
       logoutForm.submit();
     });
   }
+  // Propose push only inside the installed PWA and only once per account/device.
+  async function offerPushOnFirstLaunch(){
+    const installed=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+    if(!installed||!('Notification' in window)||Notification.permission!=='default')return;
+    if(!('serviceWorker' in navigator)||!('PushManager' in window))return;
+    const key='edupilot-push-onboarding-'+String(window.EDUPILOT_USER_ID||'unknown');
+    try{if(localStorage.getItem(key))return;}catch(e){return;}
+    try{
+      const response=await fetch('/api/push/config',{credentials:'same-origin'});
+      if(!response.ok)return;
+      const config=await response.json();
+      if(!config.enabled)return;
+      const registration=await navigator.serviceWorker.register('/sw.js',{scope:'/'});
+      if(await registration.pushManager.getSubscription())return;
+      enable.dataset.publicKey=config.public_key;
+      const banner=document.createElement('section');
+      banner.setAttribute('role','region');banner.setAttribute('aria-label','Activer les notifications EduPilot');
+      banner.style.cssText='position:fixed;z-index:10000;bottom:18px;left:16px;right:16px;max-width:460px;margin:auto;background:white;color:#203950;padding:20px;border-radius:14px;box-shadow:0 8px 40px #0003;border:1px solid #dce5ed';
+      const title=document.createElement('strong');title.textContent='Activer les notifications EduPilot ?';
+      const message=document.createElement('p');message.textContent='Recevez les informations de votre établissement, même lorsque l’application est fermée.';
+      const accept=document.createElement('button');accept.type='button';accept.textContent='Activer les notifications';
+      accept.style.cssText='padding:10px 16px;background:#203950;color:white;border:0;border-radius:8px;margin-right:10px;cursor:pointer';
+      const later=document.createElement('button');later.type='button';later.textContent='Plus tard';
+      later.style.cssText='padding:10px 16px;border:1px solid #aaa;border-radius:8px;background:white;cursor:pointer';
+      banner.append(title,message,accept,later);document.body.append(banner);
+      function dismiss(){try{localStorage.setItem(key,'seen');}catch(e){} banner.remove();}
+      later.addEventListener('click',dismiss);
+      accept.addEventListener('click',()=>{dismiss();enable.click();});
+    }catch(e){/* Push onboarding is optional: never block the app. */}
+  }
+  offerPushOnFirstLaunch();
   load().catch(()=>{});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)load().catch(()=>{});});
   setInterval(()=>{if(!document.hidden)load().catch(()=>{});},60000);
