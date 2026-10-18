@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, school_id INTEGER, user
 CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id), student_id INTEGER NOT NULL REFERENCES users(id), filename TEXT NOT NULL, filepath TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(assessment_id,student_id));
 CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS mfa_settings(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, totp_secret TEXT, totp_pending_secret TEXT, totp_last_step INTEGER NOT NULL DEFAULT -1, totp_attempts INTEGER NOT NULL DEFAULT 0, totp_locked_until INTEGER NOT NULL DEFAULT 0, email_code_hash TEXT, email_expires INTEGER, email_attempts INTEGER NOT NULL DEFAULT 0, email_last_sent INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS mfa_recovery_codes(user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, code_hash TEXT NOT NULL, PRIMARY KEY(user_id,code_hash));
 CREATE TABLE IF NOT EXISTS mfa_trusted_devices(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS email_delivery_log(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), recipient_user_id INTEGER REFERENCES users(id), sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS password_reset_limits(key_hash TEXT PRIMARY KEY, attempted_at INTEGER NOT NULL);
@@ -412,6 +413,24 @@ def mfa_role(u):
     return None
 
 
+def generate_recovery_codes(uid):
+    codes=['-'.join((secrets.token_hex(4),secrets.token_hex(4))) for _ in range(8)]
+    with db() as c:
+        c.execute('DELETE FROM mfa_recovery_codes WHERE user_id=?',(uid,))
+        c.executemany('INSERT INTO mfa_recovery_codes(user_id,code_hash) VALUES (?,?)',
+                      [(uid,hashlib.sha256(code.encode()).hexdigest()) for code in codes])
+    return codes
+
+
+def use_recovery_code(uid,code):
+    code=code.strip().lower()
+    if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{8}',code):return False
+    with db() as c:
+        removed=c.execute('DELETE FROM mfa_recovery_codes WHERE user_id=? AND code_hash=?',
+                          (uid,hashlib.sha256(code.encode()).hexdigest()))
+        return removed.rowcount==1
+
+
 def mfa_valid_totp(secret,code,previous=-1):
     try:
         key=base64.b32decode(secret+'='*((-len(secret))%8))
@@ -493,6 +512,8 @@ def mfa_verify():
             flash('Si l’envoi est disponible, un nouveau code a été envoyé.','success')
             return redirect(url_for('mfa_verify'))
         code=request.form.get('code','').strip()
+        if mode=='totp' and config and config['totp_secret'] and use_recovery_code(u['id'],code):
+            return complete_login(u)
         if mode=='totp':
             step=mfa_valid_totp(secret or config['totp_secret'],code,config['totp_last_step'] if config else -1)
             if step is not None:
@@ -503,6 +524,13 @@ def mfa_verify():
                     else:
                         changed=c.execute('UPDATE mfa_settings SET totp_last_step=?,totp_attempts=0,totp_locked_until=0 WHERE user_id=? AND totp_last_step<?',(step,u['id'],step))
                         if changed.rowcount!=1:abort(403)
+                if secret:
+                    codes=generate_recovery_codes(u['id'])
+                    session.clear()
+                    session['uid']=u['id']
+                    session['csrf']=secrets.token_urlsafe(24)
+                    execute("UPDATE users SET first_login_at=CURRENT_TIMESTAMP WHERE id=? AND first_login_at IS NULL",(u['id'],))
+                    return render_template('mfa_recovery_codes.html',codes=codes)
                 return complete_login(u)
         elif config and config['email_expires'] and config['email_expires']>=int(time.time()) and config['email_attempts']<5 and len(code)==6:
             digest=hmac.new(app.secret_key.encode(),f"{u['id']}:{code}".encode(),hashlib.sha256).hexdigest()
