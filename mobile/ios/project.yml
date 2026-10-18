@@ -2,7 +2,7 @@ name: EduPilot
 options:
   bundleIdPrefix: ci.edupilot
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
 settings:
   base:
     SWIFT_VERSION: "5.9"
