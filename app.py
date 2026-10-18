@@ -475,7 +475,7 @@ def send_mfa_email(u):
         code=f'{secrets.randbelow(1000000):06d}'
         digest=hmac.new(app.secret_key.encode(),f"{u['id']}:{code}".encode(),hashlib.sha256).hexdigest()
         c.execute('UPDATE mfa_settings SET email_code_hash=?,email_expires=?,email_attempts=0,email_last_sent=? WHERE user_id=?',(digest,now+600,now,u['id']))
-    return send_brevo_email(u['email'],'EduPilot — Code de connexion',f'Votre code de connexion EduPilot : {code}\\nIl expire dans 10 minutes. Si vous n’avez rien demandé, ignorez ce message.',u['school_id'],u['id'])
+    return send_brevo_email(u['email'],'EduPilot — Code de connexion',f'Bonjour,\n\nVotre code de vérification EduPilot est : {code}\n\nCe code est valable pendant 10 minutes.\n\nSi vous n’êtes pas à l’origine de cette demande, ignorez cet e-mail.\n\nL’équipe EduPilot',u['school_id'],u['id'])
 
 
 @app.route('/mfa',methods=['GET','POST'])
