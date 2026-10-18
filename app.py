@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions(id INTEGER PRIMARY KEY, user_id IN
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, school_id INTEGER, user_id INTEGER, action TEXT NOT NULL, details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id), student_id INTEGER NOT NULL REFERENCES users(id), filename TEXT NOT NULL, filepath TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(assessment_id,student_id));
 CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS email_delivery_log(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), recipient_user_id INTEGER REFERENCES users(id), sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS password_reset_limits(key_hash TEXT PRIMARY KEY, attempted_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS assessment_files(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE, filename TEXT NOT NULL, mime TEXT NOT NULL, content BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS bulletin_publications(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), class_id INTEGER NOT NULL REFERENCES classes(id), student_id INTEGER NOT NULL REFERENCES users(id), published_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(class_id,student_id));
@@ -249,7 +250,7 @@ def audit(action,details=''):
     u=current_user()
     execute('INSERT INTO audit(school_id,user_id,action,details) VALUES (?,?,?,?)',(u['school_id'],u['id'],action,details))
 
-def send_brevo_email(address,subject,message):
+def send_brevo_email(address,subject,message,school_id=None,recipient_user_id=None):
     """Email transactionnel Brevo. Ne journalise ni identifiants ni liens secrets."""
     api_key=os.getenv('BREVO_API_KEY','').strip()
     sender=os.getenv('BREVO_SENDER_EMAIL','').strip()
@@ -262,6 +263,7 @@ def send_brevo_email(address,subject,message):
                   'to':[{'email':address}],'subject':subject,'textContent':message},
             headers={'api-key':api_key,'Content-Type':'application/json'},timeout=8)
         response.raise_for_status()
+        execute('INSERT INTO email_delivery_log(school_id,recipient_user_id) VALUES (?,?)',(school_id,recipient_user_id))
         return True
     except requests.RequestException as exc:
         app.logger.warning('Échec e-mail Brevo : %s',type(exc).__name__)
@@ -285,7 +287,7 @@ def send_account_link(uid,purpose='activation'):
     else:
         subject='Bienvenue sur EduPilot — Activez votre compte'
         content=f"Bonjour {user['name']},\n\nVotre compte EduPilot ({user['role']}) pour {user['school_name'] or 'la plateforme'} a été créé.\n\nPour choisir votre mot de passe et activer votre accès :\n{url}\n\nCe lien personnel expire dans 48 heures. Ne le transférez à personne.\n\nEduPilot"
-    sent=send_brevo_email(user['email'],subject,content)
+    sent=send_brevo_email(user['email'],subject,content,user['school_id'],uid)
     # Ne pas enregistrer les URL contenant un jeton dans les notifications internes.
     return sent
 
@@ -314,7 +316,7 @@ def notify(ids,message,href=''):
         except ImportError:app.logger.warning('Module pywebpush indisponible')
     for uid in recipients:
         user=one('SELECT email FROM users WHERE id=? AND school_id=?',(uid,sid))
-        if user:send_brevo_email(user['email'],'EduPilot — Nouvelle notification',message)
+        if user:send_brevo_email(user['email'],'EduPilot — Nouvelle notification',message,sid,uid)
 
 
 def classmates(course_id):
@@ -553,6 +555,45 @@ def schools():
     account_counts={r['school_id']:r['n'] for r in counts}
     admins=allrows("SELECT school_id,first_name,last_name,name,email,phone,role,active,must_change_password FROM users WHERE role IN ('admin','administratif') ORDER BY id DESC")
     return render_template('schools.html',schools=records,admin_accounts=admins,account_counts=account_counts,today=datetime.date.today().isoformat(),base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
+
+@app.get('/superadmin/users-report')
+@roles('superadmin')
+def superadmin_users_report():
+    schools=allrows('SELECT id,name FROM schools ORDER BY name')
+    years=allrows('SELECT id,school_id,label FROM years ORDER BY label DESC')
+    classes=allrows('SELECT id,school_id,year_id,name FROM classes ORDER BY name')
+    values={}
+    allowed={'school_id':{r['id'] for r in schools},'year_id':{r['id'] for r in years},'class_id':{r['id'] for r in classes}}
+    for key in ('school_id','year_id','class_id'):
+        value=request.args.get(key,'').strip()
+        if value:
+            if not value.isdigit() or int(value) not in allowed[key]:abort(400,'Filtre invalide')
+            values[key]=int(value)
+    if 'year_id' in values and 'school_id' in values and not any(r['id']==values['year_id'] and r['school_id']==values['school_id'] for r in years):abort(400)
+    if 'class_id' in values and not any(r['id']==values['class_id'] and ('school_id' not in values or r['school_id']==values['school_id']) and ('year_id' not in values or r['year_id']==values['year_id']) for r in classes):abort(400)
+    where=["u.school_id IS NOT NULL"]
+    args=[]
+    if 'school_id' in values:where.append('u.school_id=?');args.append(values['school_id'])
+    if 'year_id' in values:
+        where.append("""(EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=u.id AND e.school_id=u.school_id AND e.year_id=?)
+        OR EXISTS (SELECT 1 FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.teacher_id=u.id AND c.school_id=u.school_id AND cl.year_id=?))""")
+        args.extend([values['year_id']]*2)
+    if 'class_id' in values:
+        where.append("""(EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=u.id AND e.school_id=u.school_id AND e.class_id=?)
+        OR EXISTS (SELECT 1 FROM courses c WHERE c.teacher_id=u.id AND c.school_id=u.school_id AND c.class_id=?)
+        OR EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id AND e.school_id=p.school_id WHERE p.parent_id=u.id AND p.school_id=u.school_id AND e.class_id=?))""")
+        args.extend([values['class_id']]*3)
+    users=allrows('SELECT u.id,u.name,u.email,u.role,u.active,u.school_id,s.name school_name FROM users u JOIN schools s ON s.id=u.school_id WHERE '+' AND '.join(where)+' ORDER BY s.name,u.role,u.name',tuple(args))
+    counts={role:sum(1 for u in users if u['role']==role) for role in ('admin','administratif','enseignant','etudiant','parent')}
+    mail_where=['1=1'];mail_args=[]
+    if 'school_id' in values:mail_where.append('m.school_id=?');mail_args.append(values['school_id'])
+    if 'year_id' in values or 'class_id' in values:
+        ids=[u['id'] for u in users]
+        if ids:mail_where.append('m.recipient_user_id IN ('+','.join('?' for _ in ids)+')');mail_args+=ids
+        else:mail_where.append('1=0')
+    mailed=one('SELECT COUNT(*) n FROM email_delivery_log m WHERE '+' AND '.join(mail_where),tuple(mail_args))['n']
+    return render_template('superadmin_users_report.html',schools=schools,years=years,classes=classes,filters=values,users=users,counts=counts,mailed=mailed)
+
 
 @app.route('/schools/new',methods=['GET','POST'])
 @roles('superadmin')
