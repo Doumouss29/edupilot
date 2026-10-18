@@ -1215,11 +1215,13 @@ def class_edit(cid):
         cycle=request.form.get('cycle','')
         campus=request.form.get('campus_id') or None
         if not name or len(name)>180 or cycle not in ('semestre','trimestre'):abort(400)
+        enabled=one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled']
+        if not enabled:campus=None
         if campus and not has_school('campuses',campus):abort(403)
         execute('UPDATE classes SET name=?,cycle=?,campus_id=?,parents_enabled=? WHERE id=? AND school_id=?',(name,cycle,campus,int('parents_enabled' in request.form),cid,school_id()))
         audit('class.updated',str(cid));flash('Classe modifiée.','success')
         return redirect(url_for('classes'))
-    return render_template('edit_academic.html',kind='class',item=item,campuses=scoped('SELECT * FROM campuses WHERE school_id=?'))
+    return render_template('edit_academic.html',kind='class',item=item,campuses=scoped('SELECT * FROM campuses WHERE school_id=?') if one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled'] else [])
 
 @app.get('/classes/<int:cid>/details')
 @roles('admin','administratif','enseignant')
