@@ -393,11 +393,15 @@ def tenant_signin(slug):
     if not school:abort(404)
     return handle_login(school)
 
-def complete_login(u, trusted_cookie=None):
+def complete_login(u, trusted_cookie=None, remember=False):
     # A successful authentication, not opening an invitation link, validates it.
     execute("UPDATE users SET first_login_at=CURRENT_TIMESTAMP WHERE id=? AND first_login_at IS NULL",(u['id'],))
     session.clear()
     session['uid']=u['id']
+    # A normal browser-session cookie can disappear when the mobile PWA closes.
+    if remember and u['role']!='superadmin':
+        session.permanent=True
+        app.permanent_session_lifetime=datetime.timedelta(days=30 if u['role'] in ('admin','administratif') else 90)
     session['csrf']=secrets.token_urlsafe(24)
     if u['must_change_password']:
         return redirect(url_for('change_password'))
@@ -465,7 +469,7 @@ def mfa_trusted_user(u):
 def start_second_factor(u):
     mode=mfa_role(u)
     if not mode or (mode=='email' and mfa_trusted_user(u)):
-        return complete_login(u)
+        return complete_login(u,remember=bool(mode=='email' and mfa_trusted_user(u)))
     session.clear()
     session['csrf']=secrets.token_urlsafe(24)
     session['mfa_pending_uid']=u['id']
@@ -571,7 +575,7 @@ def mfa_verify():
                         c.execute('INSERT INTO mfa_trusted_devices(user_id,token_hash,expires_at) VALUES (?,?,?)',(u['id'],hashlib.sha256(cookie.encode()).hexdigest(),int(time.time())+days*86400))
                     verified_cookie=cookie
         if mode=='email' and 'verified_cookie' in locals():
-            return complete_login(u,verified_cookie)
+            return complete_login(u,verified_cookie,remember=bool(verified_cookie))
         flash('Code incorrect ou expiré.','error')
     return render_template('mfa.html',mode=mode,setup_secret=secret,setup_uri=uri,setup_qr=totp_qr_data(uri) if uri else None,email_fallback=bool(session.get('mfa_email_fallback')) if mode=='totp' else False,trust_days=30 if u['role'] in ('admin','administratif') else 90)
 
@@ -662,8 +666,13 @@ def logout():
     endpoint=request.form.get('push_endpoint','')
     if uid and endpoint and len(endpoint)<=2048:
         execute('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?',(uid,endpoint))
+    token=request.cookies.get('edupilot_trusted','')
+    if uid and token and len(token)<=180:
+        execute('DELETE FROM mfa_trusted_devices WHERE user_id=? AND token_hash=?',(uid,hashlib.sha256(token.encode()).hexdigest()))
     session.clear()
-    return redirect(url_for('login'))
+    response=make_response(redirect(url_for('login')))
+    response.delete_cookie('edupilot_trusted',path='/')
+    return response
 
 @app.get('/')
 @login_required
