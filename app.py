@@ -31,8 +31,8 @@ if DB_ENGINE not in ('sqlite', 'postgresql'):
 if DB_ENGINE == 'postgresql':
     import psycopg
     DBIntegrityError = psycopg.IntegrityError
-if DB_ENGINE == 'postgresql' and os.getenv('PGSCHEMA') != 'edupilot_recette':
-    raise RuntimeError('Seul le schéma edupilot_recette est actuellement autorisé pour PostgreSQL.')
+if DB_ENGINE == 'postgresql' and os.getenv('PGSCHEMA') not in ('edupilot_recette', 'edupilot'):
+    raise RuntimeError('Schéma PostgreSQL EduPilot non autorisé.')
 DB = os.getenv('DATABASE_PATH', '/tmp/edupilot.db')
 UPLOAD_DIR = Path(os.getenv('UPLOAD_DIR', '/tmp/edupilot_uploads'))
 UPLOAD_DIR.mkdir(parents=True,exist_ok=True)
