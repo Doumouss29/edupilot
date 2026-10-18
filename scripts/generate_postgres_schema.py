@@ -22,7 +22,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("snapshot", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--schema", choices=("edupilot_recette", "edupilot"), default="edupilot_recette")
     args = parser.parse_args()
+    global SCHEMA
+    SCHEMA = args.schema
     if not args.snapshot.is_file():
         parser.error("Sauvegarde SQLite introuvable")
     source = sqlite3.connect(f"file:{args.snapshot.resolve()}?mode=ro", uri=True)
@@ -36,10 +39,10 @@ def main():
             "-- EduPilot PostgreSQL schema, generated from a consistent SQLite snapshot.",
             "-- REVIEW ONLY: do not execute on production before migration rehearsal.",
             "BEGIN;",
-            "SET LOCAL search_path TO edupilot_recette;",
-            "-- Precondition: empty schema edupilot_recette exists and is owned by the EduPilot role.",
+            f"SET LOCAL search_path TO {SCHEMA};",
+            f"-- Precondition: empty schema {SCHEMA} exists and is owned by the EduPilot role.",
             "DO $$ BEGIN",
-            " IF EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname='edupilot_recette') THEN",
+            " IF EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname='{SCHEMA}') THEN",
             "  RAISE EXCEPTION 'Refus: le schema edupilot_recette contient deja des tables';",
             " END IF;",
             "END $$;",
