@@ -535,7 +535,7 @@ def mfa_verify():
                     c.execute('UPDATE mfa_settings SET email_attempts=email_attempts+1 WHERE user_id=?',(u['id'],))
                     updated=c.execute('UPDATE mfa_settings SET email_code_hash=NULL,email_expires=NULL WHERE user_id=? AND email_code_hash=? AND email_expires>=? AND email_attempts<=5',(u['id'],digest,int(time.time())))
                 if updated.rowcount==1:
-                    audit('mfa.superadmin.email_fallback',str(u['id']))
+                    execute('INSERT INTO audit(school_id,user_id,action,details) VALUES (?,?,?,?)',(u['school_id'],u['id'],'mfa.superadmin.email_fallback','Second facteur vérifié par e-mail'))
                     return complete_login(u)
         if mode=='totp' and config and config['totp_secret'] and use_recovery_code(u['id'],code):
             return complete_login(u)
