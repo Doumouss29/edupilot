@@ -9,13 +9,13 @@
 <p>Dans Google Authenticator, Microsoft Authenticator ou une application TOTP compatible, ajoutez un compte manuellement avec cette clé :</p>
 <code style="display:block;word-break:break-all;font-size:18px;padding:16px;background:#edf4fa;border-radius:9px">{{setup_secret}}</code>
 <p class="muted">Type : basé sur l’heure (TOTP), code à 6 chiffres renouvelé toutes les 30 secondes. Conservez l’accès à votre application : sans elle, une procédure de récupération administrateur sera nécessaire.</p>
-{% else %}<p>Saisissez le code à six chiffres affiché par votre application Authenticator.</p>{% endif %}
+{% else %}<p>Saisissez le code de votre application Authenticator ou un code de récupération inutilisé.</p>{% endif %}
 {% else %}
 <h3>Code de vérification par e-mail</h3><p>Un code valable 10 minutes a été envoyé à l’adresse associée au compte.</p>
 {% endif %}
 <form method="post" class="modern-form">
 <input type="hidden" name="csrf" value="{{csrf}}">
-<label>Code de vérification<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000"></label>
+<label>Code de vérification<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="23" required placeholder="Code MFA ou code de récupération"></label>
 {% if mode=='email' %}<label class="checkline"><input type="checkbox" name="trust_device" value="1"> Faire confiance à cet appareil pendant {{trust_days}} jours</label>{% endif %}
 <button type="submit" class="btn primary">Vérifier et continuer →</button>
 </form>
