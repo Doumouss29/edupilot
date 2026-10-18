@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions(id INTEGER PRIMARY KEY, user_id IN
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, school_id INTEGER, user_id INTEGER, action TEXT NOT NULL, details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id), student_id INTEGER NOT NULL REFERENCES users(id), filename TEXT NOT NULL, filepath TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(assessment_id,student_id));
 CREATE TABLE IF NOT EXISTS invites(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS mfa_settings(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, totp_secret TEXT, totp_last_step INTEGER NOT NULL DEFAULT -1, email_code_hash TEXT, email_expires INTEGER, email_attempts INTEGER NOT NULL DEFAULT 0, email_last_sent INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS mfa_settings(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, totp_secret TEXT, totp_pending_secret TEXT, totp_last_step INTEGER NOT NULL DEFAULT -1, email_code_hash TEXT, email_expires INTEGER, email_attempts INTEGER NOT NULL DEFAULT 0, email_last_sent INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS mfa_trusted_devices(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS email_delivery_log(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), recipient_user_id INTEGER REFERENCES users(id), sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS password_reset_limits(key_hash TEXT PRIMARY KEY, attempted_at INTEGER NOT NULL);
@@ -469,9 +469,13 @@ def mfa_verify():
     if mode not in ('totp','email'):abort(403)
     config=one('SELECT * FROM mfa_settings WHERE user_id=?',(u['id'],))
     if mode=='totp' and (not config or not config['totp_secret']):
-        if 'mfa_setup_secret' not in session:
-            session['mfa_setup_secret']=base64.b32encode(secrets.token_bytes(20)).decode().rstrip('=')
-        secret=session['mfa_setup_secret']
+        if not config or not config['totp_pending_secret']:
+            candidate=base64.b32encode(secrets.token_bytes(20)).decode().rstrip('=')
+            with db() as c:
+                c.execute('INSERT OR IGNORE INTO mfa_settings(user_id) VALUES (?)',(u['id'],))
+                c.execute('UPDATE mfa_settings SET totp_pending_secret=? WHERE user_id=? AND totp_secret IS NULL',(candidate,u['id']))
+            config=one('SELECT * FROM mfa_settings WHERE user_id=?',(u['id'],))
+        secret=config['totp_pending_secret']
         uri='otpauth://totp/'+quote('EduPilot:'+u['email'])+'?secret='+secret+'&issuer=EduPilot&digits=6&period=30'
     else:
         secret=None
@@ -488,11 +492,10 @@ def mfa_verify():
                 with db() as c:
                     c.execute('INSERT OR IGNORE INTO mfa_settings(user_id) VALUES (?)',(u['id'],))
                     if secret:
-                        c.execute('UPDATE mfa_settings SET totp_secret=?,totp_last_step=? WHERE user_id=?',(secret,step,u['id']))
+                        c.execute('UPDATE mfa_settings SET totp_secret=?,totp_pending_secret=NULL,totp_last_step=? WHERE user_id=?',(secret,step,u['id']))
                     else:
                         changed=c.execute('UPDATE mfa_settings SET totp_last_step=? WHERE user_id=? AND totp_last_step<?',(step,u['id'],step))
                         if changed.rowcount!=1:abort(403)
-                session.pop('mfa_setup_secret',None)
                 return complete_login(u)
         elif config and config['email_expires'] and config['email_expires']>=int(time.time()) and config['email_attempts']<5 and len(code)==6:
             digest=hmac.new(app.secret_key.encode(),f"{u['id']}:{code}".encode(),hashlib.sha256).hexdigest()
