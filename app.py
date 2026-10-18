@@ -744,7 +744,8 @@ def dashboard():
     classes=scoped('SELECT * FROM classes WHERE school_id=?')
     courses=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
     if u['role']=='enseignant': courses=[x for x in courses if x['teacher_id']==u['id']]
-    lessonlist=scoped('SELECT l.*,CAST(ROUND((julianday(l.ends_at)-julianday(l.starts_at))*1440) AS INTEGER) scheduled_minutes,c.name course_name,cl.name class_name,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? ORDER BY l.starts_at DESC LIMIT 80')
+    lesson_minutes_expr = ("CAST(ROUND(EXTRACT(EPOCH FROM (l.ends_at::timestamp - l.starts_at::timestamp))/60) AS INTEGER)" if DB_ENGINE == 'postgresql' else "CAST(ROUND((julianday(l.ends_at)-julianday(l.starts_at))*1440) AS INTEGER)")
+    lessonlist=scoped(f'SELECT l.*,{lesson_minutes_expr} scheduled_minutes,c.name course_name,cl.name class_name,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? ORDER BY l.starts_at DESC LIMIT 80')
     if u['role']=='enseignant': lessonlist=[x for x in lessonlist if any(y['id']==x['course_id'] for y in courses)]
     upcoming=scoped("""SELECT l.*,c.name course_name,cl.name class_name
         FROM lessons l JOIN courses c ON c.id=l.course_id
