@@ -76,6 +76,8 @@ class CompatConnection:
             if item:
                 lastrowid = item["id"]
         return CompatCursor(cursor, lastrowid)
+    def cursor(self):
+        return self.raw.cursor()
     def commit(self):
         self.raw.commit()
     def rollback(self):
