@@ -24,9 +24,13 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=90),
 )
 app.config['MAX_CONTENT_LENGTH'] = 12 * 1024 * 1024
+DBIntegrityError = sqlite3.IntegrityError
 DB_ENGINE = os.getenv('DB_ENGINE', 'sqlite').lower()
 if DB_ENGINE not in ('sqlite', 'postgresql'):
     raise RuntimeError('DB_ENGINE doit être sqlite ou postgresql.')
+if DB_ENGINE == 'postgresql':
+    import psycopg
+    DBIntegrityError = psycopg.IntegrityError
 if DB_ENGINE == 'postgresql' and os.getenv('PGSCHEMA') != 'edupilot_recette':
     raise RuntimeError('Seul le schéma edupilot_recette est actuellement autorisé pour PostgreSQL.')
 DB = os.getenv('DATABASE_PATH', '/tmp/edupilot.db')
@@ -849,7 +853,7 @@ def school_accounts(sid):
                     c.execute('BEGIN IMMEDIATE')
                     matricule=requested_matricule(c,sid,role,request.form.get('matricule'))
                     uid=c.execute('INSERT INTO users(school_id,name,first_name,last_name,email,phone,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,?,?,?,1)',(sid,first+' '+last,first,last,email,phone,generate_password_hash(password),role,matricule)).lastrowid
-            except (ValueError,sqlite3.IntegrityError) as exc:
+            except (ValueError,DBIntegrityError) as exc:
                 flash(str(exc),'error')
                 return redirect(url_for('school_accounts',sid=sid))
             sent=create_invite(uid)
@@ -884,7 +888,7 @@ def school_account_edit(sid,uid):
                     raise ValueError('Matricule déjà utilisé dans cet établissement')
                 c.execute('UPDATE users SET name=?,first_name=?,last_name=?,email=?,phone=?,role=?,matricule=? WHERE id=? AND school_id=?',
                           (first+' '+last,first,last,email,phone,role,matricule,uid,sid))
-        except (ValueError,sqlite3.IntegrityError) as exc:
+        except (ValueError,DBIntegrityError) as exc:
             flash(str(exc),'error')
             return redirect(url_for('school_account_edit',sid=sid,uid=uid))
         with db() as c:
@@ -1080,7 +1084,7 @@ def school_matricules(sid):
                     c.execute('UPDATE matricule_rules SET prefix=?,padding=?,next_number=? WHERE school_id=? AND role=?',
                               (prefix,padding,start,sid,role))
             flash('Numérotation des matricules enregistrée.','success')
-        except (ValueError,sqlite3.IntegrityError) as exc:
+        except (ValueError,DBIntegrityError) as exc:
             flash(str(exc),'error')
         return redirect(url_for('school_matricules',sid=sid))
     with db() as c:
@@ -1118,7 +1122,7 @@ def edit_person_matricule(uid):
             c.execute('UPDATE users SET matricule=? WHERE school_id=? AND id=?',(value,school_id(),uid))
         audit('person.matricule_updated',f'{uid}:{user["matricule"]}->{value}')
         flash('Matricule mis à jour.','success')
-    except (ValueError,sqlite3.IntegrityError) as exc:
+    except (ValueError,DBIntegrityError) as exc:
         flash(str(exc),'error')
     return redirect(url_for('people'))
 
@@ -1153,7 +1157,7 @@ def people():
             try:
                 matricule=requested_matricule(c,school_id(),role,request.form.get('matricule'))
                 uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,1)',(school_id(),name,email,generate_password_hash(password),role,matricule)).lastrowid
-            except (ValueError,sqlite3.IntegrityError) as exc:
+            except (ValueError,DBIntegrityError) as exc:
                 flash(str(exc),'error')
                 return redirect(url_for('people'))
             if role=='etudiant':
@@ -1327,7 +1331,7 @@ def people_import():
                 uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role,matricule) VALUES (?,?,?,?,?,?)',(school_id(),name,email,generate_password_hash(secrets.token_urlsafe(24)),'etudiant',next_matricule(c,school_id(),'etudiant'))).lastrowid
                 c.execute('INSERT INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school_id(),uid,class_id,year_id))
                 hashes.append(uid)
-    except sqlite3.IntegrityError:
+    except DBIntegrityError:
         flash('Import annulé : conflit sur les données.','error')
         return redirect(url_for('people'))
     # Invitations can be requested later; avoid thousands of synchronous outbound email calls.
