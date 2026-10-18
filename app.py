@@ -213,7 +213,7 @@ def safety():
 
 @app.context_processor
 def globals_template():
-    return dict(me=current_user(),csrf=session.get('csrf',''),appname='EduPilot',support_name=setting('support_name','LMurbs'),support_phone=setting('support_phone','+2250711124359'),powered_by=setting('powered_by','Propulsé par LMurbs'),school_brand=one('SELECT id,name,logo_mime FROM schools WHERE id=?',(school_id(),)) if school_id() else None, platform_logo_enabled=bool(one('SELECT id FROM platform_branding WHERE id=1')))
+    return dict(me=current_user(),csrf=session.get('csrf',''),appname='EduPilot',support_name=setting('support_name','LMurbs'),support_phone=setting('support_phone','+2250711124359'),powered_by=setting('powered_by','Propulsé par LMurbs'),school_brand=one('SELECT id,name,logo_mime,campus_enabled FROM schools WHERE id=?',(school_id(),)) if school_id() else None, platform_logo_enabled=bool(one('SELECT id FROM platform_branding WHERE id=1')))
 
 def current_user():
     uid=session.get('uid')
@@ -1203,7 +1203,7 @@ def classes():
         execute('INSERT INTO periods(school_id,class_id,name) VALUES (?,?,?)',(school_id(),cid,'Trimestre 1' if request.form.get('cycle')=='trimestre' else 'Semestre 1'))
         audit('class.created',name)
         return redirect(url_for('classes'))
-    return render_template('list.html',title='Classes',columns=['Classe','Régime','Parents','Détails','Modifier'],rows=[(x['name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif',{'link':url_for('class_details',cid=x['id']),'label':'Détails'},{'link':url_for('class_edit',cid=x['id']),'label':'Modifier'}) for x in scoped('SELECT * FROM classes WHERE school_id=?')],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?'))
+    return render_template('list.html',title='Classes',columns=['Classe','Régime','Parents','Détails','Modifier'],rows=[(x['name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif',{'link':url_for('class_details',cid=x['id']),'label':'Détails'},{'link':url_for('class_edit',cid=x['id']),'label':'Modifier'}) for x in scoped('SELECT * FROM classes WHERE school_id=?')],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?') if one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled'] else [])
 
 @app.route('/classes/<int:cid>/edit',methods=['GET','POST'])
 @roles('admin','administratif')
