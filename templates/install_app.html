@@ -13,10 +13,11 @@
 <div id="android-help"><div class="steps"><b>Sur Android (Chrome)</b><br>Ouvrez le menu ⋮ puis appuyez sur <b>Installer l’application</b> ou <b>Ajouter à l’écran d’accueil</b>.</div></div>
 <div id="installed"><p>EduPilot semble déjà ouvert en mode application.</p></div>
 <button type="button" id="install" hidden>Installer EduPilot</button>
-<a class="primary" href="{{url_for('login')}}">Se connecter à EduPilot</a>
+<button type="button" id="share" style="background:#dfe9f3;color:#203950">Copier le lien d’installation</button><p id="copied" class="muted" aria-live="polite"></p><a class="primary" href="{{url_for('login')}}">Se connecter à EduPilot</a>
 <p class="muted">Après installation et connexion, ouvrez la cloche 🔔 pour activer les notifications. L'autorisation vous sera demandée uniquement si vous choisissez de les activer.</p>
 </section></main>
 <script>
+document.getElementById('share').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(location.href);document.getElementById('copied').textContent='Lien copié. Partagez-le par WhatsApp, e-mail ou SMS.';}catch(e){document.getElementById('copied').textContent='Lien à partager : '+location.href;}});
 let deferredInstall=null;
 const ios=/iPhone|iPad|iPod/.test(navigator.userAgent),standalone=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
 if(standalone)document.getElementById('installed').style.display='block';
