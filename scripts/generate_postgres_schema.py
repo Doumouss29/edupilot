@@ -42,7 +42,7 @@ def main():
             f"SET LOCAL search_path TO {SCHEMA};",
             f"-- Precondition: empty schema {SCHEMA} exists and is owned by the EduPilot role.",
             "DO $$ BEGIN",
-            " IF EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname='{SCHEMA}') THEN",
+            f" IF EXISTS (SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname='{SCHEMA}') THEN",
             "  RAISE EXCEPTION 'Refus: le schema edupilot_recette contient deja des tables';",
             " END IF;",
             "END $$;",
