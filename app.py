@@ -472,9 +472,11 @@ def mfa_trusted_user(u):
 
 def start_second_factor(u):
     mode=mfa_role(u)
+    remember=bool(session.get('login_remember_requested')) and u['role']!='superadmin'
     if not mode or (mode=='email' and mfa_trusted_user(u)):
-        return complete_login(u,remember=bool(mode=='email' and mfa_trusted_user(u)))
+        return complete_login(u,remember=remember)
     session.clear()
+    session['mfa_remember_requested']=remember
     session['csrf']=secrets.token_urlsafe(24)
     session['mfa_pending_uid']=u['id']
     session['mfa_pending_at']=int(time.time())
@@ -579,7 +581,7 @@ def mfa_verify():
                         c.execute('INSERT INTO mfa_trusted_devices(user_id,token_hash,expires_at) VALUES (?,?,?)',(u['id'],hashlib.sha256(cookie.encode()).hexdigest(),int(time.time())+days*86400))
                     verified_cookie=cookie
         if mode=='email' and 'verified_cookie' in locals():
-            return complete_login(u,verified_cookie,remember=bool(verified_cookie))
+            return complete_login(u,verified_cookie,remember=bool(session.get('mfa_remember_requested')))
         flash('Code incorrect ou expiré.','error')
     return render_template('mfa.html',mode=mode,setup_secret=secret,setup_uri=uri,setup_qr=totp_qr_data(uri) if uri else None,email_fallback=bool(session.get('mfa_email_fallback')) if mode=='totp' else False,trust_days=30 if u['role'] in ('admin','administratif') else 90)
 
@@ -594,6 +596,8 @@ def handle_login(school=None):
     valid=[u for u in candidates if check_password_hash(u['password_hash'],password)]
     if school:
         valid=[u for u in valid if u['role']!='superadmin']
+    if valid:
+        session['login_remember_requested']=request.form.get('remember_me')=='1'
     if len(valid)==1:
         return start_second_factor(valid[0])
     if not school and len(valid)>1:
