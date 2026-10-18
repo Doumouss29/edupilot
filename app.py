@@ -544,7 +544,9 @@ def mfa_verify():
                         days=30 if u['role'] in ('admin','administratif') else 90
                         c.execute('DELETE FROM mfa_trusted_devices WHERE user_id=? AND expires_at<?',(u['id'],int(time.time())))
                         c.execute('INSERT INTO mfa_trusted_devices(user_id,token_hash,expires_at) VALUES (?,?,?)',(u['id'],hashlib.sha256(cookie.encode()).hexdigest(),int(time.time())+days*86400))
-                    return complete_login(u,cookie)
+                    verified_cookie=cookie
+        if mode=='email' and 'verified_cookie' in locals():
+            return complete_login(u,verified_cookie)
         flash('Code incorrect ou expiré.','error')
     return render_template('mfa.html',mode=mode,setup_secret=secret,setup_uri=uri,trust_days=30 if u['role'] in ('admin','administratif') else 90)
 
