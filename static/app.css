@@ -404,3 +404,9 @@ img,video,iframe,canvas{max-width:100%}
   .live-filter-count{grid-column:1/-1;margin:0}
 }
 @media(max-width:360px){.live-filter-bar{grid-template-columns:1fr}}
+
+/* Official EduPilot brand: large, readable full logo in the login hero. */
+.hero-login .hero-logo{display:block;width:100%;max-width:560px}
+.hero-login .platform-logo-login{display:block;width:100%;max-width:560px;height:auto;max-height:270px;object-fit:contain;object-position:left center;background:transparent;border-radius:0;padding:0}
+.login-panel .platform-logo-login-mobile{width:min(240px,100%);height:auto;max-height:130px;object-fit:contain}
+@media(max-width:800px){.hero-login .platform-logo-login{max-width:320px;max-height:180px}.login-panel .platform-logo-login-mobile{width:min(220px,100%)}}
