@@ -2319,6 +2319,11 @@ def push_unsubscribe():
     execute('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?',(current_user()['id'],endpoint))
     return jsonify(ok=True)
 
+@app.get('/installer')
+def install_app():
+    return render_template('install_app.html')
+
+
 @app.get('/sw.js')
 def service_worker():
     return send_file(ROOT/'static'/'sw.js',mimetype='application/javascript',max_age=0)
