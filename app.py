@@ -289,7 +289,7 @@ def send_account_link(uid,purpose='activation'):
         content=f"Bonjour {user['name']},\n\nPour définir un nouveau mot de passe EduPilot, ouvrez ce lien personnel :\n{url}\n\nCe lien expire dans 30 minutes et ne peut servir qu'une fois. Si vous n'avez rien demandé, ignorez ce message.\n\nEduPilot"
     else:
         subject='Bienvenue sur EduPilot — Activez votre compte'
-        content=f"Bonjour {user['name']},\n\nVotre compte EduPilot ({user['role']}) pour {user['school_name'] or 'la plateforme'} a été créé.\n\nPour choisir votre mot de passe et activer votre accès :\n{url}\n\nCe lien personnel expire dans 48 heures. Ne le transférez à personne.\n\nEduPilot"
+        content=f"Bonjour {user['name']},\n\nVotre compte EduPilot ({user['role']}) pour {user['school_name'] or 'la plateforme'} a été créé.\n\nPour choisir votre mot de passe et activer votre accès :\n{url}\n\nCe lien personnel expire dans 48 heures. Ne le transférez à personne.\n\nPour utiliser EduPilot sur votre téléphone ou tablette, consultez le guide d'installation :\n{base}/installer\n\nAprès installation, connectez-vous avec votre compte EduPilot.\n\nEduPilot"
     sent=send_brevo_email(user['email'],subject,content,user['school_id'],uid)
     # Ne pas enregistrer les URL contenant un jeton dans les notifications internes.
     return sent
