@@ -1,0 +1,36 @@
+name: edupilot-recette
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: edupilot:pg-recette
+    container_name: edupilot-pg-recette
+    restart: "no"
+    environment:
+      DB_ENGINE: postgresql
+      PGHOST: ${PGHOST:?Configurez PGHOST}
+      PGPORT: ${PGPORT:-20184}
+      PGDATABASE: edupilot
+      PGUSER: ${PGUSER:-edupilot}
+      PGPASSWORD: ${PGPASSWORD:?Configurez PGPASSWORD}
+      PGSCHEMA: edupilot_recette
+      PGSSLMODE: ${PGSSLMODE:-require}
+      SECRET_KEY: ${SECRET_KEY:?Configurez SECRET_KEY}
+      PUBLIC_BASE_URL: http://127.0.0.1:18080
+      DATABASE_PATH: /data/edupilot.db
+      UPLOAD_DIR: /data/uploads
+      BREVO_API_KEY: ""
+      VAPID_PRIVATE_KEY: ""
+      VAPID_PUBLIC_KEY: ""
+      VAPID_SUBJECT: ""
+    volumes:
+      - ./data:/data:ro
+    ports:
+      - "127.0.0.1:18080:8000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 100
+    mem_limit: 600m
