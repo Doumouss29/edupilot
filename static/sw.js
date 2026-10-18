@@ -4,7 +4,7 @@ self.addEventListener('push',event=>{
   const path=typeof data.url==='string'&&data.url.startsWith('/')&&!data.url.startsWith('//')?data.url:'/';
   event.waitUntil(self.registration.showNotification(String(data.title||'EduPilot'),{
     body:String(data.body||'Nouvelle notification').slice(0,350),
-    icon:'/static/edupilot-icon.svg',badge:'/static/edupilot-icon.svg',
+    icon:'/static/edupilot-192.png?v=official-20261018',badge:'/static/edupilot-192.png?v=official-20261018',
     tag:'edupilot-'+Date.now(),data:{url:path}
   }));
 });
