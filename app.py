@@ -30,7 +30,7 @@ UPLOAD_DIR.mkdir(parents=True,exist_ok=True)
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS platform_branding(id INTEGER PRIMARY KEY CHECK(id=1),logo BLOB NOT NULL,logo_mime TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1, subscription_end TEXT, logo BLOB, logo_mime TEXT);
+CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1, subscription_end TEXT, logo BLOB, logo_mime TEXT, campus_enabled INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS campuses(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL, matricule TEXT, active INTEGER NOT NULL DEFAULT 1, first_name TEXT, last_name TEXT, phone TEXT, must_change_password INTEGER NOT NULL DEFAULT 0, first_login_at TEXT);
 CREATE TABLE IF NOT EXISTS years(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), label TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1);
@@ -93,7 +93,7 @@ Path(DB).parent.mkdir(parents=True,exist_ok=True)
 with db() as c:
     c.executescript(SCHEMA)
     existing={r['name'] for r in c.execute('PRAGMA table_info(schools)').fetchall()}
-    for name,definition in [('subscription_end','TEXT'),('logo','BLOB'),('logo_mime','TEXT')]:
+    for name,definition in [('subscription_end','TEXT'),('logo','BLOB'),('logo_mime','TEXT'),('campus_enabled','INTEGER NOT NULL DEFAULT 0')]:
         if name not in existing: c.execute(f'ALTER TABLE schools ADD COLUMN {name} {definition}')
     columns={r['name'] for r in c.execute('PRAGMA table_info(users)').fetchall()}
     for name,definition in [('first_name','TEXT'),('last_name','TEXT'),('phone','TEXT'),('must_change_password','INTEGER NOT NULL DEFAULT 0'),('matricule','TEXT'),('first_login_at','TEXT')]:
@@ -615,9 +615,8 @@ def school_new():
         unique=slug+'_'+str(n);n+=1
     logo,mime=read_logo(request.files.get('logo'))
     with db() as c:
-        sid=c.execute('INSERT INTO schools(name,slug,plan,subscription_end,logo,logo_mime) VALUES (?,?,?,?,?,?)',(name,unique,plan,end,logo,mime)).lastrowid
+        sid=c.execute('INSERT INTO schools(name,slug,plan,subscription_end,logo,logo_mime,campus_enabled) VALUES (?,?,?,?,?,?,?)',(name,unique,plan,end,logo,mime,int(request.form.get('campus_enabled')=='1'))).lastrowid
         c.execute('INSERT INTO years(school_id,label) VALUES (?,?)',(sid,'2026-2027'))
-        c.execute('INSERT INTO campuses(school_id,name) VALUES (?,?)',(sid,'Campus principal'))
         ensure_matricule_rules(c,sid)
     flash('Établissement créé. Créez maintenant ses comptes administrateurs.','success')
     return redirect(url_for('school_accounts',sid=sid))
@@ -781,6 +780,8 @@ def school_update(sid):
         plan=request.form.get('plan',school['plan'])
         if plan not in ('essentiel','standard','premium'):abort(400)
         logo,mime=read_logo(request.files.get('logo'))
+        campus_enabled=int(request.form.get('campus_enabled')=='1')
+        execute('UPDATE schools SET campus_enabled=? WHERE id=?',(campus_enabled,sid))
         if logo:execute('UPDATE schools SET plan=?,subscription_end=?,logo=?,logo_mime=? WHERE id=?',(plan,end,logo,mime,sid))
         elif request.form.get('remove_logo')=='1':execute('UPDATE schools SET plan=?,subscription_end=?,logo=NULL,logo_mime=NULL WHERE id=?',(plan,end,sid))
         else:execute('UPDATE schools SET plan=?,subscription_end=? WHERE id=?',(plan,end,sid))
@@ -1192,7 +1193,7 @@ def classes():
         year=scoped('SELECT id FROM years WHERE school_id=? AND is_active=1 LIMIT 1')
         if not year:abort(400)
         campus=request.form.get('campus_id')
-        if campus and not has_school('campuses',campus):abort(403)
+        if campus and (not one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled'] or not has_school('campuses',campus)):abort(403)
         if campus and one('SELECT plan FROM schools WHERE id=?',(school_id(),))['plan']!='premium':
             first=one('SELECT id FROM campuses WHERE school_id=? ORDER BY id LIMIT 1',(school_id(),))
             if int(campus)!=first['id']: abort(403)
@@ -2213,14 +2214,14 @@ def reports():
 @roles('admin','administratif')
 def campuses():
     school=one('SELECT * FROM schools WHERE id=?',(school_id(),))
+    if not school or not school['campus_enabled']:abort(404)
     if request.method=='POST':
-        if school['plan']!='premium':abort(403)
         name=request.form.get('name','').strip()
         if not name:abort(400)
         execute('INSERT INTO campuses(school_id,name) VALUES (?,?)',(school_id(),name))
         audit('campus.created',name)
         return redirect(url_for('campuses'))
-    return render_template('list.html',title='Campus et sites',columns=['Campus'],rows=[(x['name'],) for x in scoped('SELECT name FROM campuses WHERE school_id=?')],form='campuses' if school['plan']=='premium' else None)
+    return render_template('list.html',title='Campus et sites',columns=['Campus'],rows=[(x['name'],) for x in scoped('SELECT name FROM campuses WHERE school_id=?')],form='campuses')
 
 @app.post('/courses/<int:cid>/assign')
 @roles('admin','administratif')
