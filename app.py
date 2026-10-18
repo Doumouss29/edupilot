@@ -21,6 +21,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_SECURE=os.getenv('PUBLIC_BASE_URL','').startswith('https://'),
+    PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=90),
 )
 app.config['MAX_CONTENT_LENGTH'] = 12 * 1024 * 1024
 DB = os.getenv('DATABASE_PATH', '/tmp/edupilot.db')
@@ -208,6 +209,9 @@ def safety():
         token=request.form.get('csrf','') or request.headers.get('X-CSRF-Token','')
         if token!=session.get('csrf') or not token: abort(400,'Jeton CSRF invalide')
     if 'csrf' not in session: session['csrf']=secrets.token_urlsafe(24)
+    if session.get('remember_until') and int(time.time())>=session['remember_until']:
+        session.clear()
+        return redirect(url_for('login'))
     u=current_user()
     if u and subscription_blocked(u) and request.endpoint not in ('restricted','logout','login','health','school_logo','static'):
         return redirect(url_for('restricted'))
@@ -401,7 +405,7 @@ def complete_login(u, trusted_cookie=None, remember=False):
     # A normal browser-session cookie can disappear when the mobile PWA closes.
     if remember and u['role']!='superadmin':
         session.permanent=True
-        app.permanent_session_lifetime=datetime.timedelta(days=30 if u['role'] in ('admin','administratif') else 90)
+        session['remember_until']=int(time.time())+(30 if u['role'] in ('admin','administratif') else 90)*86400
     session['csrf']=secrets.token_urlsafe(24)
     if u['must_change_password']:
         return redirect(url_for('change_password'))
