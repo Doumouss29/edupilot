@@ -24,6 +24,8 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=90),
 )
 app.config['MAX_CONTENT_LENGTH'] = 12 * 1024 * 1024
+if os.getenv('DB_ENGINE', 'sqlite').lower() != 'sqlite':
+    raise RuntimeError('Moteur PostgreSQL non activé : compatibilité et recette à finaliser avant bascule.')
 DB = os.getenv('DATABASE_PATH', '/tmp/edupilot.db')
 UPLOAD_DIR = Path(os.getenv('UPLOAD_DIR', '/tmp/edupilot_uploads'))
 UPLOAD_DIR.mkdir(parents=True,exist_ok=True)
