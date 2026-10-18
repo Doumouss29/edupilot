@@ -6,7 +6,7 @@ application SQL statements have passed PostgreSQL compatibility tests.
 import os
 from contextlib import contextmanager
 
-ALLOWED_SCHEMA = "edupilot_recette"
+ALLOWED_SCHEMAS = ("edupilot_recette", "edupilot")
 
 def pg_connection():
     import psycopg
@@ -17,7 +17,7 @@ def pg_connection():
         raise RuntimeError("Missing PostgreSQL configuration: " + ", ".join(missing))
     if os.getenv("PGDATABASE") != "edupilot":
         raise RuntimeError("Refusing unexpected PostgreSQL database")
-    if os.getenv("PGSCHEMA") != ALLOWED_SCHEMA:
+    if os.getenv("PGSCHEMA") not in ALLOWED_SCHEMAS:
         raise RuntimeError("Only the dedicated rehearsal schema is allowed")
     mode = os.getenv("PGSSLMODE", "verify-full")
     if mode not in ("verify-full", "require"):
@@ -31,12 +31,12 @@ def pg_connection():
         sslmode=mode,
         connect_timeout=12,
         row_factory=dict_row,
-        options="-c search_path=edupilot_recette",
+        options="-c search_path=" + os.environ["PGSCHEMA"],
     )
     with conn.cursor() as cur:
         cur.execute("SELECT current_database(), current_schema()")
         row = cur.fetchone()
-        if row["current_database"] != "edupilot" or row["current_schema"] != ALLOWED_SCHEMA:
+        if row["current_database"] != "edupilot" or row["current_schema"] != os.environ["PGSCHEMA"]:
             conn.close()
             raise RuntimeError("Unexpected PostgreSQL database/schema")
     return CompatConnection(conn)
