@@ -11,7 +11,11 @@ COPY app.py /app/
 COPY templates/ /app/templates/
 COPY static/ /app/static/
 COPY scripts/ /app/scripts/
-RUN python scripts/build_icons.py
+RUN test -s /app/static/edupilot-logo-header.png && \
+    test -s /app/static/edupilot-180.png && \
+    test -s /app/static/edupilot-192.png && \
+    test -s /app/static/edupilot-512.png && \
+    test -s /app/static/edupilot-maskable-512.png
 
 RUN groupadd --gid 10001 edupilot && useradd --uid 10001 --gid 10001 --shell /usr/sbin/nologin edupilot
 USER 10001:10001
