@@ -9,6 +9,14 @@ services:
     restart: unless-stopped
     init: true
     environment:
+      DB_ENGINE: ${DB_ENGINE:-sqlite}
+      PGHOST: ${PGHOST:-}
+      PGPORT: ${PGPORT:-20184}
+      PGDATABASE: ${PGDATABASE:-edupilot}
+      PGUSER: ${PGUSER:-edupilot}
+      PGPASSWORD: ${PGPASSWORD:-}
+      PGSCHEMA: ${PGSCHEMA:-edupilot}
+      PGSSLMODE: ${PGSSLMODE:-require}
       DATABASE_PATH: /data/edupilot.db
       UPLOAD_DIR: /data/uploads
       PUBLIC_BASE_URL: https://edupilot.ci
