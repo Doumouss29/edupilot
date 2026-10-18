@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block heading %}Pilotage des utilisateurs{% endblock %}
+{% block head %}
+<style>
+.superadmin-report-filters{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:14px;margin:20px 0}
+.superadmin-report-filters select{width:100%;margin-top:7px}
+@media(max-width:850px){.superadmin-report-filters{grid-template-columns:1fr}}
+@media print{
+.sidebar,.topbar,.page-actions,.superadmin-report-filters,.no-print,.mobile-brand-banner{display:none!important}
+.main{margin:0!important;padding:10px!important;width:100%!important}
+.panel{box-shadow:none!important;border:none!important}
+.table-scroll{overflow:visible!important}
+body{background:#fff!important}
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="section-intro"><span class="eyebrow">SUPER ADMIN · PILOTAGE GLOBAL</span><h2>Effectifs et communications</h2><p>Suivi des utilisateurs par établissement, année académique et classe.</p></div>
+<section class="panel">
+<div class="panel-title"><h3>Filtres dynamiques</h3><button class="btn outline no-print" type="button" onclick="window.print()">🖨 Imprimer la liste</button></div>
+<div class="superadmin-report-filters">
+<label>Établissement<select id="su-school"><option value="">Tous les établissements</option>{% for s in schools %}<option value="{{s.id}}" {% if filters.get('school_id')==s.id %}selected{% endif %}>{{s.name}}</option>{% endfor %}</select></label>
+<label>Année académique<select id="su-year"><option value="">Toutes les années</option>{% for y in years %}<option value="{{y.id}}" data-school="{{y.school_id}}" {% if filters.get('year_id')==y.id %}selected{% endif %}>{{y.label}} — {{(schools|selectattr('id','equalto',y.school_id)|first).name}}</option>{% endfor %}</select></label>
+<label>Classe<select id="su-class"><option value="">Toutes les classes</option>{% for cl in classes %}<option value="{{cl.id}}" data-school="{{cl.school_id}}" data-year="{{cl.year_id}}" {% if filters.get('class_id')==cl.id %}selected{% endif %}>{{cl.name}}</option>{% endfor %}</select></label>
+</div>
+<div class="kpis">
+<div class="kpi"><small>Utilisateurs</small><strong>{{users|length}}</strong></div>
+{% for role,label in [('admin','Administrateurs'),('administratif','Administratifs'),('enseignant','Enseignants'),('etudiant','Élèves / étudiants'),('parent','Parents')] %}
+<div class="kpi"><small>{{label}}</small><strong>{{counts[role]}}</strong></div>
+{% endfor %}
+<div class="kpi"><small>E-mails envoyés</small><strong>{{mailed}}</strong><span>Envois réussis enregistrés depuis la mise à jour</span></div>
+</div>
+<p class="muted">Avec un filtre par année ou classe, les utilisateurs affichés sont ceux liés à des inscriptions ou enseignements correspondants. Les profils de direction ne sont pas rattachés à une classe. Les e-mails historiques antérieurs à cette fonctionnalité ne sont pas comptabilisés.</p>
+</section>
+<section class="panel">
+<div class="panel-title"><h3>Liste des utilisateurs</h3><span class="muted">{{users|length}} résultat(s)</span></div>
+<div class="table-scroll"><table><thead><tr><th>Établissement</th><th>Nom</th><th>E-mail</th><th>Profil</th><th>Compte</th></tr></thead><tbody>
+{% for u in users %}<tr><td>{{u.school_name}}</td><td><b>{{u.name}}</b></td><td>{{u.email}}</td><td>{{{'admin':'Administrateur','administratif':'Administratif','enseignant':'Enseignant','etudiant':'Élève / étudiant','parent':'Parent'}.get(u.role,u.role)}}</td><td><span class="tag {{'success' if u.active else 'danger'}}">{{'Actif' if u.active else 'Suspendu'}}</span></td></tr>
+{% else %}<tr><td colspan="5" class="muted">Aucun utilisateur pour cette sélection.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<script>
+(()=>{
+const school=document.getElementById('su-school'),year=document.getElementById('su-year'),cls=document.getElementById('su-class');
+function sync(){
+for(const o of year.options)if(o.value)o.hidden=!!school.value && o.dataset.school!==school.value;
+if(year.selectedOptions[0]?.hidden)year.value='';
+for(const o of cls.options)if(o.value)o.hidden=(!!school.value&&o.dataset.school!==school.value)||(!!year.value&&o.dataset.year!==year.value);
+if(cls.selectedOptions[0]?.hidden)cls.value='';
+}
+function apply(){sync();const q=new URLSearchParams();if(school.value)q.set('school_id',school.value);if(year.value)q.set('year_id',year.value);if(cls.value)q.set('class_id',cls.value);location.assign(location.pathname+(q.size?'?'+q:''));}
+sync();[school,year,cls].forEach(e=>e.addEventListener('change',apply));
+})();
+</script>
+{% endblock %}
