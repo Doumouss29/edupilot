@@ -431,6 +431,15 @@ def use_recovery_code(uid,code):
         return removed.rowcount==1
 
 
+def totp_qr_data(uri):
+    import qrcode
+    from io import BytesIO
+    image=qrcode.make(uri,box_size=6,border=3)
+    output=BytesIO()
+    image.save(output,format='PNG')
+    return 'data:image/png;base64,'+base64.b64encode(output.getvalue()).decode()
+
+
 def mfa_valid_totp(secret,code,previous=-1):
     try:
         key=base64.b32decode(secret+'='*((-len(secret))%8))
@@ -507,11 +516,27 @@ def mfa_verify():
             with db() as c:
                 c.execute('UPDATE mfa_settings SET totp_attempts=totp_attempts+1 WHERE user_id=?',(u['id'],))
                 c.execute('UPDATE mfa_settings SET totp_locked_until=?,totp_attempts=0 WHERE user_id=? AND totp_attempts>=5',(int(time.time())+300,u['id']))
+        if mode=='totp' and request.form.get('action')=='email_send' and config and config['totp_secret']:
+            if send_mfa_email(u):
+                session['mfa_email_fallback']=True
+                flash('Un code de secours a été envoyé à votre adresse e-mail.','success')
+            else:
+                flash('Envoi indisponible ou délai entre deux demandes non écoulé.','error')
+            return redirect(url_for('mfa_verify'))
         if mode=='email' and request.form.get('action')=='resend':
             send_mfa_email(u)
             flash('Si l’envoi est disponible, un nouveau code a été envoyé.','success')
             return redirect(url_for('mfa_verify'))
         code=request.form.get('code','').strip()
+        if mode=='totp' and config and config['totp_secret'] and session.get('mfa_email_fallback'):
+            if config['email_expires'] and config['email_expires']>=int(time.time()) and config['email_attempts']<5 and len(code)==6:
+                digest=hmac.new(app.secret_key.encode(),f"{u['id']}:{code}".encode(),hashlib.sha256).hexdigest()
+                with db() as c:
+                    c.execute('UPDATE mfa_settings SET email_attempts=email_attempts+1 WHERE user_id=?',(u['id'],))
+                    updated=c.execute('UPDATE mfa_settings SET email_code_hash=NULL,email_expires=NULL WHERE user_id=? AND email_code_hash=? AND email_expires>=? AND email_attempts<=5',(u['id'],digest,int(time.time())))
+                if updated.rowcount==1:
+                    audit('mfa.superadmin.email_fallback',str(u['id']))
+                    return complete_login(u)
         if mode=='totp' and config and config['totp_secret'] and use_recovery_code(u['id'],code):
             return complete_login(u)
         if mode=='totp':
@@ -548,7 +573,7 @@ def mfa_verify():
         if mode=='email' and 'verified_cookie' in locals():
             return complete_login(u,verified_cookie)
         flash('Code incorrect ou expiré.','error')
-    return render_template('mfa.html',mode=mode,setup_secret=secret,setup_uri=uri,trust_days=30 if u['role'] in ('admin','administratif') else 90)
+    return render_template('mfa.html',mode=mode,setup_secret=secret,setup_uri=uri,setup_qr=totp_qr_data(uri) if uri else None,email_fallback=bool(session.get('mfa_email_fallback')) if mode=='totp' else False,trust_days=30 if u['role'] in ('admin','administratif') else 90)
 
 
 def handle_login(school=None):
