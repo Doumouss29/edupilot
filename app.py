@@ -1177,7 +1177,7 @@ def people():
     classes=scoped('SELECT id,name,year_id FROM classes WHERE school_id=? ORDER BY name')
     years=scoped('SELECT id,label FROM years WHERE school_id=? ORDER BY label DESC')
     courses=scoped('SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? ORDER BY cl.name,c.name')
-    rows=allrows("""SELECT u.id,u.name,u.email,u.role,u.matricule,u.active,u.must_change_password,
+    rows_sql="""SELECT u.id,u.name,u.email,u.role,u.matricule,u.active,u.must_change_password,
                      GROUP_CONCAT(DISTINCT cl.name) class_names,
                      TRIM(COALESCE(GROUP_CONCAT(DISTINCT cl.id),'') || ',' ||
                        COALESCE((SELECT GROUP_CONCAT(DISTINCT c2.class_id) FROM courses c2 WHERE c2.school_id=u.school_id AND c2.teacher_id=u.id),''), ',') class_ids,
@@ -1186,7 +1186,17 @@ def people():
                      (SELECT GROUP_CONCAT(c.name||' ('||cl2.name||')',', ') FROM courses c JOIN classes cl2 ON cl2.id=c.class_id WHERE c.teacher_id=u.id AND c.school_id=u.school_id) teacher_courses
                   FROM users u LEFT JOIN enrollments e ON e.student_id=u.id AND e.school_id=u.school_id
                   LEFT JOIN classes cl ON cl.id=e.class_id
-                  WHERE u.school_id=? GROUP BY u.id ORDER BY u.role,u.name""",(school_id(),))
+                  WHERE u.school_id=? GROUP BY u.id ORDER BY u.role,u.name"""
+    if DB_ENGINE == 'postgresql':
+        rows_sql = (rows_sql
+            .replace("GROUP_CONCAT(DISTINCT cl.name)", "STRING_AGG(DISTINCT cl.name, ',')")
+            .replace("GROUP_CONCAT(DISTINCT cl.id)", "STRING_AGG(DISTINCT cl.id::text, ',')")
+            .replace("GROUP_CONCAT(DISTINCT c2.class_id)", "STRING_AGG(DISTINCT c2.class_id::text, ',')")
+            .replace("GROUP_CONCAT(DISTINCT e.year_id)", "STRING_AGG(DISTINCT e.year_id::text, ',')")
+            .replace("GROUP_CONCAT(DISTINCT cl2.year_id)", "STRING_AGG(DISTINCT cl2.year_id::text, ',')")
+            .replace("GROUP_CONCAT(c.name||' ('||cl2.name||')',', ')", "STRING_AGG(c.name||' ('||cl2.name||')', ', ')")
+            .replace("GROUP BY u.id ORDER BY", "GROUP BY u.id ORDER BY"))
+    rows=allrows(rows_sql,(school_id(),))
     return render_template('list.html',title='Utilisateurs',columns=['Matricule','Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['matricule'],x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,years=years,courses=courses,user_rows=rows,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(school_id(),))})
 
 @app.post('/people/bulk')
