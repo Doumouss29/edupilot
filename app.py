@@ -1696,15 +1696,20 @@ def course_edit(cid):
 def planning():
     u=current_user()
     if u['role']=='superadmin':abort(403)
+    draft_key=f'planning_draft_{school_id()}_{u["id"]}'
     if request.method=='POST':
         if u['role'] not in ('admin','administratif'):abort(403)
+        session[draft_key]={k:request.form.get(k,'')[:100] for k in ('mode','class_id','course_id','planning_timezone','lesson_date','start_time','duration_hours','repeat_until','room')}
+        session.pop('planning_result',None)
         course_id=request.form.get('course_id')
         class_id=request.form.get('class_id')
         course=one('SELECT * FROM courses WHERE id=? AND school_id=? AND class_id=?',(course_id,school_id(),class_id))
         if not course:
+            session['planning_result']={'ok':False,'text':'Sélectionnez une classe et un cours valide.'}
             flash('Sélectionnez une classe puis un cours appartenant à cette classe.','error')
             return redirect(url_for('planning'))
         if not course['teacher_id']:
+            session['planning_result']={'ok':False,'text':'Affectez un enseignant au cours avant de programmer la séance.'}
             flash('Affectez un enseignant à ce cours avant la planification.','error')
             return redirect(url_for('planning'))
         try:
@@ -1737,6 +1742,7 @@ def planning():
             else: dates=[start_dt]
             if len(dates)>53:raise ValueError('limite')
         except (ValueError,TypeError,OverflowError):
+            session['planning_result']={'ok':False,'text':'Date, horaire, durée ou récurrence invalide. Vérifiez le fuseau horaire et les dates.'}
             flash('Date, heure, durée ou récurrence invalide. Une séance doit finir le même jour et durer de 0,5 à 12 h.','error')
             return redirect(url_for('planning'))
         room=request.form.get('room','').strip()[:80]
@@ -1754,12 +1760,14 @@ def planning():
                            LIMIT 1""",(school_id(),end_txt,start_txt,class_id,course['teacher_id'],room,room)).fetchone()
                 if clash:
                     c.rollback()
+                    session['planning_result']={'ok':False,'text':f'Conflit le {dt.strftime("%d/%m/%Y")} : classe, enseignant ou salle déjà occupé(e). Aucune séance créée.'}
                     flash(f'Conflit le {dt.strftime("%d/%m/%Y")} : classe, enseignant ou salle déjà occupé(e). Aucune séance ajoutée.','error')
                     return redirect(url_for('planning'))
                 cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room))
                 created.append(cur.lastrowid)
         notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']])
         audit('lesson.created',','.join(str(x) for x in created))
+        session['planning_result']={'ok':True,'text':f'{len(created)} séance(s) ajoutée(s) au planning. Vous pouvez choisir une nouvelle date sans ressaisir le cours.'}
         flash(f'{len(created)} séance(s) ajoutée(s) au planning.','success')
         return redirect(url_for('planning'))
     query='''SELECT l.*,c.name course_name,cl.name class_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id WHERE l.school_id=?'''
@@ -1769,7 +1777,7 @@ def planning():
     elif u['role']=='etudiant':query+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     events=allrows(query,args)
-    return render_template('planning.html',now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
+    return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
 
 def lesson_utc_iso(value):
     """Existing lesson timestamps are historical Africa/Abidjan local times."""
