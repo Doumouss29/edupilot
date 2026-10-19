@@ -2465,7 +2465,7 @@ def reports():
       COALESCE(SUM(CASE WHEN l.status IN ('realisee','partielle') THEN l.actual_minutes ELSE 0 END),0) actual_minutes
       FROM courses c JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
       LEFT JOIN lessons l ON l.course_id=c.id AND l.school_id=c.school_id
-      WHERE '''+' AND '.join(conditions)+''' GROUP BY c.id ORDER BY cl.name,c.name''',tuple(params))
+      WHERE '''+' AND '.join(conditions)+''' GROUP BY c.id,c.name,c.planned_minutes,cl.name ORDER BY cl.name,c.name''',tuple(params))
     if request.args.get('format')=='csv':
         import csv,io
         b=io.StringIO();w=csv.writer(b,delimiter=';');w.writerow(['Cours','Classe','Séances planifiées','Heures prévues','Heures réalisées','Taux %'])
