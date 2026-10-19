@@ -11,12 +11,19 @@
     const rows=[...table.querySelectorAll('tbody tr[data-filter-row]')];
     const allOptions=new Map(selects.filter(el=>el.tagName==='SELECT').map(el=>[el,[...el.options].map(o=>({value:o.value,label:o.textContent}))]));
     const counter=bar.querySelector('.live-filter-count');
+    function matchesFilter(row,key,val){
+      if(!val)return true;
+      if(key==='search')return norm(row.textContent).includes(norm(val));
+      if(key==='last-from')return !!row.dataset.lastDate && row.dataset.lastDate>=val;
+      if(key==='last-to')return !!row.dataset.lastDate && row.dataset.lastDate<=val;
+      return tokens(row.dataset[key]).includes(val);
+    }
     function update(){
       // Cascade: available choices reflect all *other* selected criteria.
       const current=Object.fromEntries(selects.map(el=>[el.dataset.filter,String(el.value||'')]));
       for(const [select,options] of allOptions){
         const key=select.dataset.filter;
-        const allowed=new Set(rows.filter(row=>Object.entries(current).every(([other,val])=>!val||other===key||(other==='search'?norm(row.textContent).includes(norm(val)):tokens(row.dataset[other]).includes(val)))).flatMap(row=>tokens(row.dataset[key])));
+        const allowed=new Set(rows.filter(row=>Object.entries(current).every(([other,val])=>!val||other===key||matchesFilter(row,other,val))).flatMap(row=>tokens(row.dataset[key])));
         const previous=select.value;
         for(const option of select.options){option.disabled=!!option.value&&!allowed.has(option.value);}
         // Keep selected value visible if it becomes temporarily incompatible.
@@ -27,8 +34,7 @@
       rows.forEach(row=>{
         const matches=Object.entries(values).every(([key,val])=>{
           if(!val)return true;
-          if(key==='search')return norm(row.textContent).includes(norm(val));
-          return tokens(row.dataset[key]).includes(val);
+          return matchesFilter(row,key,val);
         });
         row.hidden=!matches;
         if(matches)visible++;
