@@ -427,7 +427,7 @@ def tenant_signin(slug):
 
 def complete_login(u, trusted_cookie=None, remember=False):
     # A successful authentication, not opening an invitation link, validates it.
-    execute("UPDATE users SET first_login_at=COALESCE(first_login_at,CURRENT_TIMESTAMP), last_login_at=CURRENT_TIMESTAMP WHERE id=?",(u['id'],))
+    execute("UPDATE users SET first_login_at=COALESCE(first_login_at,CAST(CURRENT_TIMESTAMP AS TEXT)), last_login_at=CAST(CURRENT_TIMESTAMP AS TEXT) WHERE id=?",(u['id'],))
     session.clear()
     session['uid']=u['id']
     # A normal browser-session cookie can disappear when the mobile PWA closes.
@@ -592,7 +592,7 @@ def mfa_verify():
                     session.clear()
                     session['uid']=u['id']
                     session['csrf']=secrets.token_urlsafe(24)
-                    execute("UPDATE users SET first_login_at=COALESCE(first_login_at,CURRENT_TIMESTAMP), last_login_at=CURRENT_TIMESTAMP WHERE id=?",(u['id'],))
+                    execute("UPDATE users SET first_login_at=COALESCE(first_login_at,CAST(CURRENT_TIMESTAMP AS TEXT)), last_login_at=CAST(CURRENT_TIMESTAMP AS TEXT) WHERE id=?",(u['id'],))
                     return render_template('mfa_recovery_codes.html',codes=codes)
                 return complete_login(u)
         elif config and config['email_expires'] and config['email_expires']>=int(time.time()) and config['email_attempts']<5 and len(code)==6:
