@@ -114,7 +114,7 @@ if DB_ENGINE == 'sqlite':
     for name,definition in [('subscription_end','TEXT'),('logo','BLOB'),('logo_mime','TEXT'),('campus_enabled','INTEGER NOT NULL DEFAULT 0')]:
         if name not in existing: c.execute(f'ALTER TABLE schools ADD COLUMN {name} {definition}')
     columns={r['name'] for r in c.execute('PRAGMA table_info(users)').fetchall()}
-    for name,definition in [('first_name','TEXT'),('last_name','TEXT'),('phone','TEXT'),('must_change_password','INTEGER NOT NULL DEFAULT 0'),('matricule','TEXT'),('first_login_at','TEXT')]:
+    for name,definition in [('first_name','TEXT'),('last_name','TEXT'),('phone','TEXT'),('must_change_password','INTEGER NOT NULL DEFAULT 0'),('matricule','TEXT'),('first_login_at','TEXT'),('last_login_at','TEXT')]:
         if name not in columns:c.execute(f'ALTER TABLE users ADD COLUMN {name} {definition}')
     for table, additions in {'courses':[('coefficient','REAL NOT NULL DEFAULT 1')],
         'assessments':[('attachment_name','TEXT'),('attachment_blob','BLOB'),('attachment_mime','TEXT')],
@@ -128,6 +128,11 @@ if DB_ENGINE == 'sqlite':
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_name','LMurbs')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_phone','+2250711124359')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('powered_by','Propulsé par LMurbs')")
+# Additive migration: preserve existing first-login history on both engines.
+if DB_ENGINE == 'postgresql':
+    with db() as c:
+        c.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TEXT')
+
 MATRICULE_PROFILES = {'etudiant': 'ETU', 'enseignant': 'ENS', 'administratif': 'ADM', 'admin': 'DIR', 'parent': 'PAR'}
 
 def ensure_matricule_rules(c, sid):
@@ -422,7 +427,7 @@ def tenant_signin(slug):
 
 def complete_login(u, trusted_cookie=None, remember=False):
     # A successful authentication, not opening an invitation link, validates it.
-    execute("UPDATE users SET first_login_at=CURRENT_TIMESTAMP WHERE id=? AND first_login_at IS NULL",(u['id'],))
+    execute("UPDATE users SET first_login_at=COALESCE(first_login_at,CURRENT_TIMESTAMP), last_login_at=CURRENT_TIMESTAMP WHERE id=?",(u['id'],))
     session.clear()
     session['uid']=u['id']
     # A normal browser-session cookie can disappear when the mobile PWA closes.
@@ -587,7 +592,7 @@ def mfa_verify():
                     session.clear()
                     session['uid']=u['id']
                     session['csrf']=secrets.token_urlsafe(24)
-                    execute("UPDATE users SET first_login_at=CURRENT_TIMESTAMP WHERE id=? AND first_login_at IS NULL",(u['id'],))
+                    execute("UPDATE users SET first_login_at=COALESCE(first_login_at,CURRENT_TIMESTAMP), last_login_at=CURRENT_TIMESTAMP WHERE id=?",(u['id'],))
                     return render_template('mfa_recovery_codes.html',codes=codes)
                 return complete_login(u)
         elif config and config['email_expires'] and config['email_expires']>=int(time.time()) and config['email_attempts']<5 and len(code)==6:
@@ -1196,6 +1201,7 @@ def people():
             .replace("GROUP_CONCAT(DISTINCT cl2.year_id)", "STRING_AGG(DISTINCT cl2.year_id::text, ',')")
             .replace("GROUP_CONCAT(c.name||' ('||cl2.name||')',', ')", "STRING_AGG(c.name||' ('||cl2.name||')', ', ')")
             .replace("GROUP BY u.id ORDER BY", "GROUP BY u.id ORDER BY"))
+    rows_sql=rows_sql.replace("u.must_change_password,", "u.must_change_password,u.first_login_at,u.last_login_at,")
     rows=allrows(rows_sql,(school_id(),))
     return render_template('list.html',title='Utilisateurs',columns=['Matricule','Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['matricule'],x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,years=years,courses=courses,user_rows=rows,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(school_id(),))})
 
