@@ -4,6 +4,7 @@ from openpyxl import load_workbook
 from flask import Response
 from contextlib import contextmanager
 from pathlib import Path
+from zoneinfo import ZoneInfo
 import requests
 from urllib.parse import urlsplit, quote
 from flask import Flask, request, redirect, url_for, render_template, flash, session, abort, jsonify, make_response
@@ -1711,7 +1712,14 @@ def planning():
             start_time=datetime.time.fromisoformat(request.form.get('start_time',''))
             hours=float(request.form.get('duration_hours',''))
             if hours<0.5 or hours>12 or not (hours*2).is_integer():raise ValueError('durée')
-            start_dt=datetime.datetime.combine(day,start_time)
+            planning_zone=request.form.get('planning_timezone','Africa/Abidjan')
+            if planning_zone not in ('Africa/Abidjan','Europe/Paris'):
+                raise ValueError('Fuseau horaire')
+            local_start=datetime.datetime.combine(day,start_time)
+            aware=local_start.replace(tzinfo=ZoneInfo(planning_zone))
+            if aware.astimezone(datetime.timezone.utc).astimezone(ZoneInfo(planning_zone)).replace(tzinfo=None)!=local_start:
+                raise ValueError('Heure inexistante au changement horaire')
+            start_dt=aware.astimezone(ZoneInfo('Africa/Abidjan')).replace(tzinfo=None)
             end_dt=start_dt+datetime.timedelta(minutes=round(hours*60))
             if end_dt.date()!=day:raise ValueError('minuit')
             mode=request.form.get('mode','unique')
@@ -1719,7 +1727,13 @@ def planning():
             if mode=='hebdomadaire':
                 last=datetime.date.fromisoformat(request.form.get('repeat_until',''))
                 if last<day or (last-day).days>365:raise ValueError('récurrence')
-                dates=[start_dt+datetime.timedelta(days=7*i) for i in range((last-day).days//7+1)]
+                dates=[]
+                for i in range((last-day).days//7+1):
+                    wall=local_start+datetime.timedelta(days=7*i)
+                    zoned=wall.replace(tzinfo=ZoneInfo(planning_zone))
+                    if zoned.astimezone(datetime.timezone.utc).astimezone(ZoneInfo(planning_zone)).replace(tzinfo=None)!=wall:
+                        raise ValueError('Heure inexistante')
+                    dates.append(zoned.astimezone(ZoneInfo('Africa/Abidjan')).replace(tzinfo=None))
             else: dates=[start_dt]
             if len(dates)>53:raise ValueError('limite')
         except (ValueError,TypeError,OverflowError):
@@ -1756,6 +1770,11 @@ def planning():
     elif u['role']=='parent':query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     events=allrows(query,args)
     return render_template('planning.html',now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
+
+def lesson_utc_iso(value):
+    """Existing lesson timestamps are historical Africa/Abidjan local times."""
+    local=datetime.datetime.fromisoformat(value)
+    return local.replace(tzinfo=ZoneInfo('Africa/Abidjan')).astimezone(datetime.timezone.utc).isoformat().replace('+00:00','Z')
 
 def editable_lesson_row(conn,lid):
     return conn.execute("""SELECT l.*,c.class_id FROM lessons l JOIN courses c ON c.id=l.course_id
@@ -2542,7 +2561,7 @@ def planning_json():
         sql+=' AND l.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND e.class_id=c.class_id AND p.active=1 AND cl.parents_enabled=1)';args.append(u['id'])
-    return jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':x['starts_at'],'end':x['ends_at'],'extendedProps':{'status':x['status'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
+    return jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':lesson_utc_iso(x['starts_at']),'end':lesson_utc_iso(x['ends_at']),'extendedProps':{'status':x['status'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
 
 @app.errorhandler(403)
 def denied(e):return render_template('error.html',message='Accès non autorisé.'),403
