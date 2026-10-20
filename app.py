@@ -1227,7 +1227,7 @@ def people():
             .replace("GROUP_CONCAT(DISTINCT cl2.year_id)", "STRING_AGG(DISTINCT cl2.year_id::text, ',')")
             .replace("GROUP_CONCAT(c.name||' ('||cl2.name||')',', ')", "STRING_AGG(c.name||' ('||cl2.name||')', ', ')")
             .replace("GROUP BY u.id ORDER BY", "GROUP BY u.id ORDER BY"))
-    rows_sql=rows_sql.replace("u.must_change_password,", "u.must_change_password,u.first_login_at,u.last_login_at,")
+    rows_sql=rows_sql.replace("u.must_change_password,", "u.must_change_password,u.first_login_at,u.last_login_at,u.first_name,u.last_name,u.phone,")
     rows=allrows(rows_sql,(school_id(),))
     return render_template('list.html',title='Utilisateurs',columns=['Matricule','Nom','E-mail','Profil','Classe / cours attribués'],rows=[(x['matricule'],x['name'],x['email'],x['role'],x['class_names'] if x['role']=='etudiant' else x['teacher_courses'] or '—') for x in rows],form='people',classes=classes,years=years,courses=courses,user_rows=rows,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(school_id(),))})
 
