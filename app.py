@@ -1169,6 +1169,7 @@ def people():
         if role not in ('etudiant','enseignant','parent','administratif'):abort(400)
         name=request.form.get('name','').strip()
         email=request.form.get('email','').strip().lower()
+        phone=request.form.get('phone','').strip()[:40]
         if not name or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400)
         class_id=request.form.get('class_id','').strip()
         if role=='etudiant':
@@ -1191,7 +1192,7 @@ def people():
             c.execute('BEGIN IMMEDIATE')
             try:
                 matricule=requested_matricule(c,school_id(),role,request.form.get('matricule'))
-                uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role,matricule,must_change_password) VALUES (?,?,?,?,?,?,1)',(school_id(),name,email,generate_password_hash(password),role,matricule)).lastrowid
+                uid=c.execute('INSERT INTO users(school_id,name,email,password_hash,role,matricule,phone,must_change_password) VALUES (?,?,?,?,?,?,?,1)',(school_id(),name,email,generate_password_hash(password),role,matricule,phone)).lastrowid
             except (ValueError,DBIntegrityError) as exc:
                 flash(str(exc),'error')
                 return redirect(url_for('people'))
