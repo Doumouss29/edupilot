@@ -1145,7 +1145,7 @@ def edit_person_details(uid):
     last=request.form.get('last_name','').strip()
     email=request.form.get('email','').strip().lower()
     phone=request.form.get('phone','').strip()
-    if not first or not last or len(first)>120 or len(last)>120 or len(phone)>40 or not re.fullmatch(r'[^\\s@]+@[^\\s@]+\\.[^\\s@]+',email):
+    if not first or not last or len(first)>120 or len(last)>120 or len(phone)>40 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):
         flash('Veuillez renseigner un nom, un prénom et un e-mail valide. Le contact est facultatif.','error')
         return redirect(url_for('people'))
     if one('SELECT id FROM users WHERE school_id=? AND LOWER(email)=? AND id<>?',(school_id(),email,uid)):
