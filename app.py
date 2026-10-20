@@ -1136,6 +1136,31 @@ def edit_person_matricule(uid):
         flash(str(exc),'error')
     return redirect(url_for('people'))
 
+@app.post('/people/<int:uid>/edit')
+@roles('admin','administratif')
+def edit_person_details(uid):
+    user=one('SELECT id,role FROM users WHERE id=? AND school_id=?',(uid,school_id()))
+    if not user or user['role']=='superadmin':abort(404)
+    first=request.form.get('first_name','').strip()
+    last=request.form.get('last_name','').strip()
+    email=request.form.get('email','').strip().lower()
+    phone=request.form.get('phone','').strip()
+    if not first or not last or len(first)>120 or len(last)>120 or len(phone)>40 or not re.fullmatch(r'[^\\s@]+@[^\\s@]+\\.[^\\s@]+',email):
+        flash('Veuillez renseigner un nom, un prénom et un e-mail valide. Le contact est facultatif.','error')
+        return redirect(url_for('people'))
+    if one('SELECT id FROM users WHERE school_id=? AND LOWER(email)=? AND id<>?',(school_id(),email,uid)):
+        flash('Cette adresse e-mail est déjà utilisée dans cet établissement.','error')
+        return redirect(url_for('people'))
+    try:
+        execute('UPDATE users SET first_name=?,last_name=?,name=?,email=?,phone=? WHERE id=? AND school_id=?',
+                (first,last,(first+' '+last).strip(),email,phone,uid,school_id()))
+    except DBIntegrityError:
+        flash('Impossible de modifier ce compte : adresse e-mail déjà utilisée.','error')
+        return redirect(url_for('people'))
+    audit('person.details_updated',str(uid))
+    flash('Informations utilisateur enregistrées.','success')
+    return redirect(url_for('people'))
+
 @app.route('/people',methods=['GET','POST'])
 @roles('admin','administratif')
 def people():
