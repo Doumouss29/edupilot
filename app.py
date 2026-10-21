@@ -1159,13 +1159,12 @@ def edit_person_page(uid):
 def edit_person_details(uid):
     user=one('SELECT id,role,matricule FROM users WHERE id=? AND school_id=?',(uid,school_id()))
     if not user or user['role']=='superadmin':abort(404)
-    first=request.form.get('first_name','').strip()
-    last=request.form.get('last_name','').strip()
+    name=request.form.get('name','').strip()
     email=request.form.get('email','').strip().lower()
     phone=request.form.get('phone','').strip()
     matricule=request.form.get('matricule','').strip()
-    if not first or not last or len(first)>120 or len(last)>120 or len(phone)>40 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):
-        flash('Veuillez renseigner un nom, un prénom et un e-mail valide. Le contact est facultatif.','error')
+    if not name or len(name)>240 or len(phone)>40 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):
+        flash('Veuillez renseigner un nom complet et un e-mail valide. Le contact est facultatif.','error')
         return redirect(url_for('people'))
     if one('SELECT id FROM users WHERE school_id=? AND LOWER(email)=? AND id<>?',(school_id(),email,uid)):
         flash('Cette adresse e-mail est déjà utilisée dans cet établissement.','error')
@@ -1179,8 +1178,8 @@ def edit_person_details(uid):
                     raise ValueError('Matricule déjà attribué')
             else:
                 matricule=user['matricule']
-            c.execute('UPDATE users SET first_name=?,last_name=?,name=?,email=?,phone=?,matricule=? WHERE id=? AND school_id=?',
-                      (first,last,(first+' '+last).strip(),email,phone,matricule,uid,school_id))
+            c.execute('UPDATE users SET name=?,first_name=NULL,last_name=NULL,email=?,phone=?,matricule=? WHERE id=? AND school_id=?',
+                      (name,email,phone,matricule,uid,school_id))
     except (DBIntegrityError,ValueError) as exc:
         flash(f'Impossible de modifier ce compte : {exc}','error')
         return redirect(url_for('people'))
