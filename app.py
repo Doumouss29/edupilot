@@ -1136,6 +1136,13 @@ def edit_person_matricule(uid):
         flash(str(exc),'error')
     return redirect(url_for('people'))
 
+@app.get('/people/<int:uid>/edit')
+@roles('admin','administratif')
+def edit_person_page(uid):
+    user=one('SELECT * FROM users WHERE id=? AND school_id=?',(uid,school_id()))
+    if not user or user['role']=='superadmin':abort(404)
+    return render_template('person_edit.html',person=user)
+
 @app.post('/people/<int:uid>/edit')
 @roles('admin','administratif')
 def edit_person_details(uid):
