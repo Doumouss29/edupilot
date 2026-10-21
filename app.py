@@ -1141,7 +1141,18 @@ def edit_person_matricule(uid):
 def edit_person_page(uid):
     user=one('SELECT * FROM users WHERE id=? AND school_id=?',(uid,school_id()))
     if not user or user['role']=='superadmin':abort(404)
-    return render_template('person_edit.html',person=user)
+    # Legacy/imported accounts may have only users.name populated.
+    first=(user['first_name'] or '').strip()
+    last=(user['last_name'] or '').strip()
+    if not first and not last:
+        display=(user['name'] or '').strip()
+        parts=display.split()
+        if len(parts)>1:
+            first=' '.join(parts[:-1])
+            last=parts[-1]
+        else:
+            first=display
+    return render_template('person_edit.html',person=user,edit_first_name=first,edit_last_name=last)
 
 @app.post('/people/<int:uid>/edit')
 @roles('admin','administratif')
