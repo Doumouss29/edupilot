@@ -6,8 +6,8 @@
 <form method="post" action="{{ url_for('edit_person_details',uid=person.id) }}" class="modern-form">
 <input type="hidden" name="csrf" value="{{csrf}}">
 <label>Matricule<input name="matricule" value="{{person.matricule or ''}}" maxlength="40" required {% if me.role!='admin' %}readonly{% endif %}></label>
-<label>Prénom<input name="first_name" value="{{person.first_name or ''}}" maxlength="120" required></label>
-<label>Nom<input name="last_name" value="{{person.last_name or ''}}" maxlength="120" required></label>
+<label>Prénom<input name="first_name" value="{{edit_first_name}}" maxlength="120" required></label>
+<label>Nom<input name="last_name" value="{{edit_last_name}}" maxlength="120" required></label>
 <label>E-mail<input name="email" value="{{person.email}}" type="email" required></label>
 <label>Contact (facultatif)<input name="phone" value="{{person.phone or ''}}" type="tel" maxlength="40"></label>
 <p class="muted">Nom affiché actuellement : {{person.name}}. Pour les comptes importés, renseignez correctement le prénom et le nom.</p>
