@@ -1987,6 +1987,25 @@ def declare(lid):
     audit('lesson.declared',str(lid)+':'+status)
     flash('Séance déclarée.','success');return redirect(url_for('planning'))
 
+@app.post('/lessons/<int:lid>/delete')
+@roles('admin','administratif')
+def delete_lesson(lid):
+    """Correct a planning mistake: remove an unstarted, unhistorized lesson."""
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        lesson=editable_lesson_row(c,lid)
+        if not lesson:abort(404)
+        # Never erase a lesson already started or carrying pedagogic records.
+        lesson_start=datetime.datetime.fromisoformat(lesson['starts_at'])
+        now_abidjan=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).replace(tzinfo=None)
+        if lesson_start<=now_abidjan or not lesson_editable(c,lesson):
+            flash('Suppression impossible : séance commencée ou avec historique. Utilisez Annuler si elle ne doit pas avoir lieu.','error')
+            return redirect(url_for('planning'))
+        c.execute('DELETE FROM lessons WHERE id=? AND school_id=?',(lid,school_id()))
+    audit('lesson.deleted_planning_error',str(lid))
+    flash('Séance supprimée du planning. Elle ne figurera pas comme annulée.','success')
+    return redirect(url_for('planning'))
+
 @app.post('/lessons/<int:lid>/cancel')
 @roles('enseignant','admin','administratif')
 def cancel_lesson(lid):
