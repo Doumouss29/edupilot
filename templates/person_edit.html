@@ -7,8 +7,9 @@
 <input type="hidden" name="csrf" value="{{csrf}}">
 <label>Matricule<input name="matricule" value="{{person.matricule or ''}}" maxlength="40" required {% if me.role!='admin' %}readonly{% endif %}></label>
 <label>Nom et prénom<input name="name" value="{{person.name or ''}}" maxlength="240" required></label>
-<label>E-mail<input name="email" value="{{person.email}}" type="email" required></label>
+<label>E-mail{% if person.role=='enseignant' %} (facultatif tant que le compte n’est pas activé){% endif %}<input name="email" value="{{'' if person.email.endswith('@pending-teacher.edupilot.invalid') else person.email}}" type="email" {% if person.role!='enseignant' %}required{% endif %}></label>
 <label>Contact (facultatif)<input name="phone" value="{{person.phone or ''}}" type="tel" maxlength="40"></label>
+{% if person.role=='enseignant' and person.email.endswith('@pending-teacher.edupilot.invalid') %}<p class="muted">L’enseignant n’a pas encore d’accès. Dès qu’une adresse e-mail sera enregistrée, une invitation d’activation sera envoyée automatiquement.</p>{% endif %}
 <p class="muted">Le nom complet est repris tel qu'il a été enregistré lors de la création ou de l'importation.</p>
 <div class="form-actions"><a href="{{url_for('people')}}" class="btn outline">Annuler</a><button type="submit" class="btn primary">Enregistrer les modifications</button></div>
 </form>
