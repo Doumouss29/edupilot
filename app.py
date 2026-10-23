@@ -391,8 +391,8 @@ def event_recipients(course_ids=(),teacher_ids=(),include_management=True,includ
         recipients.update(r['id'] for r in managers)
     return sorted(recipients)
 
-def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True):
-    recipients=event_recipients(course_ids,teacher_ids,include_parents=include_parents)
+def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True,include_management=True):
+    recipients=event_recipients(course_ids,teacher_ids,include_management=include_management,include_parents=include_parents)
     # No duplicate notification to the user who performed the operation.
     actor=current_user()
     if actor:
@@ -1830,7 +1830,7 @@ def planning():
                     return redirect(url_for('planning'))
                 cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room))
                 created.append(cur.lastrowid)
-        notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']])
+        notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']],include_management=False)
         audit('lesson.created',','.join(str(x) for x in created))
         session['planning_result']={'ok':True,'text':f'{len(created)} séance(s) ajoutée(s) au planning. Vous pouvez choisir une nouvelle date sans ressaisir le cours.'}
         flash(f'{len(created)} séance(s) ajoutée(s) au planning.','success')
