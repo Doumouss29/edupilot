@@ -303,7 +303,7 @@ def send_brevo_email(address,subject,message,school_id=None,recipient_user_id=No
 def send_account_link(uid,purpose='activation'):
     """Émet un lien à usage unique, valable 48 h pour activation, 30 min pour réinitialisation."""
     user=one('SELECT u.id,u.name,u.email,u.active,u.role,u.school_id,s.name school_name FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.id=?',(uid,))
-    if not user or not user['active']:return False
+    if not user or not user['active'] or is_pending_teacher_email(user['email']):return False
     token=secrets.token_urlsafe(32)
     token_hash=hashlib.sha256(token.encode()).hexdigest()
     expiration=datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(minutes=30 if purpose=='reset' else 48*60)
@@ -1157,10 +1157,11 @@ def edit_person_page(uid):
 @app.post('/people/<int:uid>/edit')
 @roles('admin','administratif')
 def edit_person_details(uid):
-    user=one('SELECT id,role,matricule FROM users WHERE id=? AND school_id=?',(uid,school_id()))
+    user=one('SELECT id,role,matricule,email FROM users WHERE id=? AND school_id=?',(uid,school_id()))
     if not user or user['role']=='superadmin':abort(404)
     name=request.form.get('name','').strip()
-    email=request.form.get('email','').strip().lower()
+    entered_email=request.form.get('email','').strip().lower()
+    email=entered_email or (user['email'] if user['role']=='enseignant' and is_pending_teacher_email(user['email']) else '')
     phone=request.form.get('phone','').strip()
     matricule=request.form.get('matricule','').strip()
     if not name or len(name)>240 or len(phone)>40 or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):
@@ -1183,6 +1184,9 @@ def edit_person_details(uid):
     except (DBIntegrityError,ValueError) as exc:
         flash(f'Impossible de modifier ce compte : {exc}','error')
         return redirect(url_for('people'))
+    if user['role']=='enseignant' and is_pending_teacher_email(user['email']) and entered_email:
+        sent=create_invite(uid)
+        flash('Adresse enregistrée. '+('Invitation d’activation envoyée.' if sent else 'Invitation non envoyée : vérifiez le service e-mail et utilisez « Envoyer l’accès ».'),'success' if sent else 'error')
     audit('person.details_updated',str(uid))
     flash('Informations utilisateur enregistrées.','success')
     return redirect(url_for('people'))
@@ -1196,7 +1200,9 @@ def people():
         name=request.form.get('name','').strip()
         email=request.form.get('email','').strip().lower()
         phone=request.form.get('phone','').strip()[:40]
-        if not name or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400)
+        if not name or (not email and role!='enseignant') or (email and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email)):abort(400)
+        pending_teacher=(role=='enseignant' and not email)
+        if pending_teacher:email='teacher-'+secrets.token_hex(16)+PENDING_TEACHER_EMAIL_SUFFIX
         class_id=request.form.get('class_id','').strip()
         if role=='etudiant':
             if not class_id or not has_school('classes',class_id):
@@ -1228,8 +1234,11 @@ def people():
                 c.execute('INSERT INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school_id(),uid,int(class_id),clazz['year_id']))
         if course_ids:assign_courses_to_teacher(uid,course_ids)
         audit('person.created',email)
-        sent=create_invite(uid)
-        flash('Compte créé. '+('Lien d’activation envoyé par e-mail.' if sent else 'Invitation non envoyée : vérifiez la configuration Brevo.'),'success' if sent else 'error')
+        sent=create_invite(uid) if not pending_teacher else False
+        if pending_teacher:
+            flash('Enseignant créé sans e-mail. Affectez ses cours maintenant ; ajoutez son adresse plus tard dans Modifier pour envoyer son invitation.','success')
+        else:
+            flash('Compte créé. '+('Lien d’activation envoyé par e-mail.' if sent else 'Invitation non envoyée : vérifiez la configuration Brevo.'),'success' if sent else 'error')
         return redirect(url_for('people'))
     users=scoped('SELECT * FROM users WHERE school_id=? ORDER BY role,name')
     classes=scoped('SELECT id,name,year_id FROM classes WHERE school_id=? ORDER BY name')
@@ -1411,6 +1420,10 @@ def people_import():
     audit('students.imported',str(len(hashes)))
     flash(f'{len(hashes)} étudiants importés et inscrits dans '+(selected_class['name'] if selected_class else 'leurs classes')+'. Invitations disponibles via l’action d’envoi groupé.','success')
     return redirect(url_for('people'))
+
+PENDING_TEACHER_EMAIL_SUFFIX='@pending-teacher.edupilot.invalid'
+def is_pending_teacher_email(email):
+    return bool(email) and str(email).lower().endswith(PENDING_TEACHER_EMAIL_SUFFIX)
 
 def create_invite(uid):
     return send_account_link(uid,'activation')
