@@ -1837,7 +1837,7 @@ def planning():
         session['planning_result']={'ok':True,'text':f'{len(created)} séance(s) ajoutée(s) au planning. Vous pouvez choisir une nouvelle date sans ressaisir le cours.'}
         flash(f'{len(created)} séance(s) ajoutée(s) au planning.','success')
         return redirect(url_for('planning'))
-    query='''SELECT l.*,c.name course_name,cl.name class_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id WHERE l.school_id=?'''
+    query='''SELECT l.*,c.name course_name,cl.name class_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id WHERE l.school_id=? AND l.hidden_from_planning=0'''
     args=[school_id()]
     if u['role']=='enseignant' or (u['role']=='admin' and request.args.get('mine')=='1'):
         query+=' AND l.teacher_id=?';args.append(u['id'])
