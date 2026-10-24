@@ -1180,7 +1180,7 @@ def edit_person_details(uid):
             else:
                 matricule=user['matricule']
             c.execute('UPDATE users SET name=?,first_name=NULL,last_name=NULL,email=?,phone=?,matricule=? WHERE id=? AND school_id=?',
-                      (name,email,phone,matricule,uid,school_id))
+                      (name,email,phone,matricule,uid,school_id()))
     except (DBIntegrityError,ValueError) as exc:
         flash(f'Impossible de modifier ce compte : {exc}','error')
         return redirect(url_for('people'))
