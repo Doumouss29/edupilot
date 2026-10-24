@@ -119,7 +119,8 @@ if DB_ENGINE == 'sqlite':
         if name not in columns:c.execute(f'ALTER TABLE users ADD COLUMN {name} {definition}')
     for table, additions in {'courses':[('coefficient','REAL NOT NULL DEFAULT 1')],
         'assessments':[('attachment_name','TEXT'),('attachment_blob','BLOB'),('attachment_mime','TEXT')],
-        'grades':[('comment', "TEXT DEFAULT ''")]}.items():
+        'grades':[('comment', "TEXT DEFAULT ''")],
+        'lessons':[('hidden_from_planning','INTEGER NOT NULL DEFAULT 0')]}.items():
         existing_columns={x['name'] for x in c.execute(f'PRAGMA table_info({table})')}
         for column,definition in additions:
             if column not in existing_columns:c.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
@@ -133,6 +134,7 @@ if DB_ENGINE == 'sqlite':
 if DB_ENGINE == 'postgresql':
     with db() as c:
         c.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TEXT')
+        c.execute('ALTER TABLE lessons ADD COLUMN IF NOT EXISTS hidden_from_planning INTEGER NOT NULL DEFAULT 0')
 
 MATRICULE_PROFILES = {'etudiant': 'ETU', 'enseignant': 'ENS', 'administratif': 'ADM', 'admin': 'DIR', 'parent': 'PAR'}
 
@@ -2006,6 +2008,17 @@ def delete_lesson(lid):
     flash('Séance supprimée du planning. Elle ne figurera pas comme annulée.','success')
     return redirect(url_for('planning'))
 
+@app.post('/lessons/<int:lid>/hide-cancelled')
+@roles('admin','administratif')
+def hide_cancelled_lesson(lid):
+    lesson=one('SELECT id,status FROM lessons WHERE school_id=? AND id=?',(school_id(),lid))
+    if not lesson:abort(404)
+    if lesson['status']!='annulee':abort(400,'Seules les séances annulées peuvent être retirées du calendrier')
+    execute('UPDATE lessons SET hidden_from_planning=1 WHERE id=? AND school_id=? AND status=?',(lid,school_id(),'annulee'))
+    audit('lesson.cancelled_hidden_from_planning',str(lid))
+    flash('Séance annulée retirée du calendrier. Son historique reste conservé.','success')
+    return redirect(url_for('planning'))
+
 @app.post('/lessons/<int:lid>/cancel')
 @roles('enseignant','admin','administratif')
 def cancel_lesson(lid):
@@ -2648,7 +2661,7 @@ def attendance_save(lid):
 def planning_json():
     u=current_user()
     if u['role']=='superadmin':abort(403)
-    sql='''SELECT l.id,l.starts_at,l.ends_at,l.status,l.room,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=?'''; args=[school_id()]
+    sql='''SELECT l.id,l.starts_at,l.ends_at,l.status,l.room,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? AND l.hidden_from_planning=0'''; args=[school_id()]
     if u['role']=='enseignant' or (u['role']=='admin' and request.args.get('mine')=='1'):
         sql+=' AND l.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
