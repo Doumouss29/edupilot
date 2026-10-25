@@ -142,6 +142,13 @@ with db() as c:
         school_id INTEGER NOT NULL, teacher_id INTEGER NOT NULL,
         week_start TEXT NOT NULL, sent_at TEXT NOT NULL,
         PRIMARY KEY(school_id,teacher_id,week_start))""")
+    # Preserve already-sent weeks when upgrading from per-school digests.
+    c.execute("""INSERT INTO teacher_weekly_email_by_address(email,week_start,sent_at)
+        SELECT LOWER(u.email), d.week_start, MIN(d.sent_at)
+        FROM teacher_weekly_email d JOIN users u ON u.id=d.teacher_id AND u.school_id=d.school_id
+        WHERE u.email IS NOT NULL AND u.email<>''
+        GROUP BY LOWER(u.email),d.week_start
+        ON CONFLICT(email,week_start) DO NOTHING""")
 
 # Additive migration: preserve existing first-login history on both engines.
 if DB_ENGINE == 'postgresql':
