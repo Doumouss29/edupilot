@@ -130,6 +130,13 @@ if DB_ENGINE == 'sqlite':
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_name','LMurbs')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('support_phone','+2250711124359')")
     c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('powered_by','Propulsé par LMurbs')")
+# Weekly teacher schedule digests: one email per teacher and academic week.
+with db() as c:
+    c.execute("""CREATE TABLE IF NOT EXISTS teacher_weekly_email (
+        school_id INTEGER NOT NULL, teacher_id INTEGER NOT NULL,
+        week_start TEXT NOT NULL, sent_at TEXT NOT NULL,
+        PRIMARY KEY(school_id,teacher_id,week_start))""")
+
 # Additive migration: preserve existing first-login history on both engines.
 if DB_ENGINE == 'postgresql':
     with db() as c:
@@ -393,6 +400,56 @@ def event_recipients(course_ids=(),teacher_ids=(),include_management=True,includ
                             AND role IN ('admin','administratif')""",(sid,))
         recipients.update(r['id'] for r in managers)
     return sorted(recipients)
+
+def teacher_week_bounds(day):
+    monday=day-datetime.timedelta(days=day.weekday())
+    return monday,monday+datetime.timedelta(days=7)
+
+
+def send_teacher_weekly_schedule(teacher_id,school,week_start=None):
+    """One consolidated email per ISO week; never mail a pending-address teacher."""
+    today=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()
+    monday,end=teacher_week_bounds(week_start or today)
+    user=one("SELECT id,name,email,role,active FROM users WHERE id=? AND school_id=?",(teacher_id,school))
+    if not user or not user['active'] or user['role'] not in ('enseignant','admin') or is_pending_teacher_email(user['email']):return False
+    items=allrows("""SELECT l.starts_at,l.ends_at,c.name course,cl.name class_name,l.room
+        FROM lessons l JOIN courses c ON c.id=l.course_id
+        JOIN classes cl ON cl.id=c.class_id
+        WHERE l.school_id=? AND l.teacher_id=?
+          AND l.status='programmee' AND l.starts_at>=? AND l.starts_at<?
+        ORDER BY l.starts_at""",(school,teacher_id,monday.isoformat(),end.isoformat()))
+    if not items:return False
+    # Reserve a week atomically; concurrent cron/processes cannot double-send.
+    with db() as c:
+        claim=c.execute("""INSERT INTO teacher_weekly_email(school_id,teacher_id,week_start,sent_at)
+            VALUES (?,?,?,?) ON CONFLICT(school_id,teacher_id,week_start) DO NOTHING""",
+            (school,teacher_id,monday.isoformat(),datetime.datetime.now(datetime.timezone.utc).isoformat()))
+        if claim.rowcount!=1:return False
+    lines=[]
+    for item in items:
+        start=datetime.datetime.fromisoformat(item['starts_at'])
+        end_time=datetime.datetime.fromisoformat(item['ends_at'])
+        lines.append(f"- {start.strftime('%d/%m/%Y %H:%M')}–{end_time.strftime('%H:%M')} : {item['course']} — {item['class_name']}"+(f" — {item['room']}" if item['room'] else ''))
+    body=(f"Bonjour {user['name']},\\n\\nVoici votre planning du {monday.strftime('%d/%m/%Y')} au {(end-datetime.timedelta(days=1)).strftime('%d/%m/%Y')} (heures d'Abidjan) :\\n\\n"
+          +'\\n'.join(lines)+"\\n\\nRetrouvez le planning à jour sur https://edupilot.ci/planning. Les modifications restent notifiées dans EduPilot.\\n")
+    if send_brevo_email(user['email'],'EduPilot — Votre planning hebdomadaire',body,school,teacher_id):
+        return True
+    # Allow retry if Brevo failed.
+    execute('DELETE FROM teacher_weekly_email WHERE school_id=? AND teacher_id=? AND week_start=?',
+            (school,teacher_id,monday.isoformat()))
+    return False
+
+
+def send_all_teacher_weekly_schedules():
+    """Called by an explicit server-side cron, never by an HTTP request."""
+    today=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()
+    teachers=allrows("""SELECT DISTINCT l.school_id,l.teacher_id FROM lessons l
+        JOIN users u ON u.id=l.teacher_id AND u.school_id=l.school_id
+        WHERE l.status='programmee' AND u.active=1
+        AND l.starts_at>=? AND l.starts_at<?""",
+        (teacher_week_bounds(today)[0].isoformat(),teacher_week_bounds(today)[1].isoformat()))
+    return sum(bool(send_teacher_weekly_schedule(x['teacher_id'],x['school_id'],today)) for x in teachers)
+
 
 def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True,include_management=True,skip_teacher_email=False):
     recipients=event_recipients(course_ids,teacher_ids,include_management=include_management,include_parents=include_parents)
