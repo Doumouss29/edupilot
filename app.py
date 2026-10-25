@@ -443,12 +443,14 @@ def send_teacher_weekly_schedule(teacher_id,school,week_start=None):
 def send_all_teacher_weekly_schedules():
     """Called by an explicit server-side cron, never by an HTTP request."""
     today=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()
+    target_day=today+datetime.timedelta(days=1) if today.weekday()==6 else today
+    monday,end=teacher_week_bounds(target_day)
     teachers=allrows("""SELECT DISTINCT l.school_id,l.teacher_id FROM lessons l
         JOIN users u ON u.id=l.teacher_id AND u.school_id=l.school_id
         WHERE l.status='programmee' AND u.active=1
         AND l.starts_at>=? AND l.starts_at<?""",
-        (teacher_week_bounds(today)[0].isoformat(),teacher_week_bounds(today)[1].isoformat()))
-    return sum(bool(send_teacher_weekly_schedule(x['teacher_id'],x['school_id'],today)) for x in teachers)
+        (monday.isoformat(),end.isoformat()))
+    return sum(bool(send_teacher_weekly_schedule(x['teacher_id'],x['school_id'],target_day)) for x in teachers)
 
 
 def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True,include_management=True,skip_teacher_email=False):
