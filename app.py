@@ -1242,7 +1242,7 @@ def people():
         else:
             flash('Compte créé. '+('Lien d’activation envoyé par e-mail.' if sent else 'Invitation non envoyée : vérifiez la configuration Brevo.'),'success' if sent else 'error')
         return redirect(url_for('people'))
-    users=scoped('SELECT * FROM users WHERE school_id=? ORDER BY role,name')
+    users=scoped('SELECT * FROM users WHERE school_id=? ORDER BY LOWER(name),id')
     classes=scoped('SELECT id,name,year_id FROM classes WHERE school_id=? ORDER BY name')
     years=scoped('SELECT id,label FROM years WHERE school_id=? ORDER BY label DESC')
     courses=scoped('SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? ORDER BY cl.name,c.name')
@@ -1255,7 +1255,7 @@ def people():
                      (SELECT GROUP_CONCAT(c.name||' ('||cl2.name||')',', ') FROM courses c JOIN classes cl2 ON cl2.id=c.class_id WHERE c.teacher_id=u.id AND c.school_id=u.school_id) teacher_courses
                   FROM users u LEFT JOIN enrollments e ON e.student_id=u.id AND e.school_id=u.school_id
                   LEFT JOIN classes cl ON cl.id=e.class_id
-                  WHERE u.school_id=? GROUP BY u.id ORDER BY u.role,u.name"""
+                  WHERE u.school_id=? GROUP BY u.id ORDER BY LOWER(u.name),u.id"""
     if DB_ENGINE == 'postgresql':
         rows_sql = (rows_sql
             .replace("GROUP_CONCAT(DISTINCT cl.name)", "STRING_AGG(DISTINCT cl.name, ',')")
@@ -1628,7 +1628,7 @@ def courses():
         if teacher:execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,datetime.date.today().isoformat()))
         audit('course.created',name);return redirect(url_for('courses'))
     rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
-    return render_template('courses_manage.html',courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin')"))
+    return render_template('courses_manage.html',courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') ORDER BY LOWER(name),id"))
 
 @app.post('/courses/bulk')
 @roles('admin','administratif')
@@ -1756,7 +1756,7 @@ def course_edit(cid):
             notify_event([cid],'Changement d’enseignant pour le cours '+name+'. '+str(moved)+' séance(s) future(s) réattribuée(s).','/planning',teacher_ids=[item['teacher_id'],int(teacher) if teacher else None])
         audit('course.updated',str(cid));flash(f'Cours mis à jour. {moved} séance(s) future(s) synchronisée(s) ; historique conservé.','success')
         return redirect(url_for('courses'))
-    return render_template('edit_academic.html',kind='course',item=item,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') AND active=1"))
+    return render_template('edit_academic.html',kind='course',item=item,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') AND active=1 ORDER BY LOWER(name),id"))
 
 @app.route('/planning',methods=['GET','POST'])
 @login_required
