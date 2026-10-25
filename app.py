@@ -324,7 +324,7 @@ def send_account_link(uid,purpose='activation'):
     # Ne pas enregistrer les URL contenant un jeton dans les notifications internes.
     return sent
 
-def notify(ids,message,href=''):
+def notify(ids,message,href='',skip_email_ids=()):
     # Persist first: an external push or email error cannot erase an internal alert.
     sid=school_id()
     candidate=set(ids)
@@ -353,6 +353,7 @@ def notify(ids,message,href=''):
                 except Exception as exc:app.logger.warning('Échec push: %s',type(exc).__name__)
         except ImportError:app.logger.warning('Module pywebpush indisponible')
     for uid in recipients:
+        if uid in skip_email_ids:continue
         user=one('SELECT email FROM users WHERE id=? AND school_id=?',(uid,sid))
         if user:send_brevo_email(user['email'],'EduPilot — Nouvelle notification',message,sid,uid)
 
@@ -393,14 +394,14 @@ def event_recipients(course_ids=(),teacher_ids=(),include_management=True,includ
         recipients.update(r['id'] for r in managers)
     return sorted(recipients)
 
-def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True,include_management=True):
+def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True,include_management=True,skip_teacher_email=False):
     recipients=event_recipients(course_ids,teacher_ids,include_management=include_management,include_parents=include_parents)
     # No duplicate notification to the user who performed the operation.
     actor=current_user()
     if actor:
         recipients=[uid for uid in recipients if uid!=actor['id']]
     if recipients:
-        notify(recipients,message,href)
+        notify(recipients,message,href,skip_email_ids=teacher_ids if skip_teacher_email else ())
 
 
 @app.template_filter('statut_seance')
@@ -1833,7 +1834,7 @@ def planning():
                     return redirect(url_for('planning'))
                 cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room))
                 created.append(cur.lastrowid)
-        notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']],include_management=False)
+        notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']],include_management=False,skip_teacher_email=True)
         audit('lesson.created',','.join(str(x) for x in created))
         session['planning_result']={'ok':True,'text':f'{len(created)} séance(s) ajoutée(s) au planning. Vous pouvez choisir une nouvelle date sans ressaisir le cours.'}
         flash(f'{len(created)} séance(s) ajoutée(s) au planning.','success')
