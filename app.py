@@ -1626,9 +1626,10 @@ def courses():
         except ValueError:abort(400,'Coefficient matière invalide')
         cid=execute('INSERT INTO courses(school_id,class_id,name,code,planned_minutes,teacher_id,coefficient) VALUES (?,?,?,?,?,?,?)',(school_id(),cl,name,request.form.get('code',''),int(float(request.form.get('hours',20))*60),teacher,coefficient))
         if teacher:execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,datetime.date.today().isoformat()))
+        session[f'course_create_class_{school_id()}_{current_user()["id"]}']=str(cl)
         audit('course.created',name);return redirect(url_for('courses'))
     rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
-    return render_template('courses_manage.html',courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') ORDER BY LOWER(name),id"))
+    return render_template('courses_manage.html',selected_class_id=session.get(f'course_create_class_{school_id()}_{current_user()["id"]}', ''),courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') ORDER BY LOWER(name),id"))
 
 @app.post('/courses/bulk')
 @roles('admin','administratif')
