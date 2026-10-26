@@ -5,6 +5,31 @@ application SQL statements have passed PostgreSQL compatibility tests.
 """
 import os
 from contextlib import contextmanager
+from threading import Lock
+
+_pool = None
+_pool_lock = Lock()
+
+def _get_pool():
+    """Bound DB connections instead of opening a new socket for every SQL query."""
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                from psycopg_pool import ConnectionPool
+                import psycopg
+                from psycopg.rows import dict_row
+                _pool = ConnectionPool(
+                    conninfo=psycopg.conninfo.make_conninfo(
+                        host=os.environ["PGHOST"], port=int(os.environ["PGPORT"]),
+                        dbname=os.environ["PGDATABASE"], user=os.environ["PGUSER"],
+                        password=os.environ["PGPASSWORD"],
+                        sslmode=os.getenv("PGSSLMODE", "require"), connect_timeout=12,
+                        options="-c search_path=" + os.environ["PGSCHEMA"]),
+                    kwargs={"row_factory": dict_row},
+                    min_size=0, max_size=3, timeout=12, open=True)
+    return _pool
+
 
 ALLOWED_SCHEMAS = ("edupilot_recette", "edupilot")
 
@@ -22,24 +47,20 @@ def pg_connection():
     mode = os.getenv("PGSSLMODE", "verify-full")
     if mode not in ("verify-full", "require"):
         raise RuntimeError("PostgreSQL TLS is required")
-    conn = psycopg.connect(
-        host=os.environ["PGHOST"],
-        port=int(os.environ["PGPORT"]),
-        dbname=os.environ["PGDATABASE"],
-        user=os.environ["PGUSER"],
-        password=os.environ["PGPASSWORD"],
-        sslmode=mode,
-        connect_timeout=12,
-        row_factory=dict_row,
-        options="-c search_path=" + os.environ["PGSCHEMA"],
-    )
-    with conn.cursor() as cur:
-        cur.execute("SELECT current_database(), current_schema()")
-        row = cur.fetchone()
-        if row["current_database"] != "edupilot" or row["current_schema"] != os.environ["PGSCHEMA"]:
-            conn.close()
-            raise RuntimeError("Unexpected PostgreSQL database/schema")
-    return CompatConnection(conn)
+    pool = _get_pool()
+    conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_database(), current_schema()")
+            row = cur.fetchone()
+            if row["current_database"] != "edupilot" or row["current_schema"] != os.environ["PGSCHEMA"]:
+                raise RuntimeError("Unexpected PostgreSQL database/schema")
+        conn.commit()
+        return CompatConnection(conn, pool)
+    except BaseException:
+        conn.rollback()
+        pool.putconn(conn)
+        raise
 
 class CompatCursor:
     def __init__(self, cursor, lastrowid=None):
@@ -54,8 +75,10 @@ class CompatCursor:
         return iter(self.cursor)
 
 class CompatConnection:
-    def __init__(self, connection):
+    def __init__(self, connection, pool=None):
         self.raw = connection
+        self._pool = pool
+        self._closed = False
     def execute(self, statement, args=()):
         import re
         from postgres_sql import placeholders
@@ -83,7 +106,12 @@ class CompatConnection:
     def rollback(self):
         self.raw.rollback()
     def close(self):
-        self.raw.close()
+        if self._closed:return
+        self._closed = True
+        if self._pool is not None:
+            self._pool.putconn(self.raw)
+        else:
+            self.raw.close()
 
 @contextmanager
 def rehearsal_db():
