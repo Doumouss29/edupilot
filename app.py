@@ -120,7 +120,8 @@ if DB_ENGINE == 'sqlite':
     for table, additions in {'courses':[('coefficient','REAL NOT NULL DEFAULT 1')],
         'assessments':[('attachment_name','TEXT'),('attachment_blob','BLOB'),('attachment_mime','TEXT')],
         'grades':[('comment', "TEXT DEFAULT ''")],
-        'lessons':[('hidden_from_planning','INTEGER NOT NULL DEFAULT 0')]}.items():
+        'lessons':[('hidden_from_planning','INTEGER NOT NULL DEFAULT 0')],
+        'classes':[('video_url','TEXT')]}.items():
         existing_columns={x['name'] for x in c.execute(f'PRAGMA table_info({table})')}
         for column,definition in additions:
             if column not in existing_columns:c.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
@@ -155,6 +156,7 @@ if DB_ENGINE == 'postgresql':
     with db() as c:
         c.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TEXT')
         c.execute('ALTER TABLE lessons ADD COLUMN IF NOT EXISTS hidden_from_planning INTEGER NOT NULL DEFAULT 0')
+        c.execute('ALTER TABLE classes ADD COLUMN IF NOT EXISTS video_url TEXT')
 
 MATRICULE_PROFILES = {'etudiant': 'ETU', 'enseignant': 'ENS', 'administratif': 'ADM', 'admin': 'DIR', 'parent': 'PAR'}
 
@@ -1577,6 +1579,23 @@ def classes():
         return redirect(url_for('classes'))
     return render_template('list.html',title='Classes',columns=['Classe','Régime','Parents','Détails','Modifier'],rows=[(x['name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif',{'link':url_for('class_details',cid=x['id']),'label':'Détails'},{'link':url_for('class_edit',cid=x['id']),'label':'Modifier'}) for x in scoped('SELECT * FROM classes WHERE school_id=?')],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?') if one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled'] else [])
 
+@app.get('/mes-visios')
+@roles('admin','administratif','enseignant','etudiant')
+def video_classes():
+    u=current_user()
+    query="""SELECT cl.id,cl.name,cl.video_url,y.label academic_year
+        FROM classes cl JOIN years y ON y.id=cl.year_id
+        WHERE cl.school_id=? AND cl.video_url IS NOT NULL AND cl.video_url<>''"""
+    args=[school_id()]
+    if u['role']=='enseignant':
+        query+=" AND EXISTS (SELECT 1 FROM courses c WHERE c.school_id=cl.school_id AND c.class_id=cl.id AND c.teacher_id=?)"
+        args.append(u['id'])
+    elif u['role']=='etudiant':
+        query+=" AND EXISTS (SELECT 1 FROM enrollments e WHERE e.school_id=cl.school_id AND e.class_id=cl.id AND e.student_id=? AND e.year_id=cl.year_id)"
+        args.append(u['id'])
+    query+=' ORDER BY LOWER(cl.name),cl.id'
+    return render_template('video_classes.html',classes=allrows(query,args))
+
 @app.route('/classes/<int:cid>/edit',methods=['GET','POST'])
 @roles('admin','administratif')
 def class_edit(cid):
@@ -1590,7 +1609,12 @@ def class_edit(cid):
         enabled=one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled']
         if not enabled:campus=None
         if campus and not has_school('campuses',campus):abort(403)
-        execute('UPDATE classes SET name=?,cycle=?,campus_id=?,parents_enabled=? WHERE id=? AND school_id=?',(name,cycle,campus,int('parents_enabled' in request.form),cid,school_id()))
+        video_url=request.form.get('video_url','').strip()
+        parsed=urlsplit(video_url) if video_url else None
+        if video_url and (len(video_url)>1000 or parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password):
+            flash('Le lien de visioconférence doit être une URL HTTPS valide.','error')
+            return redirect(url_for('class_edit',cid=cid))
+        execute('UPDATE classes SET name=?,cycle=?,campus_id=?,parents_enabled=?,video_url=? WHERE id=? AND school_id=?',(name,cycle,campus,int('parents_enabled' in request.form),video_url or None,cid,school_id()))
         audit('class.updated',str(cid));flash('Classe modifiée.','success')
         return redirect(url_for('classes'))
     return render_template('edit_academic.html',kind='class',item=item,campuses=scoped('SELECT * FROM campuses WHERE school_id=?') if one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled'] else [])
