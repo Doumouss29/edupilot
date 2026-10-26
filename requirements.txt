@@ -7,3 +7,4 @@ pywebpush>=2.0,<3
 qrcode[pil]>=8,<9
 
 psycopg[binary]>=3.2,<4
+psycopg-pool>=3.2,<4
