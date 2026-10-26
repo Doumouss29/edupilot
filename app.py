@@ -2744,6 +2744,29 @@ def planning_json():
     elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND e.class_id=c.class_id AND p.active=1 AND cl.parents_enabled=1)';args.append(u['id'])
     return jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':lesson_utc_iso(x['starts_at']),'end':lesson_utc_iso(x['ends_at']),'extendedProps':{'status':x['status'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
 
+# Controlled response when managed PostgreSQL is saturated or temporarily unavailable.
+# Avoid error templates here: rendering templates may itself require a DB connection.
+if DB_ENGINE == 'postgresql':
+    from psycopg_pool import PoolTimeout
+
+    @app.errorhandler(PoolTimeout)
+    @app.errorhandler(psycopg.OperationalError)
+    def postgres_temporarily_unavailable(error):
+        app.logger.error('PostgreSQL indisponible (%s)', type(error).__name__)
+        if request.path.startswith('/api/'):
+            response=jsonify({'error':'Service temporairement indisponible. Réessayez dans quelques instants.'})
+        else:
+            response=Response(
+                '<!doctype html><html lang="fr"><meta charset="utf-8"><title>EduPilot — Chargement</title>'
+                '<body><h2>EduPilot est momentanément très sollicité.</h2>'
+                '<p>Veuillez réessayer dans quelques instants. Vos données sont conservées.</p>'
+                '<p><a href="">Réessayer</a></p></body></html>',
+                content_type='text/html; charset=utf-8')
+        response.status_code=503
+        response.headers['Retry-After']='3'
+        response.headers['Cache-Control']='no-store'
+        return response
+
 @app.errorhandler(403)
 def denied(e):return render_template('error.html',message='Accès non autorisé.'),403
 @app.errorhandler(404)
