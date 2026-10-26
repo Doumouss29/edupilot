@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block heading %}Cours en visioconférence{% endblock %}
+{% block content %}
+<div class="section-intro"><span class="eyebrow">COURS EN LIGNE</span><h2>Rejoindre une visioconférence</h2><p>Accédez aux salles virtuelles des classes auxquelles vous êtes affecté.</p></div>
+<section class="panel">
+{% if classes %}
+<div class="table-scroll"><table><thead><tr><th>Classe</th><th>Année scolaire</th><th>Rejoindre</th></tr></thead><tbody>
+{% for cl in classes %}
+<tr><td>{{cl.name}}</td><td>{{cl.academic_year}}</td><td><a class="btn primary sm" href="{{cl.video_url}}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Rejoindre le cours en visio</a></td></tr>
+{% endfor %}
+</tbody></table></div>
+{% else %}<p class="muted">Aucun lien de visioconférence n'est disponible pour vos classes pour le moment.</p>{% endif %}
+{% if me.role in ('admin','administratif') %}<p class="muted">Pour ajouter ou modifier un lien, ouvrez Classes, puis Modifier sur la classe concernée.</p><a class="btn outline" href="{{url_for('classes')}}">Gérer les classes</a>{% endif %}
+</section>
+{% endblock %}
