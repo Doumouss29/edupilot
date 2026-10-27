@@ -1,11 +1,53 @@
 {% extends 'base.html' %}
-{% block heading %}Détails de la classe{% endblock %}
+{% block heading %}Fiche de classe{% endblock %}
 {% block content %}
-<div class="section-intro"><span class="eyebrow">ESPACE PÉDAGOGIQUE</span><h2>{{clazz.name}}</h2><p>Année {{clazz.academic_year}} · {{clazz.cycle|capitalize}}{% if clazz.campus_name %} · {{clazz.campus_name}}{% endif %}</p></div>
-<div class="page-actions"><a href="{{url_for('classes')}}" class="btn outline">← Retour aux classes</a>{% if me.role in ('admin','administratif') %}<a href="{{url_for('class_edit',cid=clazz.id)}}" class="btn primary">Modifier la classe</a>{% endif %}</div>
-<div class="class-detail-summary"><div class="kpi"><small>Étudiants inscrits</small><strong>{{students|length}}</strong></div><div class="kpi"><small>Enseignants</small><strong>{{teachers|length}}</strong></div><div class="kpi"><small>Cours</small><strong>{{courses|length}}</strong></div></div>
-<section class="panel"><div class="panel-title"><h3>Étudiants de la classe</h3><span class="tag">{{students|length}} inscrit(s)</span></div><div class="table-scroll"><table><thead><tr><th>Matricule</th><th>Étudiant</th><th>E-mail</th><th>Statut</th></tr></thead><tbody>{% for st in students %}<tr><td>{{st.matricule or '—'}}</td><td><b>{{st.name}}</b></td><td>{{st.email}}</td><td><span class="tag {{'success' if st.active else 'danger'}}">{{'Actif' if st.active else 'Suspendu'}}</span></td></tr>{% else %}<tr><td colspan="4" class="muted">Aucun étudiant inscrit dans cette classe.</td></tr>{% endfor %}</tbody></table></div></section>
-<div class="two-col class-detail-columns">
-<section class="panel"><div class="panel-title"><h3>Enseignants affectés</h3></div><div class="table-scroll"><table><thead><tr><th>Matricule</th><th>Nom</th><th>E-mail</th></tr></thead><tbody>{% for t in teachers %}<tr><td>{{t.matricule or '—'}}</td><td><b>{{t.name}}</b></td><td>{{t.email}}</td></tr>{% else %}<tr><td colspan="3" class="muted">Aucun enseignant affecté.</td></tr>{% endfor %}</tbody></table></div></section>
-<section class="panel"><div class="panel-title"><h3>Cours de la classe</h3></div><div class="table-scroll"><table><thead><tr><th>Cours</th><th>Enseignant</th><th>Volume</th></tr></thead><tbody>{% for c in courses %}<tr><td><b>{{c.name}}</b><br><small>{{c.code}}</small></td><td>{% if c.teacher_name %}{{c.teacher_matricule or '—'}} — {{c.teacher_name}}{% else %}Non affecté{% endif %}</td><td>{{(c.planned_minutes/60)|round(1)}} h</td></tr>{% else %}<tr><td colspan="3" class="muted">Aucun cours enregistré.</td></tr>{% endfor %}</tbody></table></div></section>
-</div>{% endblock %}
+<div class="class-page">
+  <div class="class-hero">
+    <div class="class-hero-main">
+      <span class="class-eyebrow">ESPACE PÉDAGOGIQUE · FICHE DE CLASSE</span>
+      <h2>{{clazz.name}}</h2>
+      <div class="class-meta"><span>📅 {{clazz.academic_year}}</span><span>◷ {{clazz.cycle|capitalize}}</span>{% if clazz.campus_name %}<span>⌂ {{clazz.campus_name}}</span>{% endif %}</div>
+    </div>
+    <div class="class-hero-actions">
+      <a href="{{url_for('classes')}}" class="btn outline">← Toutes les classes</a>
+      {% if me.role in ('admin','administratif') %}<a href="{{url_for('class_edit',cid=clazz.id)}}" class="btn primary">✎ Modifier la classe</a>{% endif %}
+    </div>
+  </div>
+
+  <div class="class-kpi-grid" aria-label="Indicateurs de la classe">
+    <div class="class-kpi"><span class="class-kpi-icon students">♙</span><div><small>Étudiants inscrits</small><strong>{{students|length}}</strong><span>Apprenants dans la classe</span></div></div>
+    <div class="class-kpi"><span class="class-kpi-icon teachers">▣</span><div><small>Enseignants</small><strong>{{teachers|length}}</strong><span>Intervenants affectés</span></div></div>
+    <div class="class-kpi"><span class="class-kpi-icon courses">▤</span><div><small>Cours</small><strong>{{courses|length}}</strong><span>Unités d'enseignement</span></div></div>
+    <div class="class-kpi"><span class="class-kpi-icon hours">◷</span><div><small>Volume prévu</small><strong>{{((courses|sum(attribute='planned_minutes'))/60)|round(1)}} <em>h</em></strong><span>Total des cours</span></div></div>
+  </div>
+
+  <section class="class-workspace" aria-label="Données de la classe">
+    <div class="class-tabs" role="tablist" aria-label="Rubriques de la classe">
+      <button type="button" class="class-tab active" role="tab" id="tab-students" aria-controls="panel-students" aria-selected="true" data-class-tab="students">Étudiants <span>{{students|length}}</span></button>
+      <button type="button" class="class-tab" role="tab" id="tab-teachers" aria-controls="panel-teachers" aria-selected="false" tabindex="-1" data-class-tab="teachers">Enseignants <span>{{teachers|length}}</span></button>
+      <button type="button" class="class-tab" role="tab" id="tab-courses" aria-controls="panel-courses" aria-selected="false" tabindex="-1" data-class-tab="courses">Cours <span>{{courses|length}}</span></button>
+    </div>
+
+    <section class="class-tab-panel" id="panel-students" role="tabpanel" aria-labelledby="tab-students">
+      <div class="class-panel-heading"><div><h3>Étudiants de la classe</h3><p>Liste des apprenants et état de leurs comptes.</p></div><label class="class-search"><span class="sr-only">Rechercher un étudiant</span><input type="search" placeholder="Rechercher un étudiant…" data-class-search="students"></label></div>
+      <div class="table-scroll"><table class="class-table" data-class-table="students"><thead><tr><th>Matricule</th><th>Étudiant</th><th>E-mail</th><th>Statut</th></tr></thead><tbody>{% for st in students %}<tr data-class-row><td><span class="class-code">{{st.matricule or '—'}}</span></td><td><strong>{{st.name}}</strong></td><td class="class-mail">{{st.email}}</td><td><span class="tag {{'success' if st.active else 'danger'}}">{{'Actif' if st.active else 'Suspendu'}}</span></td></tr>{% else %}<tr><td colspan="4" class="muted">Aucun étudiant inscrit dans cette classe.</td></tr>{% endfor %}</tbody></table></div><p class="class-no-results" data-class-empty="students" hidden>Aucun étudiant ne correspond à votre recherche.</p>
+    </section>
+    <section class="class-tab-panel" id="panel-teachers" role="tabpanel" aria-labelledby="tab-teachers" hidden>
+      <div class="class-panel-heading"><div><h3>Enseignants affectés</h3><p>Équipe pédagogique intervenant dans cette classe.</p></div><label class="class-search"><span class="sr-only">Rechercher un enseignant</span><input type="search" placeholder="Rechercher un enseignant…" data-class-search="teachers"></label></div>
+      <div class="table-scroll"><table class="class-table" data-class-table="teachers"><thead><tr><th>Matricule</th><th>Enseignant</th><th>E-mail</th></tr></thead><tbody>{% for t in teachers %}<tr data-class-row><td><span class="class-code">{{t.matricule or '—'}}</span></td><td><strong>{{t.name}}</strong></td><td class="class-mail">{{t.email}}</td></tr>{% else %}<tr><td colspan="3" class="muted">Aucun enseignant affecté.</td></tr>{% endfor %}</tbody></table></div><p class="class-no-results" data-class-empty="teachers" hidden>Aucun enseignant ne correspond à votre recherche.</p>
+    </section>
+    <section class="class-tab-panel" id="panel-courses" role="tabpanel" aria-labelledby="tab-courses" hidden>
+      <div class="class-panel-heading"><div><h3>Cours de la classe</h3><p>Matières, intervenants et volumes horaires prévus.</p></div><label class="class-search"><span class="sr-only">Rechercher un cours</span><input type="search" placeholder="Rechercher un cours…" data-class-search="courses"></label></div>
+      <div class="table-scroll"><table class="class-table" data-class-table="courses"><thead><tr><th>Cours</th><th>Enseignant</th><th>Volume prévu</th></tr></thead><tbody>{% for c in courses %}<tr data-class-row><td><strong>{{c.name}}</strong><small class="class-course-code">{{c.code or '—'}}</small></td><td>{% if c.teacher_name %}<strong>{{c.teacher_name}}</strong><small class="class-course-code">{{c.teacher_matricule or '—'}}</small>{% else %}<span class="tag">Non affecté</span>{% endif %}</td><td><span class="class-hour-chip">{{(c.planned_minutes/60)|round(1)}} h</span></td></tr>{% else %}<tr><td colspan="3" class="muted">Aucun cours enregistré.</td></tr>{% endfor %}</tbody></table></div><p class="class-no-results" data-class-empty="courses" hidden>Aucun cours ne correspond à votre recherche.</p>
+    </section>
+  </section>
+</div>
+<script>
+(()=>{
+const tabs=[...document.querySelectorAll('[data-class-tab]')];
+function activate(tab,focus=false){tabs.forEach(b=>{const active=b===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1;document.getElementById('panel-'+b.dataset.classTab).hidden=!active});if(focus)tab.focus()}
+tabs.forEach((tab,index)=>{tab.addEventListener('click',()=>activate(tab));tab.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();let next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(index+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;activate(tabs[next],true)})});
+document.querySelectorAll('[data-class-search]').forEach(input=>input.addEventListener('input',()=>{const key=input.dataset.classSearch;const q=input.value.toLocaleLowerCase('fr').trim();let shown=0;document.querySelectorAll('[data-class-table="'+key+'"] [data-class-row]').forEach(row=>{const match=row.textContent.toLocaleLowerCase('fr').includes(q);row.hidden=!match;if(match)shown++});document.querySelector('[data-class-empty="'+key+'"]').hidden=!q||shown>0}));
+})();
+</script>
+{% endblock %}
