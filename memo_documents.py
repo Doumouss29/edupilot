@@ -2,7 +2,8 @@
 import io
 from decimal import Decimal, ROUND_HALF_UP
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, Inches
+from reportlab.lib.utils import ImageReader
 from docxtpl import DocxTemplate
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -31,13 +32,16 @@ def context_for_memo(meta,teacher,course,clazz,hours,rate,tax):
         adresse=meta.get("address",""),
     )
 
-def build_docx(ctx,template=None):
+def build_docx(ctx,template=None,logo=None):
     if template:
         doc=DocxTemplate(io.BytesIO(template))
         doc.render(ctx,autoescape=True)
         out=io.BytesIO();doc.save(out);return out.getvalue()
     doc=Document()
     sec=doc.sections[0];sec.header.paragraphs[0].text=ctx["entete"] or ctx["etablissement"]
+    if logo:
+        try:doc.add_picture(io.BytesIO(logo),width=Inches(1.0))
+        except Exception:pass
     doc.add_heading(ctx["etablissement"],0)
     doc.add_paragraph(ctx["adresse"])
     doc.add_paragraph("MEMO INTERNE N° "+ctx["reference"])
@@ -56,9 +60,16 @@ def build_docx(ctx,template=None):
     doc.add_paragraph(ctx["signataire_1"]+"                                  "+ctx["signataire_2"])
     out=io.BytesIO();doc.save(out);return out.getvalue()
 
-def build_pdf(ctx):
+def build_pdf(ctx,logo=None):
     buf=io.BytesIO();pdf=canvas.Canvas(buf,pagesize=A4)
     width,height=A4;y=height-55
+    if logo:
+        try:
+            img=ImageReader(io.BytesIO(logo));iw,ih=img.getSize()
+            w=min(75,iw);h=w*ih/iw
+            if h>60:w=w*60/h;h=60
+            pdf.drawImage(img,width-55-w,height-35-h,w,h,mask='auto')
+        except Exception:pass
     def line(value,bold=False,size=10,space=9):
         nonlocal y
         pdf.setFont("Helvetica-Bold" if bold else "Helvetica",size)
