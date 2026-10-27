@@ -1784,7 +1784,8 @@ def memo_settings_page():
         action=request.form.get('action')
         if action=='settings':
             fields=['institution','header','address','city','recipient','signer1','signer2','budget','subject','currency']
-            values=[request.form.get(f,'').strip()[:500] for f in fields]
+            previous_cfg=one('SELECT * FROM memo_settings WHERE school_id=?',(sid,))
+            values=[request.form.get(f,previous_cfg[f] if previous_cfg else ('FCFA' if f=='currency' else '')).strip()[:500] for f in fields]
             try:
                 rate=float(request.form.get('default_rate','0'));tax=float(request.form.get('tax_rate','0'))
                 if not 0<=rate<=100000000 or not 0<=tax<=100:raise ValueError()
