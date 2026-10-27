@@ -3,6 +3,7 @@
 <form method="post" class="modern-form"><input type="hidden" name="csrf" value="{{csrf}}">
 <label>Nom<input name="name" value="{{item.name}}" required maxlength="180"></label>
 {% if kind=='class' %}
+<label>Filière<select name="filiere_id" required>{% for f in filieres %}<option value="{{f.id}}" {% if item.filiere_id==f.id %}selected{% endif %}>{{f.name}}</option>{% endfor %}</select></label>
 <label>Régime<select name="cycle"><option value="semestre" {% if item.cycle=='semestre' %}selected{% endif %}>Semestre</option><option value="trimestre" {% if item.cycle=='trimestre' %}selected{% endif %}>Trimestre</option></select></label>
 <label>Campus<select name="campus_id"><option value="">Sans affectation</option>{% for c in campuses %}<option value="{{c.id}}" {% if item.campus_id==c.id %}selected{% endif %}>{{c.name}}</option>{% endfor %}</select></label>
 <label>Lien de visioconférence de la classe (facultatif)<input type="url" name="video_url" maxlength="1000" pattern="https://.*" placeholder="https://meet.google.com/..." value="{{item.video_url or ''}}"></label><small class="muted">Accessible depuis EduPilot aux enseignants affectés à cette classe et aux étudiants inscrits. Utilisez un lien HTTPS (Meet, Teams, Zoom…). Laissez vide pour le retirer.</small>
