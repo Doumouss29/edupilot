@@ -290,7 +290,12 @@ def safety():
 
 @app.context_processor
 def globals_template():
-    return dict(me=current_user(),csrf=session.get('csrf',''),appname='EduPilot',support_name=setting('support_name','LMurbs'),support_phone=setting('support_phone','+2250711124359'),powered_by=setting('powered_by','Propulsé par LMurbs'),school_brand=one('SELECT id,name,logo_mime,campus_enabled FROM schools WHERE id=?',(school_id(),)) if school_id() else None, platform_logo_enabled=bool(one('SELECT id FROM platform_branding WHERE id=1')))
+    user=current_user()
+    menu_filieres=[]
+    if user and user['role'] in ('admin','administratif') and user['school_id']:
+        menu_filieres=allrows("""SELECT f.id,f.name FROM filieres f
+            WHERE f.school_id=? ORDER BY LOWER(f.name),f.id""",(user['school_id'],))
+    return dict(menu_filieres=menu_filieres,me=user,csrf=session.get('csrf',''),appname='EduPilot',support_name=setting('support_name','LMurbs'),support_phone=setting('support_phone','+2250711124359'),powered_by=setting('powered_by','Propulsé par LMurbs'),school_brand=one('SELECT id,name,logo_mime,campus_enabled FROM schools WHERE id=?',(school_id(),)) if school_id() else None, platform_logo_enabled=bool(one('SELECT id FROM platform_branding WHERE id=1')))
 
 def current_user():
     uid=session.get('uid')
