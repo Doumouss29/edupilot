@@ -1,8 +1,9 @@
 import io
 import unittest
+import shutil
 from decimal import Decimal
 from docx import Document
-from memo_documents import context_for_memo, build_docx, build_pdf
+from memo_documents import context_for_memo, build_docx, pdf_from_docx
 
 class MemoDocumentTests(unittest.TestCase):
     def setUp(self):
@@ -25,7 +26,8 @@ class MemoDocumentTests(unittest.TestCase):
         self.assertIn('588 000',text)
         self.assertIn('Enseignant Test',text)
 
+    @unittest.skipUnless(shutil.which('soffice'), 'LibreOffice non installé')
     def test_pdf_generation(self):
-        self.assertTrue(build_pdf(self.ctx).startswith(b'%PDF-'))
+        self.assertTrue(pdf_from_docx(build_docx(self.ctx)).startswith(b'%PDF-'))
 
 if __name__=='__main__':unittest.main()
