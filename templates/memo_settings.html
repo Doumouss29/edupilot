@@ -20,5 +20,9 @@
 <form class="inline-form" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="action" value="template">
 <label>Nom du modèle<input name="name" maxlength="100" required placeholder="Ex. Mémo UFR"></label><label>Fichier .docx (2 Mo max)<input type="file" name="template" accept=".docx" required></label><button class="btn primary">Activer ce modèle</button>
 </form></section>
-<script>(()=>{const cl=document.getElementById('memo-class'),course=document.getElementById('memo-course');function update(){course.value='';for(const o of course.options){if(o.value)o.hidden=o.dataset.class!==cl.value}}cl.addEventListener('change',update);update()})()</script>
+{% if me.role=='admin' %}
+<section class="panel"><h3>Réinitialiser les mémos générés</h3><p class="muted">{{memo_count}} mémo(s) enregistré(s). La suppression est définitive et concerne uniquement votre établissement. Les tarifs, paramètres et modèles Word sont conservés.</p>
+<form method="post" id="delete-memos-form" class="inline-form"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="action" value="delete_all_memos"><label>Confirmation : saisir SUPPRIMER<input name="confirm" autocomplete="off" pattern="SUPPRIMER" required placeholder="SUPPRIMER"></label><button class="btn outline filiere-delete-button" type="submit" {% if not memo_count %}disabled{% endif %}>Supprimer les {{memo_count}} mémos</button></form></section>
+{% endif %}
+<script>(()=>{const remove=document.getElementById('delete-memos-form');if(remove)remove.addEventListener('submit',e=>{if(!confirm('Supprimer définitivement tous les mémos générés de cet établissement ? Cette action est irréversible.'))e.preventDefault()});const cl=document.getElementById('memo-class'),course=document.getElementById('memo-course');function update(){course.value='';for(const o of course.options){if(o.value)o.hidden=o.dataset.class!==cl.value}}cl.addEventListener('change',update);update()})()</script>
 {% endblock %}
