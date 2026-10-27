@@ -12,3 +12,4 @@ psycopg-pool>=3.2,<4
 python-docx>=1.1,<2
 docxtpl>=0.19,<1
 reportlab>=4.2,<5
+num2words>=0.5.13,<1
