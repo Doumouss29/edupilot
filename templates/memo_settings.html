@@ -2,13 +2,10 @@
 {% block heading %}Documents et mémos{% endblock %}
 {% block content %}
 <div class="section-intro"><span class="eyebrow">ADMINISTRATION</span><h2>Mémos d'honoraires</h2><p>Paramétrez votre établissement, les tarifs et un modèle Word. Chaque établissement conserve ses propres documents.</p></div>
-<section class="panel"><h3>Identité et paramètres du mémo</h3>
+<section class="panel"><h3>Paramètres de calcul</h3><p class="muted">Les textes, en-têtes, logos, signatures et emplacements sont définis directement dans votre modèle Word. EduPilot renseigne les variables automatiquement.</p>
 <form method="post" class="inline-form"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="action" value="settings">
-{% for field,label in [('institution','Nom de l’établissement'),('header','En-tête officiel'),('address','Adresse / téléphone'),('city','Ville'),('recipient','Destinataire'),('signer1','Premier signataire'),('signer2','Second signataire'),('budget','Imputation budgétaire'),('subject','Objet du mémo'),('currency','Devise')] %}
-<label>{{label}}<input name="{{field}}" value="{{cfg[field] if cfg else ('FCFA' if field=='currency' else '')}}" maxlength="500"></label>
-{% endfor %}
-<label>Taux horaire par défaut<input type="number" step="0.01" min="0" name="default_rate" value="{{cfg.default_rate if cfg else 0}}" required></label>
-<label>Prélèvement (%)<input type="number" step="0.01" min="0" max="100" name="tax_rate" value="{{cfg.tax_rate if cfg else 0}}" required></label>
+<label>Taux horaire par défaut (FCFA)<input type="number" step="0.01" min="0" name="default_rate" value="{{cfg.default_rate if cfg else 0}}" required></label>
+<label>Prélèvement fiscal (%)<input type="number" step="0.01" min="0" max="100" name="tax_rate" value="{{cfg.tax_rate if cfg else 0}}" required></label>
 <button class="btn primary">Enregistrer les paramètres</button></form></section>
 <section class="panel"><h3>Barème par classe ou cours</h3><p class="muted">Un tarif de cours prévaut sur celui de la classe, qui prévaut sur le tarif général.</p>
 <form method="post" class="inline-form"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="action" value="rate">
@@ -19,7 +16,7 @@
 {% if rates %}<div class="table-scroll"><table><thead><tr><th>Classe</th><th>Cours</th><th>Taux horaire</th></tr></thead><tbody>{% for r in rates %}<tr><td>{{r.class_name}}</td><td>{{r.course_name or 'Tous les cours'}}</td><td>{{r.hourly_rate}} FCFA / h</td></tr>{% endfor %}</tbody></table></div>{% endif %}
 </section>
 <section class="panel"><h3>Modèle Word personnalisé</h3><p>Modèle actif : <strong>{{tpl.name if tpl else 'Modèle EduPilot standard'}}</strong></p>
-<p class="muted">Vous pouvez téléverser un fichier .docx contenant des variables : <code>{% raw %}{{ enseignant }}, {{ cours }}, {{ classe }}, {{ volume_horaire }}, {{ tarif_horaire }}, {{ montant_net }}, {{ annee_academique }}, {{ reference }}, {{ date }}, {{ signataire_1 }}, {{ signataire_2 }}{% endraw %}</code>. Le PDF est maintenant converti directement depuis le Word généré, en conservant sa mise en page. Pour un rendu fidèle, privilégiez les polices courantes et vérifiez le premier aperçu PDF.</p>
+<p class="muted">Importez votre document Word avec sa mise en page (en-tête, logo, signatures). Variables disponibles : <code>{% raw %}{{ enseignant }}, {{ cours }}, {{ classe }}, {{ volume_horaire }}, {{ tarif_horaire }}, {{ montant_net }}, {{ annee_academique }}, {{ reference }}, {{ date }}, {{ signataire_1 }}, {{ signataire_2 }}{% endraw %}</code>. Le bouton « Voir » ouvre ce PDF. Le PDF est converti directement depuis le Word généré, en conservant sa mise en page. Pour un rendu fidèle, privilégiez les polices courantes et vérifiez le premier aperçu PDF.</p>
 <form class="inline-form" method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="action" value="template">
 <label>Nom du modèle<input name="name" maxlength="100" required placeholder="Ex. Mémo UFR"></label><label>Fichier .docx (2 Mo max)<input type="file" name="template" accept=".docx" required></label><button class="btn primary">Activer ce modèle</button>
 </form></section>
