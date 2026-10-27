@@ -1857,7 +1857,7 @@ def memo_create(cid):
         tax=Decimal(str(cfg['tax_rate']))
         if rate<0 or tax<0 or tax>100:raise ValueError()
     except (ValueError,InvalidOperation,TypeError):abort(400,'Valeurs financières invalides')
-    from memo_documents import context_for_memo,build_docx,build_pdf
+    from memo_documents import context_for_memo,build_docx,pdf_from_docx
     cfg_dict=dict(cfg)
     cfg_dict['date']=datetime.date.today().strftime('%d/%m/%Y')
     cfg_dict['reference']='MEMO-'+datetime.date.today().strftime('%Y%m%d')+'-'+secrets.token_hex(4).upper()
@@ -1867,7 +1867,7 @@ def memo_create(cid):
         school_logo_data=one('SELECT logo FROM schools WHERE id=?',(sid,))
         logo=bytes(school_logo_data['logo']) if school_logo_data and school_logo_data['logo'] else None
         word=build_docx(ctx,bytes(template['content']) if template else None,logo=logo)
-        pdf=build_pdf(ctx,logo=logo)
+        pdf=pdf_from_docx(word)
     except Exception:
         app.logger.exception('Erreur de génération du mémo')
         flash('Le modèle Word ne peut pas être généré. Vérifiez ses variables.','error')
