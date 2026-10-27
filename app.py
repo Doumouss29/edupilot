@@ -872,8 +872,6 @@ def dashboard():
     stats={'classes':len(classes),'courses':len(courses),'lessons':len(lessonlist),'total':total//60,'actual':round(actual/60,1),'percent':round(actual/total*100,1) if total else 0}
     return render_template('dashboard.html',stats=stats,classes=classes,events=upcoming,schools=[],courses=courses)
 
-@app.get('/schools')
-@roles('superadmin')
 def school_filiere_overview():
     rows=allrows("""SELECT f.school_id,f.name,
         COUNT(DISTINCT cl.id) classes,
@@ -887,6 +885,8 @@ def school_filiere_overview():
     return overview
 
 
+@app.get('/schools')
+@roles('superadmin')
 def schools():
     records=allrows('SELECT id,name,slug,plan,active,subscription_end,logo_mime FROM schools ORDER BY id DESC')
     counts=allrows("SELECT school_id,COUNT(*) n FROM users WHERE role IN ('admin','administratif') GROUP BY school_id")
