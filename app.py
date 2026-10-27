@@ -880,9 +880,11 @@ def dashboard():
 def school_filiere_overview():
     rows=allrows("""SELECT f.school_id,f.name,
         COUNT(DISTINCT cl.id) classes,
-        COUNT(DISTINCT e.student_id) students
+        COUNT(DISTINCT e.student_id) students,
+        COUNT(DISTINCT co.teacher_id) teachers
         FROM filieres f LEFT JOIN classes cl ON cl.filiere_id=f.id AND cl.school_id=f.school_id
         LEFT JOIN enrollments e ON e.class_id=cl.id AND e.school_id=f.school_id
+        LEFT JOIN courses co ON co.class_id=cl.id AND co.school_id=f.school_id
         GROUP BY f.school_id,f.id,f.name ORDER BY LOWER(f.name)""")
     overview={}
     for item in rows:
