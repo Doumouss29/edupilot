@@ -1655,7 +1655,7 @@ def classes():
         execute('INSERT INTO periods(school_id,class_id,name) VALUES (?,?,?)',(school_id(),cid,'Trimestre 1' if request.form.get('cycle')=='trimestre' else 'Semestre 1'))
         audit('class.created',name)
         return redirect(url_for('classes'))
-    return render_template('list.html',title='Classes',filieres=scoped('SELECT id,name FROM filieres WHERE school_id=? ORDER BY LOWER(name)'),columns=['Classe','Régime','Parents','Détails','Modifier'],rows=[(x['name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif',{'link':url_for('class_details',cid=x['id']),'label':'Détails'},{'link':url_for('class_edit',cid=x['id']),'label':'Modifier'}) for x in scoped('SELECT * FROM classes WHERE school_id=?')],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?') if one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled'] else [])
+    return render_template('list.html',title='Classes',filieres=scoped('SELECT id,name FROM filieres WHERE school_id=? ORDER BY LOWER(name)'),columns=['Classe','Filière','Régime','Parents','Détails','Modifier'],rows=[(x['name'],x['filiere_name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif',{'link':url_for('class_details',cid=x['id']),'label':'Détails'},{'link':url_for('class_edit',cid=x['id']),'label':'Modifier'}) for x in scoped('SELECT cl.*,f.name filiere_name FROM classes cl LEFT JOIN filieres f ON f.id=cl.filiere_id WHERE cl.school_id=? ORDER BY LOWER(f.name),LOWER(cl.name)')],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?') if one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled'] else [])
 
 @app.get('/mes-visios')
 @roles('admin','administratif','enseignant','etudiant')
