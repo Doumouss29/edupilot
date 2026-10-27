@@ -815,7 +815,7 @@ def dashboard():
     u=current_user()
     if u['role']=='superadmin':
         schools=allrows('SELECT s.*, (SELECT COUNT(*) FROM users u WHERE u.school_id=s.id) members FROM schools s')
-        return render_template('dashboard.html',schools=schools,stats=None,classes=[],events=[],today=datetime.date.today().isoformat(),base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
+        return render_template('dashboard.html',schools=schools,filiere_overview=school_filiere_overview(),stats=None,classes=[],events=[],today=datetime.date.today().isoformat(),base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
     if u['role']=='etudiant':
         # Week selection is server-side and restricted to this student's own enrollments.
         ref=request.args.get('week','')
@@ -869,12 +869,25 @@ def dashboard():
 
 @app.get('/schools')
 @roles('superadmin')
+def school_filiere_overview():
+    rows=allrows("""SELECT f.school_id,f.name,
+        COUNT(DISTINCT cl.id) classes,
+        COUNT(DISTINCT e.student_id) students
+        FROM filieres f LEFT JOIN classes cl ON cl.filiere_id=f.id AND cl.school_id=f.school_id
+        LEFT JOIN enrollments e ON e.class_id=cl.id AND e.school_id=f.school_id
+        GROUP BY f.school_id,f.id,f.name ORDER BY LOWER(f.name)""")
+    overview={}
+    for item in rows:
+        overview.setdefault(item['school_id'],[]).append(item)
+    return overview
+
+
 def schools():
     records=allrows('SELECT id,name,slug,plan,active,subscription_end,logo_mime FROM schools ORDER BY id DESC')
     counts=allrows("SELECT school_id,COUNT(*) n FROM users WHERE role IN ('admin','administratif') GROUP BY school_id")
     account_counts={r['school_id']:r['n'] for r in counts}
     admins=allrows("SELECT school_id,first_name,last_name,name,email,phone,role,active,must_change_password FROM users WHERE role IN ('admin','administratif') ORDER BY id DESC")
-    return render_template('schools.html',schools=records,admin_accounts=admins,account_counts=account_counts,today=datetime.date.today().isoformat(),base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
+    return render_template('schools.html',schools=records,filiere_overview=school_filiere_overview(),admin_accounts=admins,account_counts=account_counts,today=datetime.date.today().isoformat(),base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
 
 @app.get('/superadmin/users-report')
 @roles('superadmin')
