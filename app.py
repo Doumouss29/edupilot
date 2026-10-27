@@ -1600,8 +1600,6 @@ def forgot_password():
         return redirect(url_for('forgot_password'))
     return render_template('forgot_password.html')
 
-@app.route('/classes',methods=['GET','POST'])
-@roles('admin','administratif')
 @app.route('/filieres',methods=['GET','POST'])
 @roles('admin','administratif')
 def filieres():
@@ -1639,6 +1637,8 @@ def filiere_rename(fid):
     return redirect(url_for('filieres'))
 
 
+@app.route('/classes',methods=['GET','POST'])
+@roles('admin','administratif')
 def classes():
     if request.method=='POST':
         year=scoped('SELECT id FROM years WHERE school_id=? AND is_active=1 LIMIT 1')
