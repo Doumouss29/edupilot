@@ -62,6 +62,35 @@ def build_docx(ctx,template=None,logo=None):
     doc.add_paragraph(ctx["signataire_1"]+"                                  "+ctx["signataire_2"])
     out=io.BytesIO();doc.save(out);return out.getvalue()
 
+def pdf_from_docx(word_bytes):
+    """Render the *generated Word* with LibreOffice, preserving its document layout."""
+    import subprocess
+    import tempfile
+    from pathlib import Path
+    if not word_bytes or len(word_bytes)>15*1024*1024:
+        raise ValueError("Document Word vide ou trop volumineux")
+    with tempfile.TemporaryDirectory(prefix="edupilot-memo-") as folder:
+        root=Path(folder)
+        src=root/"memo.docx"
+        src.write_bytes(word_bytes)
+        profile=(root/"lo-profile").as_uri()
+        cmd=["/usr/bin/soffice", "-env:UserInstallation="+profile,
+             "--headless","--convert-to","pdf:writer_pdf_Export",
+             "--outdir",str(root),str(src)]
+        try:
+            result=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                                  timeout=60,check=False,env={"HOME":str(root),"LANG":"fr_FR.UTF-8","PATH":"/usr/bin:/bin"})
+        except (OSError,subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("Conversion Word vers PDF indisponible") from exc
+        target=root/"memo.pdf"
+        if result.returncode!=0 or not target.is_file():
+            raise RuntimeError("Conversion PDF échouée : "+result.stderr.decode("utf-8","replace")[:300])
+        pdf=target.read_bytes()
+        if not pdf.startswith(b"%PDF-"):
+            raise RuntimeError("Le convertisseur n'a pas produit un PDF valide")
+        return pdf
+
+
 def build_pdf(ctx,logo=None):
     buf=io.BytesIO();pdf=canvas.Canvas(buf,pagesize=A4)
     width,height=A4;y=height-55
