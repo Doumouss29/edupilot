@@ -12,6 +12,6 @@
 <script>
 (()=>{const f=document.getElementById('filiere-picker'),c=document.getElementById('class-picker'),box=document.getElementById('class-picker-box'),actions=document.getElementById('filiere-actions'),link=document.getElementById('class-open-link'),create=document.getElementById('filiere-create-class'),rename=document.getElementById('filiere-rename-form'),name=document.getElementById('filiere-rename-input');
 function updateFiliere(){const id=f.value;box.hidden=!id;actions.hidden=!id;c.value='';for(const o of c.options){if(o.value)o.hidden=o.dataset.filiere!==id;}link.hidden=true;if(id){create.href='{{url_for("classes")}}?filiere_id='+encodeURIComponent(id);rename.action='/filieres/'+encodeURIComponent(id)+'/rename';name.value=f.selectedOptions[0].textContent.replace(/ \(\d+ classes.*$/,'');}}
-c.addEventListener('change',()=>{link.hidden=!c.value;if(c.value)link.href='/classes/'+encodeURIComponent(c.value)+'/details';});f.addEventListener('change',updateFiliere);})();
+c.addEventListener('change',()=>{link.hidden=!c.value;if(c.value)link.href='/classes/'+encodeURIComponent(c.value)+'/details';});f.addEventListener('change',updateFiliere);const fid=new URLSearchParams(location.search).get('filiere_id');if(fid&&[...f.options].some(o=>o.value===fid)){f.value=fid;updateFiliere();}})();
 </script>
 {% endblock %}
