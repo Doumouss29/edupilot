@@ -16,6 +16,7 @@ class MemoDocumentTests(unittest.TestCase):
         self.assertEqual(self.ctx['montant_brut'],'600 000')
         self.assertEqual(self.ctx['prelevement'],'12 000')
         self.assertEqual(self.ctx['montant_net'],'588 000')
+        self.assertIn('cinq cent quatre-vingt-huit mille',self.ctx['montant_net_lettres'].lower())
 
     def test_standard_word_generation(self):
         data=build_docx(self.ctx)
