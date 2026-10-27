@@ -1849,7 +1849,7 @@ def memo_create(cid):
     if not cfg:flash('Configurez d’abord les paramètres des mémos.','error');return redirect(url_for('memo_settings_page'))
     from decimal import Decimal,InvalidOperation
     try:
-        hours=Decimal(request.form.get('hours',''))
+        hours=Decimal(str(course['planned_minutes']))/Decimal('60')
         if not Decimal('0')<hours<=Decimal('10000'):raise ValueError()
         selected_rate=one('SELECT hourly_rate FROM memo_rates WHERE school_id=? AND class_id=? AND course_id=?',(sid,cid,course_id))
         if not selected_rate:selected_rate=one('SELECT hourly_rate FROM memo_rates WHERE school_id=? AND class_id=? AND course_id IS NULL',(sid,cid))
@@ -1872,8 +1872,14 @@ def memo_create(cid):
         app.logger.exception('Erreur de génération du mémo')
         flash('Le modèle Word ne peut pas être généré. Vérifiez ses variables.','error')
         return redirect(url_for('memo_settings_page'))
-    mid=execute("""INSERT INTO teacher_memos(school_id,class_id,course_id,teacher_id,created_by,reference,hours,rate,tax_rate,context_json,docx_blob,pdf_blob)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",(sid,cid,course_id,teacher_id,current_user()['id'],ctx['reference'],str(hours),str(rate),str(tax),json.dumps(ctx,ensure_ascii=False),word,pdf))
+    previous=one('SELECT id FROM teacher_memos WHERE school_id=? AND class_id=? AND course_id=? AND teacher_id=? ORDER BY id DESC LIMIT 1',(sid,cid,course_id,teacher_id))
+    if previous:
+        mid=previous['id']
+        execute("""UPDATE teacher_memos SET created_by=?,created_at=CURRENT_TIMESTAMP,reference=?,hours=?,rate=?,tax_rate=?,context_json=?,docx_blob=?,pdf_blob=?
+                   WHERE id=? AND school_id=?""",(current_user()['id'],ctx['reference'],str(hours),str(rate),str(tax),json.dumps(ctx,ensure_ascii=False),word,pdf,mid,sid))
+    else:
+        mid=execute("""INSERT INTO teacher_memos(school_id,class_id,course_id,teacher_id,created_by,reference,hours,rate,tax_rate,context_json,docx_blob,pdf_blob)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",(sid,cid,course_id,teacher_id,current_user()['id'],ctx['reference'],str(hours),str(rate),str(tax),json.dumps(ctx,ensure_ascii=False),word,pdf))
     audit('memo.created',str(mid))
     flash('Mémo généré et enregistré.','success')
     return redirect(url_for('class_details',cid=cid))
