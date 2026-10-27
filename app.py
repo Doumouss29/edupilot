@@ -1644,6 +1644,22 @@ def filiere_rename(fid):
     return redirect(url_for('filieres'))
 
 
+@app.post('/filieres/<int:fid>/delete')
+@roles('admin','administratif')
+def filiere_delete(fid):
+    # Delete only empty filières from the active tenant; never cascade class history.
+    filiere=one('SELECT id,name FROM filieres WHERE id=? AND school_id=?',(fid,school_id()))
+    if not filiere:abort(404)
+    attached=one('SELECT COUNT(*) AS n FROM classes WHERE school_id=? AND filiere_id=?',(school_id(),fid))
+    if attached and attached['n']:
+        flash('Suppression impossible : déplacez ou supprimez d’abord les classes rattachées à cette filière.','error')
+        return redirect(url_for('filieres',filiere_id=fid))
+    execute('DELETE FROM filieres WHERE id=? AND school_id=?',(fid,school_id()))
+    audit('filiere.deleted',str(fid))
+    flash('Filière supprimée.','success')
+    return redirect(url_for('filieres'))
+
+
 @app.route('/classes',methods=['GET','POST'])
 @roles('admin','administratif')
 def classes():
