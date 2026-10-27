@@ -1844,19 +1844,11 @@ def memo_settings_page():
     memo_count=one('SELECT COUNT(*) AS n FROM teacher_memos WHERE school_id=?',(sid,))['n']
     return render_template('memo_settings.html',cfg=cfg,classes=classes,courses=courses,rates=rates,tpl=tpl,memo_count=memo_count)
 
-@app.post('/classes/<int:cid>/memos')
-@roles('admin','administratif')
-def memo_create(cid):
-    sid=school_id()
-    clazz=one("""SELECT cl.id,cl.name,y.label academic_year FROM classes cl JOIN years y ON y.id=cl.year_id
-                WHERE cl.id=? AND cl.school_id=?""",(cid,sid))
-    if not clazz:abort(404)
-    course_id=request.form.get('course_id');teacher_id=request.form.get('teacher_id')
-    course=one('SELECT id,name,planned_minutes,teacher_id FROM courses WHERE school_id=? AND class_id=? AND id=? AND teacher_id=?',(sid,cid,course_id,teacher_id))
-    teacher=one("SELECT id,name FROM users WHERE id=? AND school_id=? AND role IN ('enseignant','admin')",(teacher_id,sid))
-    if not course or not teacher:abort(403)
-    cfg=one('SELECT * FROM memo_settings WHERE school_id=?',(sid,))
-    if not cfg:flash('Configurez d’abord les paramètres des mémos.','error');return redirect(url_for('memo_settings_page'))
+def _generate_memo_course(sid,cid,clazz,course,teacher,cfg=None,template=None,logo=None):
+    """Generate and replace the current course memo; called by single and batch routes."""
+    course_id=course['id'];teacher_id=teacher['id']
+    cfg=cfg or one('SELECT * FROM memo_settings WHERE school_id=?',(sid,))
+    if not cfg:raise ValueError('Configurez les paramètres des mémos.')
     from decimal import Decimal,InvalidOperation
     try:
         hours=Decimal(str(course['planned_minutes']))/Decimal('60')
@@ -1872,16 +1864,16 @@ def memo_create(cid):
     cfg_dict['date']=datetime.date.today().strftime('%d/%m/%Y')
     cfg_dict['reference']='MEMO-'+datetime.date.today().strftime('%Y%m%d')+'-'+secrets.token_hex(4).upper()
     ctx=context_for_memo(cfg_dict,teacher,course,clazz,hours,rate,tax)
-    template=one('SELECT content FROM memo_templates WHERE school_id=? AND active=1 ORDER BY id DESC LIMIT 1',(sid,))
+    template=template if template is not None else one('SELECT content FROM memo_templates WHERE school_id=? AND active=1 ORDER BY id DESC LIMIT 1',(sid,))
     try:
-        school_logo_data=one('SELECT logo FROM schools WHERE id=?',(sid,))
-        logo=bytes(school_logo_data['logo']) if school_logo_data and school_logo_data['logo'] else None
+        if logo is None:
+            school_logo_data=one('SELECT logo FROM schools WHERE id=?',(sid,))
+            logo=bytes(school_logo_data['logo']) if school_logo_data and school_logo_data['logo'] else None
         word=build_docx(ctx,bytes(template['content']) if template else None,logo=logo)
         pdf=pdf_from_docx(word)
     except Exception:
         app.logger.exception('Erreur de génération du mémo')
-        flash('Le modèle Word ne peut pas être généré. Vérifiez ses variables.','error')
-        return redirect(url_for('memo_settings_page'))
+        raise RuntimeError('Le modèle Word ne peut pas être généré. Vérifiez ses variables.')
     previous=one('SELECT id FROM teacher_memos WHERE school_id=? AND class_id=? AND course_id=? AND teacher_id=? ORDER BY id DESC LIMIT 1',(sid,cid,course_id,teacher_id))
     if previous:
         mid=previous['id']
@@ -1891,8 +1883,26 @@ def memo_create(cid):
         mid=execute("""INSERT INTO teacher_memos(school_id,class_id,course_id,teacher_id,created_by,reference,hours,rate,tax_rate,context_json,docx_blob,pdf_blob)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",(sid,cid,course_id,teacher_id,current_user()['id'],ctx['reference'],str(hours),str(rate),str(tax),json.dumps(ctx,ensure_ascii=False),word,pdf))
     audit('memo.created',str(mid))
+    return mid
+
+@app.post('/classes/<int:cid>/memos')
+@roles('admin','administratif')
+def memo_create(cid):
+    sid=school_id()
+    clazz=one("""SELECT cl.id,cl.name,y.label academic_year FROM classes cl JOIN years y ON y.id=cl.year_id
+                WHERE cl.id=? AND cl.school_id=?""",(cid,sid))
+    if not clazz:abort(404)
+    course_id=request.form.get('course_id');teacher_id=request.form.get('teacher_id')
+    course=one('SELECT id,name,planned_minutes,teacher_id FROM courses WHERE school_id=? AND class_id=? AND id=? AND teacher_id=?',(sid,cid,course_id,teacher_id))
+    teacher=one("SELECT id,name FROM users WHERE id=? AND school_id=? AND role IN ('enseignant','admin')",(teacher_id,sid))
+    if not course or not teacher:abort(403)
+    try:
+        _generate_memo_course(sid,cid,clazz,course,teacher)
+    except (ValueError,RuntimeError) as exc:
+        flash(str(exc),'error')
+        return redirect(url_for('class_details',cid=cid,tab='teachers',teacher_id=teacher_id)+'#panel-teachers')
     flash('Mémo généré et enregistré.','success')
-    return redirect(url_for('class_details',cid=cid))
+    return redirect(url_for('class_details',cid=cid,tab='teachers',teacher_id=teacher_id)+'#panel-teachers')
 
 @app.get('/documents/memos/<int:mid>/<kind>')
 @roles('admin','administratif')
