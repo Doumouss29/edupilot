@@ -7,7 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py postgres_sql.py postgres_rehearsal.py teacher_schedule_digest.py /app/
+COPY app.py postgres_sql.py postgres_rehearsal.py teacher_schedule_digest.py memo_documents.py /app/
+RUN python -c "import memo_documents; print('Memo document module OK')"
 COPY templates/ /app/templates/
 COPY static/ /app/static/
 COPY scripts/ /app/scripts/
