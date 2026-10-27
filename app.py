@@ -1861,8 +1861,10 @@ def memo_create(cid):
     ctx=context_for_memo(cfg_dict,teacher,course,clazz,hours,rate,tax)
     template=one('SELECT content FROM memo_templates WHERE school_id=? AND active=1 ORDER BY id DESC LIMIT 1',(sid,))
     try:
-        word=build_docx(ctx,bytes(template['content']) if template else None)
-        pdf=build_pdf(ctx)
+        school_logo_data=one('SELECT logo FROM schools WHERE id=?',(sid,))
+        logo=bytes(school_logo_data['logo']) if school_logo_data and school_logo_data['logo'] else None
+        word=build_docx(ctx,bytes(template['content']) if template else None,logo=logo)
+        pdf=build_pdf(ctx,logo=logo)
     except Exception:
         app.logger.exception('Erreur de génération du mémo')
         flash('Le modèle Word ne peut pas être généré. Vérifiez ses variables.','error')
