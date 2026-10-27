@@ -542,3 +542,5 @@ img,video,iframe,canvas{max-width:100%}
 .memo-modal-buttons{display:flex;justify-content:flex-end;gap:9px;flex-wrap:wrap}
 body.memo-dialog-open{overflow:hidden}
 @media(max-width:650px){.memo-modal{padding:18px}.memo-modal-buttons .btn{flex:1}}
+
+.class-memo-bulk-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.class-memo-bulk-actions form{margin:0}.class-memo-bulk-actions .btn{white-space:nowrap;padding:9px 12px;font-size:12px}@media(max-width:720px){.class-memo-bulk-actions{width:100%}.class-memo-bulk-actions .btn{font-size:11px;padding:8px 10px}}
