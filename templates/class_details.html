@@ -34,12 +34,11 @@
     </section>
     <section class="class-tab-panel" id="panel-teachers" role="tabpanel" aria-labelledby="tab-teachers" hidden>
       <div class="class-panel-heading"><div><h3>Enseignants affectés</h3><p>Équipe pédagogique intervenant dans cette classe.</p></div><label class="class-search"><span class="sr-only">Rechercher un enseignant</span><input type="search" placeholder="Rechercher un enseignant…" data-class-search="teachers"></label></div>
-      <div class="table-scroll"><table class="class-table" data-class-table="teachers"><thead><tr><th>Matricule</th><th>Enseignant</th><th>E-mail</th><th>Mémos</th></tr></thead><tbody>{% for t in teachers %}<tr data-class-row><td><span class="class-code">{{t.matricule or '—'}}</span></td><td><strong>{{t.name}}</strong></td><td class="class-mail">{{t.email}}</td><td>
+      <div class="class-scroll-top" id="teacher-scroll-top" aria-label="Défilement horizontal des enseignants"><div id="teacher-scroll-spacer"></div></div>
+      <div class="table-scroll class-teacher-scroll" id="teacher-scroll"><table class="class-table class-teacher-table" data-class-table="teachers"><thead><tr><th>Matricule</th><th>Enseignant</th><th>E-mail</th><th>Mémos et actions</th></tr></thead><tbody>{% for t in teachers %}<tr data-class-row><td><span class="class-code">{{t.matricule or '—'}}</span></td><td><strong>{{t.name}}</strong></td><td class="class-mail">{{t.email}}</td><td class="memo-actions-cell">
 {% if me.role in ('admin','administratif') %}
-{% for m in memos if m.teacher_id==t.id %}
-<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><small>{{m.reference}}</small><a href="{{url_for('memo_download',mid=m.id,kind='pdf',view=1)}}" target="_blank" rel="noopener">Voir</a><a href="{{url_for('memo_download',mid=m.id,kind='pdf')}}">PDF</a><a href="{{url_for('memo_download',mid=m.id,kind='docx')}}">Word</a></div>
-{% else %}<small>Aucun mémo émis</small>{% endfor %}
-<details><summary class="btn outline sm">+ Générer un mémo</summary><form method="post" action="{{url_for('memo_create',cid=clazz.id)}}" style="display:grid;gap:8px;margin-top:10px;min-width:180px"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="teacher_id" value="{{t.id}}"><label>Cours<select name="course_id" required>{% for c in courses if c.teacher_id==t.id %}<option value="{{c.id}}">{{c.name}}</option>{% endfor %}</select></label><small>Le volume horaire est automatiquement repris du cours sélectionné.</small><button class="btn primary" type="submit">Créer le mémo</button></form></details>
+<div class="memo-action-list">{% for m in memos if m.teacher_id==t.id %}<div class="memo-action-item"><small title="{{m.reference}}">{{m.reference}}</small><div class="memo-action-buttons"><a class="btn outline sm" href="{{url_for('memo_download',mid=m.id,kind='pdf',view=1)}}" target="_blank" rel="noopener">Voir PDF</a><a class="btn outline sm" href="{{url_for('memo_download',mid=m.id,kind='pdf')}}">PDF</a><a class="btn outline sm" href="{{url_for('memo_download',mid=m.id,kind='docx')}}">Word</a></div></div>{% else %}<small class="muted">Aucun mémo émis</small>{% endfor %}
+<button type="button" class="btn primary sm memo-open" data-teacher-id="{{t.id}}" data-teacher-name="{{t.name}}" data-courses='{{courses|selectattr("teacher_id","equalto",t.id)|map(attribute="id")|list|tojson}}'>Générer / remplacer</button></div>
 {% else %}<small>Réservé à l’administration</small>{% endif %}</td></tr>{% else %}<tr><td colspan="4" class="muted">Aucun enseignant affecté.</td></tr>{% endfor %}</tbody></table></div><p class="class-no-results" data-class-empty="teachers" hidden>Aucun enseignant ne correspond à votre recherche.</p>
     </section>
     <section class="class-tab-panel" id="panel-courses" role="tabpanel" aria-labelledby="tab-courses" hidden>
@@ -48,9 +47,28 @@
     </section>
   </section>
 </div>
+{% if me.role in ('admin','administratif') %}
+<div class="memo-modal-backdrop" id="memo-backdrop" hidden>
+  <section class="memo-modal" role="dialog" aria-modal="true" aria-labelledby="memo-modal-title">
+    <div class="memo-modal-heading"><div><h3 id="memo-modal-title">Générer un mémo</h3><p id="memo-teacher-name"></p></div><button type="button" class="btn outline sm" id="memo-close" aria-label="Fermer">✕</button></div>
+    <form method="post" action="{{url_for('memo_create',cid=clazz.id)}}" class="memo-modal-form">
+      <input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="teacher_id" id="memo-teacher-id">
+      <label>Cours concerné<select name="course_id" id="memo-course-choice" required><option value="">Sélectionner un cours</option>{% for c in courses %}<option value="{{c.id}}" data-teacher="{{c.teacher_id}}">{{c.name}} — {{(c.planned_minutes/60)|round(1)}} h</option>{% endfor %}</select></label>
+      <p class="muted">Le volume prévu est repris automatiquement du cours. Une nouvelle génération remplace le mémo existant pour ce même cours.</p>
+      <div class="memo-modal-buttons"><button type="button" class="btn outline" id="memo-cancel">Annuler</button><button type="submit" class="btn primary">Générer le mémo</button></div>
+    </form>
+  </section>
+</div>
+{% endif %}
+
 <script>
 (()=>{
 const tabs=[...document.querySelectorAll('[data-class-tab]')];
+const dialog=document.getElementById('memo-backdrop'),choice=document.getElementById('memo-course-choice');
+if(dialog&&choice){const close=()=>{dialog.hidden=true;document.body.classList.remove('memo-dialog-open')};document.querySelectorAll('.memo-open').forEach(btn=>btn.addEventListener('click',()=>{document.getElementById('memo-teacher-id').value=btn.dataset.teacherId;document.getElementById('memo-teacher-name').textContent=btn.dataset.teacherName;choice.value='';let first='';for(const opt of choice.options){if(!opt.value)continue;opt.hidden=opt.dataset.teacher!==btn.dataset.teacherId;if(!opt.hidden&&!first)first=opt.value}choice.value=first;dialog.hidden=false;document.body.classList.add('memo-dialog-open');choice.focus()}));document.getElementById('memo-close').addEventListener('click',close);document.getElementById('memo-cancel').addEventListener('click',close);dialog.addEventListener('click',e=>{if(e.target===dialog)close()});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!dialog.hidden)close()})}
+const teacherScroll=document.getElementById('teacher-scroll'),topScroll=document.getElementById('teacher-scroll-top'),spacer=document.getElementById('teacher-scroll-spacer');
+if(teacherScroll&&topScroll){const resize=()=>{spacer.style.width=teacherScroll.scrollWidth+'px';topScroll.hidden=teacherScroll.scrollWidth<=teacherScroll.clientWidth};resize();window.addEventListener('resize',resize);teacherScroll.addEventListener('scroll',()=>{topScroll.scrollLeft=teacherScroll.scrollLeft});topScroll.addEventListener('scroll',()=>{teacherScroll.scrollLeft=topScroll.scrollLeft});document.getElementById('tab-teachers').addEventListener('click',()=>requestAnimationFrame(resize))}
+
 function activate(tab,focus=false){tabs.forEach(b=>{const active=b===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1;document.getElementById('panel-'+b.dataset.classTab).hidden=!active});if(focus)tab.focus()}
 tabs.forEach((tab,index)=>{tab.addEventListener('click',()=>activate(tab));tab.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();let next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(index+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;activate(tabs[next],true)})});
 document.querySelectorAll('[data-class-search]').forEach(input=>input.addEventListener('input',()=>{const key=input.dataset.classSearch;const q=input.value.toLocaleLowerCase('fr').trim();let shown=0;document.querySelectorAll('[data-class-table="'+key+'"] [data-class-row]').forEach(row=>{const match=row.textContent.toLocaleLowerCase('fr').includes(q);row.hidden=!match;if(match)shown++});document.querySelector('[data-class-empty="'+key+'"]').hidden=!q||shown>0}));
