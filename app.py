@@ -1782,6 +1782,14 @@ def memo_settings_page():
     sid=school_id()
     if request.method=='POST':
         action=request.form.get('action')
+        if action=='delete_all_memos':
+            if current_user()['role']!='admin':abort(403)
+            if request.form.get('confirm')!='SUPPRIMER':abort(400,'Confirmation obligatoire')
+            count=one('SELECT COUNT(*) AS n FROM teacher_memos WHERE school_id=?',(sid,))['n']
+            execute('DELETE FROM teacher_memos WHERE school_id=?',(sid,))
+            audit('memos.all_deleted',str(count))
+            flash(str(count)+' mémo(s) supprimé(s) pour cet établissement. Les modèles et tarifs sont conservés.','success')
+            return redirect(url_for('memo_settings_page'))
         if action=='settings':
             fields=['institution','header','address','city','recipient','signer1','signer2','budget','subject','currency']
             previous_cfg=one('SELECT * FROM memo_settings WHERE school_id=?',(sid,))
@@ -1833,7 +1841,8 @@ def memo_settings_page():
       JOIN classes cl ON cl.id=r.class_id LEFT JOIN courses co ON co.id=r.course_id
       WHERE r.school_id=? ORDER BY cl.name,co.name""",(sid,))
     tpl=one('SELECT id,name FROM memo_templates WHERE school_id=? AND active=1 ORDER BY id DESC LIMIT 1',(sid,))
-    return render_template('memo_settings.html',cfg=cfg,classes=classes,courses=courses,rates=rates,tpl=tpl)
+    memo_count=one('SELECT COUNT(*) AS n FROM teacher_memos WHERE school_id=?',(sid,))['n']
+    return render_template('memo_settings.html',cfg=cfg,classes=classes,courses=courses,rates=rates,tpl=tpl,memo_count=memo_count)
 
 @app.post('/classes/<int:cid>/memos')
 @roles('admin','administratif')
