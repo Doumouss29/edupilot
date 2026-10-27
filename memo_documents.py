@@ -1,6 +1,7 @@
 """Tenant-isolated teacher honorarium memo document rendering."""
 import io
 from decimal import Decimal, ROUND_HALF_UP
+from num2words import num2words
 from docx import Document
 from docx.shared import Pt, Inches
 from reportlab.lib.utils import ImageReader
@@ -23,6 +24,7 @@ def context_for_memo(meta,teacher,course,clazz,hours,rate,tax):
         volume_horaire=str(hours),tarif_horaire=formatted(rate),
         taux_prelevement=str(tax),montant_brut=formatted(gross),
         prelevement=formatted(withholding),montant_net=formatted(net),
+        montant_net_lettres=num2words(int(net),lang="fr").capitalize(),
         devise=meta.get("currency","FCFA"),reference=meta.get("reference",""),
         ville=meta.get("city",""),date=meta.get("date",""),
         objet=meta.get("subject","Paiement des honoraires"),
