@@ -1804,7 +1804,10 @@ def memo_settings_page():
                 rate=float(request.form.get('hourly_rate',''))
                 if not 0<=rate<=100000000:raise ValueError()
             except ValueError:abort(400,'Tarif invalide')
-            existing=one('SELECT id FROM memo_rates WHERE school_id=? AND class_id=? AND (course_id=? OR (course_id IS NULL AND ? IS NULL))',(sid,cid,course_id,course_id))
+            if course_id:
+                existing=one('SELECT id FROM memo_rates WHERE school_id=? AND class_id=? AND course_id=?',(sid,cid,course_id))
+            else:
+                existing=one('SELECT id FROM memo_rates WHERE school_id=? AND class_id=? AND course_id IS NULL',(sid,cid))
             if existing:execute('UPDATE memo_rates SET hourly_rate=? WHERE id=? AND school_id=?',(rate,existing['id'],sid))
             else:execute('INSERT INTO memo_rates(school_id,class_id,course_id,hourly_rate) VALUES (?,?,?,?)',(sid,cid,course_id,rate))
             audit('memo.rate.updated',str(cid));flash('Tarif enregistré.','success')
