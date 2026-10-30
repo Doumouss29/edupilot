@@ -22,7 +22,7 @@ if(userScrollTop&&userScrollBottom&&userScrollTopContent){
 }
 const allUsersCheckbox=document.getElementById('all-users');
 if(allUsersCheckbox)allUsersCheckbox.addEventListener('change',function(){
- document.querySelectorAll('input[name="user_ids"]:not(:disabled)').forEach(input=>{input.checked=this.checked;});
+ document.querySelectorAll('#users-list tbody input[name="user_ids"]:not(:disabled)').forEach(input=>{const row=input.closest('tr');input.checked=this.checked && !!row && !row.hidden && getComputedStyle(row).display!=='none';});
 });
 </script>
 </section>{% endif %}{% if form!='people' %}<section class="panel"><div class="panel-title"><h3>Liste</h3><span class="muted">{{rows|length}} élément(s)</span></div><div class="table-scroll"><table><thead><tr>{% for c in columns %}<th>{{c}}</th>{% endfor %}</tr></thead><tbody>{% for row in rows %}<tr>{% for val in row %}<td>{% if val is mapping and val.link %}<a href="{{val.link}}" class="btn outline sm">{{val.label}}</a>{% else %}{{val}}{% endif %}</td>{% endfor %}</tr>{% else %}<tr><td colspan="{{columns|length}}">Aucune donnée pour le moment.</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}{% endblock %}
