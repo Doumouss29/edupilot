@@ -1461,19 +1461,33 @@ def people_bulk():
             flash('Sélection invalide : certains comptes ne sont pas gérables dans cet établissement.','error')
             return redirect(url_for('people'))
         if action=='delete':
-            # Keep grades, attendance, teacher assignments and audited academic history intact.
+            # Explain every blocker before changing anything: deletion remains all-or-nothing.
+            checks=[
+                ('grades WHERE student_id=?','notes'),
+                ('attendance WHERE student_id=?','présences'),
+                ('submissions WHERE student_id=?','travaux remis'),
+                ('courses WHERE teacher_id=?','cours affectés'),
+                ('lessons WHERE teacher_id=?','séances'),
+                ('teacher_history WHERE teacher_id=?','historique enseignant'),
+                ('grade_history WHERE actor_id=?','historique des notes'),
+                ('unlocks WHERE teacher_id=?','déverrouillages'),
+                ('bulletin_publications WHERE student_id=?','bulletins publiés'),
+                ('teacher_memos WHERE teacher_id=?','mémos enseignant'),
+                ('teacher_memos WHERE created_by=?','mémos générés')]
+            blocked=[]
             for user in users:
-                uid=user['id']
-                linked=any(c.execute('SELECT 1 FROM '+sql+' LIMIT 1',(uid,)).fetchone() for sql in [
-                    'grades WHERE student_id=?','attendance WHERE student_id=?','submissions WHERE student_id=?',
-                    'courses WHERE teacher_id=?','lessons WHERE teacher_id=?','teacher_history WHERE teacher_id=?',
-                    'grade_history WHERE actor_id=?','unlocks WHERE teacher_id=?',
-                    'bulletin_publications WHERE student_id=?',
-                    'teacher_memos WHERE teacher_id=?',
-                    'teacher_memos WHERE created_by=?'])
-                if linked:
-                    flash('Suppression refusée : un compte possède des notes, séances ou affectations historisées. Suspendez-le pour préserver les dossiers.','error')
-                    return redirect(url_for('people'))
+                reasons=[label for clause,label in checks
+                         if c.execute('SELECT 1 FROM '+clause+' LIMIT 1',(user['id'],)).fetchone()]
+                if reasons:
+                    blocked.append((user['name'],user['id'],reasons))
+            if blocked:
+                details=[]
+                for name,uid,reasons in blocked[:20]:
+                    details.append(str(name)+' (ID '+str(uid)+') : '+', '.join(reasons))
+                suffix=(' ; et '+str(len(blocked)-20)+' autre(s) compte(s).' if len(blocked)>20 else '.')
+                flash('Suppression refusée pour '+str(len(blocked))+' compte(s) : '+' ; '.join(details)+suffix+
+                      ' Suspendez les comptes possédant un historique.','error')
+                return redirect(url_for('people'))
             for user in users:
                 uid=user['id']
                 c.execute('DELETE FROM parent_links WHERE student_id=? OR parent_id=?',(uid,uid))
