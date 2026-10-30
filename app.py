@@ -442,10 +442,14 @@ def notify(ids,message,href='',skip_email_ids=()):
                     else:app.logger.warning('Échec push: %s',type(exc).__name__)
                 except Exception as exc:app.logger.warning('Échec push: %s',type(exc).__name__)
         except ImportError:app.logger.warning('Module pywebpush indisponible')
+    sent_addresses=set()
     for uid in recipients:
         if uid in skip_email_ids:continue
         user=one('SELECT email FROM users WHERE id=? AND school_id=?',(uid,sid))
-        if user:send_brevo_email(user['email'],'EduPilot — Nouvelle notification',message,sid,uid)
+        address=(user['email'] or '').strip().lower() if user else ''
+        if not address or address in sent_addresses:continue
+        sent_addresses.add(address)
+        send_brevo_email(address,'EduPilot — Nouvelle notification',message,sid,uid)
 
 
 def classmates(course_id):
@@ -2298,6 +2302,12 @@ def lesson_utc_iso(value):
     local=datetime.datetime.fromisoformat(value)
     return local.replace(tzinfo=ZoneInfo('Africa/Abidjan')).astimezone(datetime.timezone.utc).isoformat().replace('+00:00','Z')
 
+def format_lesson_period(start,end):
+    a=datetime.datetime.fromisoformat(start)
+    b=datetime.datetime.fromisoformat(end)
+    return a.strftime('%d/%m/%Y à %Hh%M')+'–'+b.strftime('%Hh%M')
+
+
 def editable_lesson_row(conn,lid):
     return conn.execute("""SELECT l.*,c.class_id FROM lessons l JOIN courses c ON c.id=l.course_id
         WHERE l.id=? AND l.school_id=?""",(lid,school_id())).fetchone()
@@ -2348,7 +2358,7 @@ def lesson_edit(lid):
         end=start+datetime.timedelta(minutes=round(duration*60))
         if start.date()!=end.date():raise ValueError()
     except (ValueError,OverflowError):abort(400,'Date, heure ou durée invalide')
-    course=one('SELECT id,class_id,teacher_id FROM courses WHERE id=? AND school_id=?',(course_id,school_id()))
+    course=one('''SELECT c.id,c.class_id,c.teacher_id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id WHERE c.id=? AND c.school_id=?''',(course_id,school_id()))
     if not course or not course['teacher_id']:abort(400,'Cours sans enseignant')
     room=request.form.get('room','').strip()
     if len(room)>80:abort(400)
@@ -2361,9 +2371,20 @@ def lesson_edit(lid):
         assert_lesson_schedule_available(c,[item],{lid})
         c.execute('UPDATE lessons SET course_id=?,teacher_id=?,starts_at=?,ends_at=?,room=? WHERE id=? AND school_id=?',
                   (course_id,course['teacher_id'],item['start'],item['end'],room,lid,school_id()))
-    notify_event([lesson['course_id'],course_id],
-           'Planning modifié : séance du '+lesson['starts_at']+' déplacée au '+item['start']+'.','/planning',teacher_ids=[lesson['teacher_id'],course['teacher_id']])
-    audit('lesson.updated',str(lid))
+    changed=(lesson['starts_at']!=item['start'] or lesson['ends_at']!=item['end']
+             or lesson['course_id']!=course_id or (lesson['room'] or '')!=room)
+    if changed:
+        old_course=one('SELECT name FROM courses WHERE id=? AND school_id=?',(lesson['course_id'],school_id()))
+        message=('Planning modifié — Cours : '+course['name']+' ; classe : '+course['class_name']
+                 +'. Ancien créneau : '+format_lesson_period(lesson['starts_at'],lesson['ends_at'])
+                 +'. Nouveau créneau : '+format_lesson_period(item['start'],item['end'])+'.')
+        if lesson['course_id']!=course_id:
+            message+=' Ancien cours : '+(old_course['name'] if old_course else '—')+'.'
+        if (lesson['room'] or '')!=room:
+            message+=' Salle : '+(room or 'non précisée')+'.'
+        notify_event([lesson['course_id'],course_id],message,'/planning',
+                     teacher_ids=[lesson['teacher_id'],course['teacher_id']])
+    audit('lesson.updated',str(lid)+(':changed' if changed else ':unchanged'))
     flash('Séance modifiée. Les personnes concernées ont été notifiées.','success')
     return redirect(url_for('planning'))
 
