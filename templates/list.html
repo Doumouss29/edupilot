@@ -20,6 +20,18 @@ if(userScrollTop&&userScrollBottom&&userScrollTopContent){
  if('ResizeObserver' in window)new ResizeObserver(updateWidth).observe(userScrollBottom);
  updateWidth();
 }
+const bulkUsersForm=document.getElementById('bulk-users');
+if(bulkUsersForm)bulkUsersForm.addEventListener('submit',event=>{
+  // Never submit selections hidden by live class/year/role filters.
+  bulkUsersForm.querySelectorAll('input[name="user_ids"]').forEach(box=>{
+    const row=box.closest('tr');
+    if(row && (row.hidden || getComputedStyle(row).display==='none'))box.checked=false;
+  });
+  if(!bulkUsersForm.querySelector('input[name="user_ids"]:checked')){
+    event.preventDefault();
+    alert('Aucun utilisateur visible sélectionné. Sélectionnez les comptes à traiter.');
+  }
+});
 const allUsersCheckbox=document.getElementById('all-users');
 if(allUsersCheckbox)allUsersCheckbox.addEventListener('change',function(){
  document.querySelectorAll('#users-list tbody input[name="user_ids"]:not(:disabled)').forEach(input=>{const row=input.closest('tr');input.checked=this.checked && !!row && !row.hidden && getComputedStyle(row).display!=='none';});
