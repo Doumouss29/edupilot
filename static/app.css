@@ -544,3 +544,12 @@ body.memo-dialog-open{overflow:hidden}
 @media(max-width:650px){.memo-modal{padding:18px}.memo-modal-buttons .btn{flex:1}}
 
 .class-memo-bulk-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.class-memo-bulk-actions form{margin:0}.class-memo-bulk-actions .btn{white-space:nowrap;padding:9px 12px;font-size:12px}@media(max-width:720px){.class-memo-bulk-actions{width:100%}.class-memo-bulk-actions .btn{font-size:11px;padding:8px 10px}}
+
+/* Document administration tabs */
+.doc-tabs{display:flex;gap:7px;overflow-x:auto;padding:8px 5px 0;margin:0 0 20px;border-bottom:1px solid #e0e8ef}
+.doc-tab{border:0;border-bottom:3px solid transparent;background:transparent;color:#61758b;font-size:14px;font-weight:750;padding:13px 22px;cursor:pointer;white-space:nowrap}
+.doc-tab:hover{color:#1d4c70;background:#f7fafc}
+.doc-tab.active{color:#1f5678;border-bottom-color:#e18a3d}
+.doc-tab-panel[hidden]{display:none!important}
+#doc-panel-memo{display:grid;gap:16px}
+@media(max-width:650px){.doc-tab{padding:12px 14px;font-size:12px}}
