@@ -1463,7 +1463,10 @@ def people_bulk():
                 linked=any(c.execute('SELECT 1 FROM '+sql+' LIMIT 1',(uid,)).fetchone() for sql in [
                     'grades WHERE student_id=?','attendance WHERE student_id=?','submissions WHERE student_id=?',
                     'courses WHERE teacher_id=?','lessons WHERE teacher_id=?','teacher_history WHERE teacher_id=?',
-                    'grade_history WHERE actor_id=?','unlocks WHERE teacher_id=?'])
+                    'grade_history WHERE actor_id=?','unlocks WHERE teacher_id=?',
+                    'bulletin_publications WHERE student_id=?',
+                    'teacher_memos WHERE teacher_id=?',
+                    'teacher_memos WHERE created_by=?'])
                 if linked:
                     flash('Suppression refusée : un compte possède des notes, séances ou affectations historisées. Suspendez-le pour préserver les dossiers.','error')
                     return redirect(url_for('people'))
@@ -1473,6 +1476,12 @@ def people_bulk():
                 c.execute('DELETE FROM enrollments WHERE student_id=?',(uid,))
                 c.execute('DELETE FROM notifications WHERE user_id=?',(uid,))
                 c.execute('DELETE FROM invites WHERE user_id=?',(uid,))
+                # Clear non-academic auxiliary records that reference the account.
+                c.execute('DELETE FROM email_delivery_log WHERE recipient_user_id=?',(uid,))
+                c.execute('DELETE FROM push_subscriptions WHERE user_id=?',(uid,))
+                c.execute('DELETE FROM mfa_recovery_codes WHERE user_id=?',(uid,))
+                c.execute('DELETE FROM mfa_trusted_devices WHERE user_id=?',(uid,))
+                c.execute('DELETE FROM mfa_settings WHERE user_id=?',(uid,))
                 c.execute('UPDATE audit SET user_id=NULL WHERE user_id=?',(uid,))
                 c.execute('DELETE FROM users WHERE id=? AND school_id=?',(uid,school_id()))
         else:
