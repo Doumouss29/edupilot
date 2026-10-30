@@ -1511,7 +1511,7 @@ def people_bulk():
 @app.get('/people/import/template')
 @roles('admin','administratif')
 def students_csv_template():
-    csv_data='\ufeffprenom;nom;email;classe\nAmadou;Traore;amadou.exemple@example.test;Licence 1\n'
+    csv_data='\ufeffnom;prenom;email;classe\nTRAORE;Amadou;amadou.exemple@example.test;Licence 1\n'
     return Response(csv_data,mimetype='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename=edupilot-modele-etudiants.csv'})
 
 @app.post('/people/import')
