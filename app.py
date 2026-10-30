@@ -1442,6 +1442,9 @@ def people_bulk():
         flash('Sélectionnez des utilisateurs et une action valide.','error')
         return redirect(url_for('people'))
     selected=list(dict.fromkeys(int(x) for x in values))
+    if current_user()['id'] in selected:
+        flash('Votre propre compte administrateur ne peut pas être inclus dans une action en masse. Décochez votre compte et réessayez.','error')
+        return redirect(url_for('people'))
     if action=='invite' and len(selected)>30:
         flash('Limitez les envois d’invitation à 30 utilisateurs par opération.','error')
         return redirect(url_for('people'))
@@ -1454,8 +1457,9 @@ def people_bulk():
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
         users=c.execute('SELECT id,role,name FROM users WHERE school_id=? AND id IN ('+','.join('?' for _ in selected)+')',(school_id(),*selected)).fetchall()
-        if len(users)!=len(selected) or current_user()['id'] in selected or any(x['role']=='superadmin' for x in users):
-            abort(403)
+        if len(users)!=len(selected) or any(x['role']=='superadmin' for x in users):
+            flash('Sélection invalide : certains comptes ne sont pas gérables dans cet établissement.','error')
+            return redirect(url_for('people'))
         if action=='delete':
             # Keep grades, attendance, teacher assignments and audited academic history intact.
             for user in users:
