@@ -1,7 +1,14 @@
 {% extends 'base.html' %}
 {% block heading %}Documents et mémos{% endblock %}
 {% block content %}
-<div class="section-intro"><span class="eyebrow">ADMINISTRATION</span><h2>Mémos d'honoraires</h2><p>Paramétrez votre établissement, les tarifs et un modèle Word. Chaque établissement conserve ses propres documents.</p></div>
+<div class="section-intro"><span class="eyebrow">ADMINISTRATION</span><h2>Documents administratifs</h2><p>Centralisez les modèles et paramètres des documents de votre établissement.</p></div>
+<div class="doc-tabs" role="tablist" aria-label="Types de documents">
+<button type="button" class="doc-tab active" role="tab" id="doc-tab-memo" aria-controls="doc-panel-memo" aria-selected="true" data-doc-tab="memo">Mémo</button>
+<button type="button" class="doc-tab" role="tab" id="doc-tab-bulletin" aria-controls="doc-panel-bulletin" aria-selected="false" data-doc-tab="bulletin">Bulletin</button>
+<button type="button" class="doc-tab" role="tab" id="doc-tab-pv" aria-controls="doc-panel-pv" aria-selected="false" data-doc-tab="pv">PV</button>
+<button type="button" class="doc-tab" role="tab" id="doc-tab-attestation" aria-controls="doc-panel-attestation" aria-selected="false" data-doc-tab="attestation">Attestation</button>
+</div>
+<div id="doc-panel-memo" class="doc-tab-panel" role="tabpanel" aria-labelledby="doc-tab-memo">
 <section class="panel"><h3>Paramètres de calcul</h3><p class="muted">Les textes, en-têtes, logos, signatures et emplacements sont définis directement dans votre modèle Word. EduPilot renseigne les variables automatiquement.</p>
 <form method="post" class="inline-form"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="action" value="settings">
 <label>Taux horaire par défaut (FCFA)<input type="number" step="0.01" min="0" name="default_rate" value="{{cfg.default_rate if cfg else 0}}" required></label>
@@ -24,5 +31,13 @@
 <section class="panel"><h3>Réinitialiser les mémos générés</h3><p class="muted">{{memo_count}} mémo(s) enregistré(s). La suppression est définitive et concerne uniquement votre établissement. Les tarifs, paramètres et modèles Word sont conservés.</p>
 <form method="post" id="delete-memos-form" class="inline-form"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="action" value="delete_all_memos"><label>Confirmation : saisir SUPPRIMER<input name="confirm" autocomplete="off" pattern="SUPPRIMER" required placeholder="SUPPRIMER"></label><button class="btn outline filiere-delete-button" type="submit" {% if not memo_count %}disabled{% endif %}>Supprimer les {{memo_count}} mémos</button></form></section>
 {% endif %}
-<script>(()=>{const remove=document.getElementById('delete-memos-form');if(remove)remove.addEventListener('submit',e=>{if(!confirm('Supprimer définitivement tous les mémos générés de cet établissement ? Cette action est irréversible.'))e.preventDefault()});const cl=document.getElementById('memo-class'),course=document.getElementById('memo-course');function update(){course.value='';for(const o of course.options){if(o.value)o.hidden=o.dataset.class!==cl.value}}cl.addEventListener('change',update);update()})()</script>
+</div>
+{% for key,name,description in [('bulletin','Bulletins','Les bulletins de notes existants restent accessibles depuis la gestion des notes.'),('pv','Procès-verbaux','Cette rubrique accueillera les modèles et la génération des procès-verbaux.'),('attestation','Attestations','Cette rubrique accueillera les modèles et la génération des attestations.') ] %}
+<section class="panel doc-tab-panel" id="doc-panel-{{key}}" role="tabpanel" aria-labelledby="doc-tab-{{key}}" hidden>
+<h3>{{name}}</h3><p class="muted">{{description}}</p>
+{% if key=='bulletin' %}<a class="btn outline" href="{{url_for('grades')}}">Accéder aux notes et bulletins</a>{% endif %}
+<p class="muted">Aucune génération de document supplémentaire n'est activée dans cet onglet pour le moment.</p>
+</section>
+{% endfor %}
+<script>(()=>{const tabs=[...document.querySelectorAll('[data-doc-tab]')];function activate(tab){tabs.forEach(btn=>{const active=btn===tab;btn.classList.toggle('active',active);btn.setAttribute('aria-selected',String(active));document.getElementById('doc-panel-'+btn.dataset.docTab).hidden=!active})}tabs.forEach(btn=>btn.addEventListener('click',()=>activate(btn)));const selected=new URLSearchParams(location.search).get('tab');const fromUrl=tabs.find(btn=>btn.dataset.docTab===selected);if(fromUrl)activate(fromUrl);const remove=document.getElementById('delete-memos-form');if(remove)remove.addEventListener('submit',e=>{if(!confirm('Supprimer définitivement tous les mémos générés de cet établissement ? Cette action est irréversible.'))e.preventDefault()});const cl=document.getElementById('memo-class'),course=document.getElementById('memo-course');function update(){course.value='';for(const o of course.options){if(o.value)o.hidden=o.dataset.class!==cl.value}}cl.addEventListener('change',update);update()})()</script>
 {% endblock %}
