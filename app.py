@@ -1588,7 +1588,7 @@ def people_import():
             errors.append(f'Ligne {lineno} : e-mail en doublon ({email})')
         else:
             encountered.add(email)
-            prepared.append((first+' '+last,email,target['id'],target['year_id']))
+            prepared.append((last.upper()+' '+first,email,target['id'],target['year_id']))
         if len(errors)>=8:break
     if not prepared and not errors:errors.append('Aucune ligne exploitable')
     if errors:
