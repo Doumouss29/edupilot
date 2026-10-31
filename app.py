@@ -2496,13 +2496,21 @@ def lessons_bulk():
                 if start.date()!=end.date():abort(400,'Une séance ne peut pas franchir minuit')
                 planned.append({'id':row['id'],'start':start.strftime('%Y-%m-%dT%H:%M'),'end':end.strftime('%Y-%m-%dT%H:%M'),
                          'room':new_room if update_room else row['room'] or '', 'class_id':row['class_id'],'teacher_id':row['teacher_id']})
+            changed_items=[item for item in planned if any(
+                row['id']==item['id'] and
+                (row['starts_at']!=item['start'] or row['ends_at']!=item['end']
+                 or (row['room'] or '')!=item['room']) for row in rows)]
+            if not changed_items:
+                flash('Aucune modification réelle : aucun message envoyé.','success')
+                return redirect(url_for('planning'))
             assert_lesson_schedule_available(c,planned,set(ids))
-            for item in planned:
+            for item in changed_items:
                 c.execute('UPDATE lessons SET starts_at=?,ends_at=?,room=? WHERE id=? AND school_id=?',
                           (item['start'],item['end'],item['room'],item['id'],school_id()))
         else:
             c.execute(f'DELETE FROM lessons WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
-    notify_event([row['course_id'] for row in rows],str(len(ids))+' séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+' dans le planning.','/planning',teacher_ids=[row['teacher_id'] for row in rows],email_roles=('etudiant',) if action=='modify' else ())
+    affected=[row for row in rows if action=='delete' or any(item['id']==row['id'] for item in changed_items)]
+    notify_event([row['course_id'] for row in affected],str(len(affected))+' séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+' dans le planning.','/planning',teacher_ids=[row['teacher_id'] for row in affected],email_roles=('etudiant',) if action=='modify' else ())
     audit('lessons.bulk.'+action,','.join(map(str,ids)))
     flash(f'{len(ids)} séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+'.','success')
     return redirect(url_for('planning'))
