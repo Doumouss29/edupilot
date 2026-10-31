@@ -414,7 +414,7 @@ def send_account_link(uid,purpose='activation'):
     # Ne pas enregistrer les URL contenant un jeton dans les notifications internes.
     return sent
 
-def notify(ids,message,href='',skip_email_ids=()):
+def notify(ids,message,href='',skip_email_ids=(),email_roles=None):
     # Persist first: an external push or email error cannot erase an internal alert.
     sid=school_id()
     candidate=set(ids)
@@ -445,7 +445,8 @@ def notify(ids,message,href='',skip_email_ids=()):
     sent_addresses=set()
     for uid in recipients:
         if uid in skip_email_ids:continue
-        user=one('SELECT email FROM users WHERE id=? AND school_id=?',(uid,sid))
+        user=one('SELECT email,role FROM users WHERE id=? AND school_id=?',(uid,sid))
+        if email_roles is not None and (not user or user['role'] not in email_roles):continue
         address=(user['email'] or '').strip().lower() if user else ''
         if not address or address in sent_addresses:continue
         sent_addresses.add(address)
@@ -542,14 +543,14 @@ def send_all_teacher_weekly_schedules():
     return sent
 
 
-def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True,include_management=True,skip_teacher_email=False):
+def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True,include_management=True,skip_teacher_email=False,email_roles=None):
     recipients=event_recipients(course_ids,teacher_ids,include_management=include_management,include_parents=include_parents)
     # No duplicate notification to the user who performed the operation.
     actor=current_user()
     if actor:
         recipients=[uid for uid in recipients if uid!=actor['id']]
     if recipients:
-        notify(recipients,message,href,skip_email_ids=teacher_ids if skip_teacher_email else ())
+        notify(recipients,message,href,skip_email_ids=teacher_ids if skip_teacher_email else (),email_roles=email_roles)
 
 
 @app.template_filter('statut_seance')
@@ -2310,7 +2311,7 @@ def planning():
                     return redirect(url_for('planning'))
                 cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room))
                 created.append(cur.lastrowid)
-        notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']],include_management=False,skip_teacher_email=True)
+        notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']],include_management=False,skip_teacher_email=True,email_roles=())
         audit('lesson.created',','.join(str(x) for x in created))
         session['planning_result']={'ok':True,'text':f'{len(created)} séance(s) ajoutée(s) au planning. Vous pouvez choisir une nouvelle date sans ressaisir le cours.'}
         flash(f'{len(created)} séance(s) ajoutée(s) au planning.','success')
@@ -2398,19 +2399,19 @@ def lesson_edit(lid):
         assert_lesson_schedule_available(c,[item],{lid})
         c.execute('UPDATE lessons SET course_id=?,teacher_id=?,starts_at=?,ends_at=?,room=? WHERE id=? AND school_id=?',
                   (course_id,course['teacher_id'],item['start'],item['end'],room,lid,school_id()))
-    changed=(lesson['starts_at']!=item['start'] or lesson['ends_at']!=item['end']
-             or lesson['course_id']!=course_id or (lesson['room'] or '')!=room)
+    changed=(current['starts_at']!=item['start'] or current['ends_at']!=item['end']
+             or current['course_id']!=course_id or (current['room'] or '')!=room)
     if changed:
         old_course=one('SELECT name FROM courses WHERE id=? AND school_id=?',(lesson['course_id'],school_id()))
         message=('Planning modifié — Cours : '+course['name']+' ; classe : '+course['class_name']
-                 +'. Ancien créneau : '+format_lesson_period(lesson['starts_at'],lesson['ends_at'])
+                 +'. Ancien créneau : '+format_lesson_period(current['starts_at'],current['ends_at'])
                  +'. Nouveau créneau : '+format_lesson_period(item['start'],item['end'])+'.')
         if lesson['course_id']!=course_id:
             message+=' Ancien cours : '+(old_course['name'] if old_course else '—')+'.'
         if (lesson['room'] or '')!=room:
             message+=' Salle : '+(room or 'non précisée')+'.'
         notify_event([lesson['course_id'],course_id],message,'/planning',
-                     teacher_ids=[lesson['teacher_id'],course['teacher_id']])
+                     teacher_ids=[lesson['teacher_id'],course['teacher_id']],email_roles=('etudiant',))
     audit('lesson.updated',str(lid)+(':changed' if changed else ':unchanged'))
     flash('Séance modifiée. Les personnes concernées ont été notifiées.','success')
     return redirect(url_for('planning'))
@@ -2457,7 +2458,7 @@ def lessons_bulk():
                           (item['start'],item['end'],item['room'],item['id'],school_id()))
         else:
             c.execute(f'DELETE FROM lessons WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
-    notify_event([row['course_id'] for row in rows],str(len(ids))+' séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+' dans le planning.','/planning',teacher_ids=[row['teacher_id'] for row in rows])
+    notify_event([row['course_id'] for row in rows],str(len(ids))+' séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+' dans le planning.','/planning',teacher_ids=[row['teacher_id'] for row in rows],email_roles=('etudiant',) if action=='modify' else ())
     audit('lessons.bulk.'+action,','.join(map(str,ids)))
     flash(f'{len(ids)} séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+'.','success')
     return redirect(url_for('planning'))
@@ -2523,8 +2524,9 @@ def cancel_lesson(lid):
     reason=request.form.get('reason','').strip()
     if len(reason)>1500 or (u['role']=='enseignant' and not reason):abort(400,'Motif d’annulation obligatoire pour les enseignants')
     if lesson['status'] in ('realisee','partielle'):abort(400,'Impossible d’annuler une séance déjà déclarée')
+    if lesson['status']=='annulee':flash('Séance déjà annulée : aucune nouvelle notification.','error');return redirect(url_for('planning'))
     execute("UPDATE lessons SET status='annulee',actual_minutes=0,comment=? WHERE id=? AND school_id=?",(reason,lid,school_id()))
-    notify_event([lesson['course_id']],'Séance annulée : '+lesson['starts_at']+((' — '+reason[:350]) if reason else ''),'/planning',teacher_ids=[lesson['teacher_id']])
+    notify_event([lesson['course_id']],'Séance annulée : '+lesson['starts_at']+((' — '+reason[:350]) if reason else ''),'/planning',teacher_ids=[lesson['teacher_id']],email_roles=('etudiant',))
     audit('lesson.cancelled',f'{lid}:{reason}')
     flash('Séance annulée. Les étudiants ont été notifiés.','success')
     return redirect(url_for('planning'))
