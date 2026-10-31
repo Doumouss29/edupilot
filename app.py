@@ -2457,7 +2457,7 @@ def lesson_edit(lid):
         notify_event([lesson['course_id'],course_id],message,'/planning',
                      teacher_ids=[lesson['teacher_id'],course['teacher_id']],email_roles=('etudiant',))
     audit('lesson.updated',str(lid)+(':changed' if changed else ':unchanged'))
-    flash('Séance modifiée. Les personnes concernées ont été notifiées.','success')
+    flash('Séance modifiée. Les personnes concernées ont été notifiées.' if changed else 'Aucun changement détecté : aucune notification envoyée.','success')
     return redirect(url_for('planning'))
 
 @app.post('/lessons/bulk')
