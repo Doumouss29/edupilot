@@ -655,7 +655,8 @@ def complete_login(u, trusted_cookie=None, remember=False):
 
 def mfa_role(u):
     if u['role']=='superadmin':return 'totp'
-    if u['role'] in ('admin','administratif','etudiant','enseignant','parent'):return 'email'
+    if u['role'] in ('admin','administratif'):return 'email'
+    # Élèves/étudiants, enseignants et parents : mot de passe uniquement.
     return None
 
 
