@@ -386,10 +386,18 @@ def send_brevo_email(address,subject,message,school_id=None,recipient_user_id=No
                   'to':[{'email':address}],'subject':subject,'textContent':message},
             headers={'api-key':api_key,'Content-Type':'application/json'},timeout=8)
         response.raise_for_status()
-        execute('INSERT INTO email_delivery_log(school_id,recipient_user_id) VALUES (?,?)',(school_id,recipient_user_id))
+        # Brevo HTTP 201 acknowledges acceptance, NOT delivery to the inbox.
+        if response.status_code != 201:
+            app.logger.warning('Brevo : réponse inattendue HTTP %s (message non confirmé)',response.status_code)
+            return False
+        try:
+            execute('INSERT INTO email_delivery_log(school_id,recipient_user_id) VALUES (?,?)',(school_id,recipient_user_id))
+        except Exception:
+            app.logger.exception('Brevo a accepté le message mais la journalisation locale a échoué')
         return True
     except requests.RequestException as exc:
-        app.logger.warning('Échec e-mail Brevo : %s',type(exc).__name__)
+        status=getattr(getattr(exc,'response',None),'status_code',None)
+        app.logger.warning('Échec e-mail Brevo : %s, HTTP %s',type(exc).__name__,status if status is not None else 'aucune réponse')
         return False
 
 def send_account_link(uid,purpose='activation'):
@@ -399,8 +407,8 @@ def send_account_link(uid,purpose='activation'):
     token=secrets.token_urlsafe(32)
     token_hash=hashlib.sha256(token.encode()).hexdigest()
     expiration=datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(minutes=30 if purpose=='reset' else 48*60)
+    # Keep older unused links valid if this delivery attempt fails.
     with db() as c:
-        c.execute('DELETE FROM invites WHERE user_id=? AND used=0',(uid,))
         c.execute('INSERT INTO invites(user_id,token_hash,expires_at) VALUES (?,?,?)',(uid,token_hash,expiration.isoformat()))
     base=os.getenv('PUBLIC_BASE_URL','https://edupilot.ci').rstrip('/')
     url=base+url_for('activate',token=token)
@@ -411,6 +419,11 @@ def send_account_link(uid,purpose='activation'):
         subject='Bienvenue sur EduPilot — Activez votre compte'
         content=f"Bonjour {user['name']},\n\nVotre compte EduPilot ({user['role']}) pour {user['school_name'] or 'la plateforme'} a été créé.\n\nPour choisir votre mot de passe et activer votre accès :\n{url}\n\nCe lien personnel expire dans 48 heures. Ne le transférez à personne.\n\nPour utiliser EduPilot sur votre téléphone ou tablette, consultez le guide d'installation :\n{base}/installer\n\nAprès installation, connectez-vous avec votre compte EduPilot.\n\nEduPilot"
     sent=send_brevo_email(user['email'],subject,content,user['school_id'],uid)
+    if sent:
+        # Only after Brevo accepts the new message do we revoke older unused links.
+        execute('DELETE FROM invites WHERE user_id=? AND token_hash<>? AND used=0',(uid,token_hash))
+    else:
+        execute('DELETE FROM invites WHERE user_id=? AND token_hash=?',(uid,token_hash))
     # Ne pas enregistrer les URL contenant un jeton dans les notifications internes.
     return sent
 
@@ -1326,7 +1339,7 @@ def resend_account_invite(uid):
         if person['school_id']!=actor['school_id'] or person['role']=='superadmin':abort(403)
         target=url_for('people')
     sent=create_invite(uid)
-    flash('Lien envoyé par e-mail.' if sent else 'Brevo indisponible : invitation non envoyée.', 'success' if sent else 'error')
+    flash('Brevo a accepté la demande d’envoi. La réception reste à vérifier dans Brevo (journaux transactionnels / blocages).' if sent else 'Échec de l’envoi Brevo : aucun nouvel e-mail confirmé. Consultez les journaux serveur et Brevo.', 'success' if sent else 'error')
     return redirect(target)
 
 @app.post('/people/<int:uid>/matricule')
