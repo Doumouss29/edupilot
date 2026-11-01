@@ -993,7 +993,7 @@ def school_filiere_overview():
 @app.get('/schools')
 @roles('superadmin')
 def schools():
-    records=allrows('SELECT id,name,slug,plan,active,subscription_end,logo_mime FROM schools ORDER BY id DESC')
+    records=allrows('SELECT id,name,slug,plan,active,subscription_end,logo_mime,campus_enabled FROM schools ORDER BY id DESC')
     counts=allrows("SELECT school_id,COUNT(*) n FROM users WHERE role IN ('admin','administratif') GROUP BY school_id")
     account_counts={r['school_id']:r['n'] for r in counts}
     admins=allrows("SELECT school_id,first_name,last_name,name,email,phone,role,active,must_change_password FROM users WHERE role IN ('admin','administratif') ORDER BY id DESC")
@@ -1220,14 +1220,33 @@ def school_update(sid):
         if end:
             try:datetime.date.fromisoformat(end)
             except ValueError:abort(400)
+        name=request.form.get('name','').strip()
+        slug=request.form.get('slug','').strip().lower()
+        if not name or len(name)>180:
+            flash('Le nom de l’établissement est obligatoire (180 caractères maximum).','error')
+            return redirect(url_for('schools'))
+        if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{1,79}',slug):
+            flash('Identifiant URL invalide : utilisez 2 à 80 caractères (lettres minuscules, chiffres, tirets ou underscores).','error')
+            return redirect(url_for('schools'))
+        if one('SELECT id FROM schools WHERE slug=? AND id<>?',(slug,sid)):
+            flash('Cet identifiant URL est déjà utilisé.','error')
+            return redirect(url_for('schools'))
         plan=request.form.get('plan',school['plan'])
         if plan not in ('essentiel','standard','premium'):abort(400)
         logo,mime=read_logo(request.files.get('logo'))
+        if logo and request.form.get('remove_logo')=='1':
+            flash('Choisissez soit le remplacement, soit la suppression du logo.','error')
+            return redirect(url_for('schools'))
         campus_enabled=int(request.form.get('campus_enabled')=='1')
-        execute('UPDATE schools SET campus_enabled=? WHERE id=?',(campus_enabled,sid))
-        if logo:execute('UPDATE schools SET plan=?,subscription_end=?,logo=?,logo_mime=? WHERE id=?',(plan,end,logo,mime,sid))
-        elif request.form.get('remove_logo')=='1':execute('UPDATE schools SET plan=?,subscription_end=?,logo=NULL,logo_mime=NULL WHERE id=?',(plan,end,sid))
-        else:execute('UPDATE schools SET plan=?,subscription_end=? WHERE id=?',(plan,end,sid))
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            c.execute('UPDATE schools SET name=?,slug=?,plan=?,subscription_end=?,campus_enabled=? WHERE id=?',
+                      (name,slug,plan,end,campus_enabled,sid))
+            if logo:
+                c.execute('UPDATE schools SET logo=?,logo_mime=? WHERE id=?',(logo,mime,sid))
+            elif request.form.get('remove_logo')=='1':
+                c.execute('UPDATE schools SET logo=NULL,logo_mime=NULL WHERE id=?',(sid,))
+        audit('school.updated',str(sid))
         flash('Paramètres de l’établissement enregistrés.','success')
     else:abort(400)
     return redirect(url_for('schools'))
