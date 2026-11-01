@@ -5,8 +5,51 @@
 <p class="muted">À utiliser lorsqu'un e-mail d'activation est bloqué. Le mot de passe doit être communiqué à l'utilisateur par un canal privé sécurisé. Il devra être changé lors de sa prochaine connexion. Cette action invalide les liens d'activation non utilisés.</p>
 <form method="post" action="{{url_for('set_person_temporary_password',uid=person.id)}}" class="modern-form" autocomplete="off" onsubmit="return confirm('Remplacer le mot de passe actuel de ce compte par le mot de passe temporaire ?');">
 <input type="hidden" name="csrf" value="{{csrf}}">
-<label>Mot de passe temporaire<input type="password" name="temporary_password" required minlength="12" maxlength="128" autocomplete="new-password" placeholder="12 caractères minimum, lettres et chiffres"></label>
-<label>Confirmer le mot de passe<input type="password" name="confirm_temporary_password" required minlength="12" maxlength="128" autocomplete="new-password"></label>
+<label>Mot de passe temporaire<input id="temporary-password" type="password" name="temporary_password" required minlength="12" maxlength="128" autocomplete="new-password" placeholder="12 caractères minimum, lettres et chiffres"></label>
+<div class="form-actions">
+<button type="button" class="btn outline" id="generate-temporary-password">Générer un mot de passe sécurisé</button>
+<button type="button" class="btn outline" id="copy-temporary-password">Copier</button>
+<label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="show-temporary-password">Afficher</label>
+</div>
+<label>Confirmer le mot de passe<input id="confirm-temporary-password" type="password" name="confirm_temporary_password" required minlength="12" maxlength="128" autocomplete="new-password"></label>
+<p class="muted" id="temporary-password-note" role="status" aria-live="polite">Utilisez un canal privé sécurisé pour transmettre ce mot de passe. Le système ne l'envoie pas par e-mail.</p>
+<script>
+(()=>{
+ const pass=document.getElementById('temporary-password');
+ const confirm=document.getElementById('confirm-temporary-password');
+ const note=document.getElementById('temporary-password-note');
+ const show=document.getElementById('show-temporary-password');
+ document.getElementById('generate-temporary-password').addEventListener('click',()=>{
+   if(!window.crypto || !window.crypto.getRandomValues){
+     note.textContent='Génération sécurisée indisponible dans ce navigateur.';return;
+   }
+   const letters='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+   const digits='23456789';
+   const symbols='!@#$%*-_';
+   const alphabet=letters+digits+symbols;
+   const number=(max)=>{
+     const limit=256-(256%max);
+     const buffer=new Uint8Array(1);
+     do{window.crypto.getRandomValues(buffer);}while(buffer[0]>=limit);
+     return buffer[0]%max;
+   };
+   const chars=[letters[number(letters.length)],digits[number(digits.length)],symbols[number(symbols.length)]];
+   while(chars.length<18)chars.push(alphabet[number(alphabet.length)]);
+   for(let i=chars.length-1;i>0;i--){const j=number(i+1);[chars[i],chars[j]]=[chars[j],chars[i]];}
+   pass.value=chars.join('');
+   confirm.value=pass.value;
+   show.checked=false;
+   pass.type='password';confirm.type='password';
+   note.textContent='Mot de passe de 18 caractères généré. Copiez-le avant de valider : il ne sera plus visible ensuite.';
+ });
+ document.getElementById('copy-temporary-password').addEventListener('click',async()=>{
+   if(!pass.value){note.textContent='Générez ou saisissez d’abord un mot de passe.';return;}
+   try{await navigator.clipboard.writeText(pass.value);note.textContent='Mot de passe copié. Effacez le presse-papiers après transmission.';}
+   catch(_){note.textContent='Copie impossible : affichez le mot de passe pour le copier manuellement.';}
+ });
+ show.addEventListener('change',()=>{pass.type=confirm.type=show.checked?'text':'password';});
+})();
+</script>
 <div class="form-actions"><button type="submit" class="btn primary">Définir le mot de passe temporaire</button></div>
 </form>
 </section>
