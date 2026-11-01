@@ -2579,9 +2579,21 @@ def lessons_bulk():
     # Room-only edits do not trigger email. Student emails are limited to rescheduled lessons.
     notify_event([row['course_id'] for row in affected],str(len(affected))+' séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+' dans le planning.','/planning',teacher_ids=[row['teacher_id'] for row in affected],email_roles=())
     if schedule_affected:
-        notify_event([row['course_id'] for row in schedule_affected],
-                     str(len(schedule_affected))+' créneau(x) déplacé(s) dans le planning.','/planning',
-                     teacher_ids=(),include_management=False,include_parents=False,email_roles=('etudiant',))
+        # The in-app alert was already created above; send only the email here.
+        school=one('SELECT name FROM schools WHERE id=?',(school_id(),))
+        recipients=event_recipients([row['course_id'] for row in schedule_affected],
+                                   include_management=False,include_parents=False)
+        seen_emails=set()
+        for uid in recipients:
+            user=one("SELECT email FROM users WHERE id=? AND school_id=? AND role='etudiant' AND active=1",
+                     (uid,school_id()))
+            address=(user['email'] or '').strip().lower() if user else ''
+            if not address or address in seen_emails:continue
+            seen_emails.add(address)
+            send_brevo_email(address,'EduPilot — Créneau de cours modifié',
+                (school['name'] if school else 'Votre établissement')+' : '+
+                str(len(schedule_affected))+' créneau(x) de cours ont changé de date ou d’heure. '
+                'Consultez votre planning dans EduPilot.',school_id(),uid)
     audit('lessons.bulk.'+action,','.join(map(str,ids)))
     flash(f'{len(ids)} séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+'.','success')
     return redirect(url_for('planning'))
