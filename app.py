@@ -1359,7 +1359,7 @@ def resend_account_invite(uid):
         if person['school_id']!=actor['school_id'] or person['role']=='superadmin':abort(403)
         target=url_for('people')
     sent=create_invite(uid)
-    flash('Brevo a accepté la demande d’envoi. La réception reste à vérifier dans Brevo (journaux transactionnels / blocages).' if sent else 'Échec de l’envoi Brevo : aucun nouvel e-mail confirmé. Consultez les journaux serveur et Brevo.', 'success' if sent else 'error')
+    flash('email_accepted' if sent else 'Échec de l’envoi Brevo : aucun nouvel e-mail confirmé. Consultez les journaux serveur et Brevo.', 'email_modal' if sent else 'error')
     return redirect(target)
 
 @app.post('/people/<int:uid>/matricule')
