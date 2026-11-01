@@ -1,72 +1,98 @@
 {% extends 'base.html' %}
-{% block heading %}Modifier un utilisateur{% if me.role=='admin' and person.role not in ('admin','superadmin') %}
-<section class="panel form-page">
-<h3>Définir un mot de passe temporaire</h3>
-<p class="muted">À utiliser lorsqu'un e-mail d'activation est bloqué. Le mot de passe doit être communiqué à l'utilisateur par un canal privé sécurisé. Il devra être changé lors de sa prochaine connexion. Cette action invalide les liens d'activation non utilisés.</p>
-<form method="post" action="{{url_for('set_person_temporary_password',uid=person.id)}}" class="modern-form" autocomplete="off" onsubmit="return confirm('Remplacer le mot de passe actuel de ce compte par le mot de passe temporaire ?');">
+{% block heading %}Modifier un utilisateur{% endblock %}
+{% block content %}
+<style>
+.person-edit-layout{display:grid;gap:24px;max-width:1120px;margin:0 auto}
+.person-edit-layout .person-edit-panel{min-width:0}
+.person-edit-layout .person-edit-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 22px;align-items:start}
+.person-edit-layout .person-edit-form>label{min-width:0}
+.person-edit-layout .person-edit-form>label input{width:100%;min-width:0}
+.person-edit-layout .person-edit-full{grid-column:1/-1}
+.person-edit-layout .person-edit-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;grid-column:1/-1}
+.person-edit-layout .temp-password-form{display:flex;flex-direction:column;gap:16px;max-width:760px}
+.person-edit-layout .temp-password-field{display:flex;flex-direction:column;gap:7px;width:100%;min-width:0}
+.person-edit-layout .temp-password-field input{width:100%;min-width:0}
+.person-edit-layout .temp-password-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;width:100%}
+.person-edit-layout .temp-password-toolbar .btn{white-space:normal}
+.person-edit-layout .show-password-toggle{display:inline-flex!important;flex-direction:row!important;align-items:center!important;justify-content:flex-start;gap:8px;flex:0 0 auto!important;width:auto!important;min-width:max-content;margin:0!important;white-space:nowrap}
+.person-edit-layout .show-password-toggle input[type=checkbox]{width:18px!important;height:18px!important;flex:0 0 18px!important;margin:0!important}
+.person-edit-layout .temp-password-note{margin:0;line-height:1.55;overflow-wrap:anywhere}
+@media(max-width:700px){
+ .person-edit-layout .person-edit-form{grid-template-columns:minmax(0,1fr)}
+ .person-edit-layout .temp-password-toolbar{align-items:stretch}
+ .person-edit-layout .temp-password-toolbar button{flex:1 1 auto}
+ .person-edit-layout .show-password-toggle{width:100%!important;flex:1 1 100%!important}
+}
+</style>
+<div class="section-intro"><span class="eyebrow">ADMINISTRATION</span><h2>Modifier un utilisateur</h2><p>Modifiez les informations du compte et, si nécessaire, définissez un accès temporaire.</p></div>
+<div class="person-edit-layout">
+<section class="panel form-page person-edit-panel">
+<h3>Informations du compte</h3>
+<form method="post" action="{{ url_for('edit_person_details',uid=person.id) }}" class="modern-form person-edit-form">
 <input type="hidden" name="csrf" value="{{csrf}}">
-<label>Mot de passe temporaire<input id="temporary-password" type="password" name="temporary_password" required minlength="12" maxlength="128" autocomplete="new-password" placeholder="12 caractères minimum, lettres et chiffres"></label>
-<div class="form-actions">
+<label>Matricule<input name="matricule" value="{{person.matricule or ''}}" maxlength="40" required {% if me.role!='admin' %}readonly{% endif %}></label>
+<label>Nom et prénoms<input name="name" value="{{person.name or ''}}" maxlength="240" required></label>
+<label>E-mail{% if person.role=='enseignant' %} (facultatif tant que le compte n’est pas activé){% endif %}<input name="email" value="{{'' if person.email.endswith('@pending-teacher.edupilot.invalid') else person.email}}" type="email" {% if person.role!='enseignant' %}required{% endif %}></label>
+<label>Contact (facultatif)<input name="phone" value="{{person.phone or ''}}" type="tel" maxlength="40"></label>
+{% if person.role=='enseignant' and person.email.endswith('@pending-teacher.edupilot.invalid') %}<p class="muted person-edit-full">L’enseignant n’a pas encore d’accès. Dès qu’une adresse e-mail sera enregistrée, une invitation d’activation sera envoyée automatiquement.</p>{% endif %}
+<p class="muted person-edit-full">Le nom complet est repris tel qu'il a été enregistré lors de la création ou de l'importation, dans l'ordre NOM PRÉNOMS.</p>
+<div class="person-edit-actions"><a href="{{url_for('people')}}" class="btn outline">Annuler</a><button type="submit" class="btn primary">Enregistrer les modifications</button></div>
+</form>
+</section>
+{% if me.role=='admin' and person.role not in ('admin','superadmin') %}
+<section class="panel form-page person-edit-panel">
+<h3>Définir un mot de passe temporaire</h3>
+<p class="muted">En cas d'e-mail d'activation bloqué, définissez un accès provisoire. L'utilisateur devra changer son mot de passe à sa prochaine connexion. Les anciens liens d'activation seront invalidés.</p>
+<form method="post" action="{{url_for('set_person_temporary_password',uid=person.id)}}" class="temp-password-form" autocomplete="off" onsubmit="return confirm('Remplacer le mot de passe actuel par un mot de passe temporaire ?');">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<label class="temp-password-field">Mot de passe temporaire<input id="temporary-password" type="password" name="temporary_password" required minlength="12" maxlength="128" autocomplete="new-password" placeholder="12 caractères minimum, lettres et chiffres"></label>
+<div class="temp-password-toolbar">
 <button type="button" class="btn outline" id="generate-temporary-password">Générer un mot de passe sécurisé</button>
 <button type="button" class="btn outline" id="copy-temporary-password">Copier</button>
-<label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="show-temporary-password">Afficher</label>
+<label class="show-password-toggle"><input type="checkbox" id="show-temporary-password"><span>Afficher</span></label>
 </div>
-<label>Confirmer le mot de passe<input id="confirm-temporary-password" type="password" name="confirm_temporary_password" required minlength="12" maxlength="128" autocomplete="new-password"></label>
-<p class="muted" id="temporary-password-note" role="status" aria-live="polite">Utilisez un canal privé sécurisé pour transmettre ce mot de passe. Le système ne l'envoie pas par e-mail.</p>
+<label class="temp-password-field">Confirmer le mot de passe<input id="confirm-temporary-password" type="password" name="confirm_temporary_password" required minlength="12" maxlength="128" autocomplete="new-password"></label>
+<p class="muted temp-password-note" id="temporary-password-note" role="status" aria-live="polite">Transmettez ce mot de passe par un canal privé sécurisé. EduPilot ne l'envoie pas par e-mail.</p>
+<div class="person-edit-actions"><button type="submit" class="btn primary">Définir le mot de passe temporaire</button></div>
+</form>
+</section>
 <script>
 (()=>{
  const pass=document.getElementById('temporary-password');
- const confirm=document.getElementById('confirm-temporary-password');
+ const confirmation=document.getElementById('confirm-temporary-password');
  const note=document.getElementById('temporary-password-note');
  const show=document.getElementById('show-temporary-password');
- document.getElementById('generate-temporary-password').addEventListener('click',()=>{
-   if(!window.crypto || !window.crypto.getRandomValues){
-     note.textContent='Génération sécurisée indisponible dans ce navigateur.';return;
-   }
+ const generate=document.getElementById('generate-temporary-password');
+ const copy=document.getElementById('copy-temporary-password');
+ if(!pass||!confirmation||!note||!show||!generate||!copy)return;
+ generate.addEventListener('click',()=>{
+   if(!window.crypto||!window.crypto.getRandomValues){note.textContent='Génération sécurisée indisponible dans ce navigateur.';return;}
    const letters='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
    const digits='23456789';
    const symbols='!@#$%*-_';
    const alphabet=letters+digits+symbols;
-   const number=(max)=>{
+   const number=max=>{
      const limit=256-(256%max);
-     const buffer=new Uint8Array(1);
-     do{window.crypto.getRandomValues(buffer);}while(buffer[0]>=limit);
-     return buffer[0]%max;
+     const data=new Uint8Array(1);
+     do{window.crypto.getRandomValues(data);}while(data[0]>=limit);
+     return data[0]%max;
    };
    const chars=[letters[number(letters.length)],digits[number(digits.length)],symbols[number(symbols.length)]];
    while(chars.length<18)chars.push(alphabet[number(alphabet.length)]);
    for(let i=chars.length-1;i>0;i--){const j=number(i+1);[chars[i],chars[j]]=[chars[j],chars[i]];}
-   pass.value=chars.join('');
-   confirm.value=pass.value;
+   pass.value=confirmation.value=chars.join('');
    show.checked=false;
-   pass.type='password';confirm.type='password';
+   pass.type=confirmation.type='password';
    note.textContent='Mot de passe de 18 caractères généré. Copiez-le avant de valider : il ne sera plus visible ensuite.';
  });
- document.getElementById('copy-temporary-password').addEventListener('click',async()=>{
+ copy.addEventListener('click',async()=>{
    if(!pass.value){note.textContent='Générez ou saisissez d’abord un mot de passe.';return;}
    try{await navigator.clipboard.writeText(pass.value);note.textContent='Mot de passe copié. Effacez le presse-papiers après transmission.';}
    catch(_){note.textContent='Copie impossible : affichez le mot de passe pour le copier manuellement.';}
  });
- show.addEventListener('change',()=>{pass.type=confirm.type=show.checked?'text':'password';});
+ show.addEventListener('change',()=>{pass.type=confirmation.type=show.checked?'text':'password';});
 })();
 </script>
-<div class="form-actions"><button type="submit" class="btn primary">Définir le mot de passe temporaire</button></div>
-</form>
-</section>
 {% endif %}
-{% endblock %}
-{% block content %}
-<div class="section-intro"><span class="eyebrow">ADMINISTRATION</span><h2>Modifier un utilisateur</h2><p>Modifiez toutes les informations du compte depuis un seul formulaire.</p></div>
-<section class="panel form-page">
-<form method="post" action="{{ url_for('edit_person_details',uid=person.id) }}" class="modern-form">
-<input type="hidden" name="csrf" value="{{csrf}}">
-<label>Matricule<input name="matricule" value="{{person.matricule or ''}}" maxlength="40" required {% if me.role!='admin' %}readonly{% endif %}></label>
-<label>Nom et prénom<input name="name" value="{{person.name or ''}}" maxlength="240" required></label>
-<label>E-mail{% if person.role=='enseignant' %} (facultatif tant que le compte n’est pas activé){% endif %}<input name="email" value="{{'' if person.email.endswith('@pending-teacher.edupilot.invalid') else person.email}}" type="email" {% if person.role!='enseignant' %}required{% endif %}></label>
-<label>Contact (facultatif)<input name="phone" value="{{person.phone or ''}}" type="tel" maxlength="40"></label>
-{% if person.role=='enseignant' and person.email.endswith('@pending-teacher.edupilot.invalid') %}<p class="muted">L’enseignant n’a pas encore d’accès. Dès qu’une adresse e-mail sera enregistrée, une invitation d’activation sera envoyée automatiquement.</p>{% endif %}
-<p class="muted">Le nom complet est repris tel qu'il a été enregistré lors de la création ou de l'importation.</p>
-<div class="form-actions"><a href="{{url_for('people')}}" class="btn outline">Annuler</a><button type="submit" class="btn primary">Enregistrer les modifications</button></div>
-</form>
-</section>
+</div>
 {% endblock %}
