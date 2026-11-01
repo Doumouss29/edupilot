@@ -479,8 +479,10 @@ def event_recipients(course_ids=(),teacher_ids=(),include_management=True,includ
         clause=','.join('?' for _ in courses)
         students=allrows(f"""SELECT DISTINCT e.student_id FROM enrollments e
             JOIN courses c ON c.class_id=e.class_id AND c.school_id=e.school_id
-            JOIN users u ON u.id=e.student_id
-            WHERE e.school_id=? AND c.id IN ({clause}) AND u.active=1""",(sid,*courses))
+            JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id
+            JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
+            WHERE e.school_id=? AND e.year_id=cl.year_id
+            AND c.id IN ({clause}) AND u.role='etudiant' AND u.active=1""",(sid,*courses))
         recipients.update(r['student_id'] for r in students)
         if include_parents:
             parents=allrows(f"""SELECT DISTINCT p.parent_id FROM parent_links p
@@ -2504,8 +2506,8 @@ def lesson_edit(lid):
         assert_lesson_schedule_available(c,[item],{lid})
         c.execute('UPDATE lessons SET course_id=?,teacher_id=?,starts_at=?,ends_at=?,room=? WHERE id=? AND school_id=?',
                   (course_id,course['teacher_id'],item['start'],item['end'],room,lid,school_id()))
-    changed=(current['starts_at']!=item['start'] or current['ends_at']!=item['end']
-             or current['course_id']!=course_id or (current['room'] or '')!=room)
+    schedule_changed=(current['starts_at']!=item['start'] or current['ends_at']!=item['end'])
+    changed=(schedule_changed or current['course_id']!=course_id or (current['room'] or '')!=room)
     if changed:
         old_course=one('SELECT name FROM courses WHERE id=? AND school_id=?',(lesson['course_id'],school_id()))
         message=('Planning modifié — Cours : '+course['name']+' ; classe : '+course['class_name']
@@ -2516,7 +2518,7 @@ def lesson_edit(lid):
         if (lesson['room'] or '')!=room:
             message+=' Salle : '+(room or 'non précisée')+'.'
         notify_event([lesson['course_id'],course_id],message,'/planning',
-                     teacher_ids=[lesson['teacher_id'],course['teacher_id']],email_roles=('etudiant',))
+                     teacher_ids=[lesson['teacher_id'],course['teacher_id']],email_roles=('etudiant',) if schedule_changed else ())
     audit('lesson.updated',str(lid)+(':changed' if changed else ':unchanged'))
     flash('Séance modifiée. Les personnes concernées ont été notifiées.' if changed else 'Aucun changement détecté : aucune notification envoyée.','success')
     return redirect(url_for('planning'))
@@ -2571,7 +2573,15 @@ def lessons_bulk():
         else:
             c.execute(f'DELETE FROM lessons WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
     affected=[row for row in rows if action=='delete' or any(item['id']==row['id'] for item in changed_items)]
-    notify_event([row['course_id'] for row in affected],str(len(affected))+' séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+' dans le planning.','/planning',teacher_ids=[row['teacher_id'] for row in affected],email_roles=('etudiant',) if action=='modify' else ())
+    schedule_affected=[row for row in affected if action=='modify' and any(
+        item['id']==row['id'] and (row['starts_at']!=item['start'] or row['ends_at']!=item['end'])
+        for item in changed_items)]
+    # Room-only edits do not trigger email. Student emails are limited to rescheduled lessons.
+    notify_event([row['course_id'] for row in affected],str(len(affected))+' séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+' dans le planning.','/planning',teacher_ids=[row['teacher_id'] for row in affected],email_roles=())
+    if schedule_affected:
+        notify_event([row['course_id'] for row in schedule_affected],
+                     str(len(schedule_affected))+' créneau(x) déplacé(s) dans le planning.','/planning',
+                     teacher_ids=(),include_management=False,include_parents=False,email_roles=('etudiant',))
     audit('lessons.bulk.'+action,','.join(map(str,ids)))
     flash(f'{len(ids)} séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+'.','success')
     return redirect(url_for('planning'))
