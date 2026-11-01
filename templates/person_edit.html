@@ -1,5 +1,17 @@
 {% extends 'base.html' %}
-{% block heading %}Modifier un utilisateur{% endblock %}
+{% block heading %}Modifier un utilisateur{% if me.role=='admin' and person.role not in ('admin','superadmin') %}
+<section class="panel form-page">
+<h3>Définir un mot de passe temporaire</h3>
+<p class="muted">À utiliser lorsqu'un e-mail d'activation est bloqué. Le mot de passe doit être communiqué à l'utilisateur par un canal privé sécurisé. Il devra être changé lors de sa prochaine connexion. Cette action invalide les liens d'activation non utilisés.</p>
+<form method="post" action="{{url_for('set_person_temporary_password',uid=person.id)}}" class="modern-form" autocomplete="off" onsubmit="return confirm('Remplacer le mot de passe actuel de ce compte par le mot de passe temporaire ?');">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<label>Mot de passe temporaire<input type="password" name="temporary_password" required minlength="12" maxlength="128" autocomplete="new-password" placeholder="12 caractères minimum, lettres et chiffres"></label>
+<label>Confirmer le mot de passe<input type="password" name="confirm_temporary_password" required minlength="12" maxlength="128" autocomplete="new-password"></label>
+<div class="form-actions"><button type="submit" class="btn primary">Définir le mot de passe temporaire</button></div>
+</form>
+</section>
+{% endif %}
+{% endblock %}
 {% block content %}
 <div class="section-intro"><span class="eyebrow">ADMINISTRATION</span><h2>Modifier un utilisateur</h2><p>Modifiez toutes les informations du compte depuis un seul formulaire.</p></div>
 <section class="panel form-page">
