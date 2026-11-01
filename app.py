@@ -1378,6 +1378,34 @@ def edit_person_page(uid):
             first=display
     return render_template('person_edit.html',person=user,edit_first_name=first,edit_last_name=last)
 
+@app.post('/people/<int:uid>/temporary-password')
+@roles('admin')
+def set_person_temporary_password(uid):
+    """School admin fallback when a student's transactional invitation is blocked."""
+    actor=current_user()
+    person=one('SELECT id,name,role,active FROM users WHERE id=? AND school_id=?',(uid,school_id()))
+    if not person or person['role'] in ('admin','superadmin') or person['id']==actor['id']:
+        abort(403)
+    if not person['active']:
+        flash('Réactivez ce compte avant de définir un accès temporaire.','error')
+        return redirect(url_for('edit_person_page',uid=uid))
+    temporary=request.form.get('temporary_password','')
+    confirm=request.form.get('confirm_temporary_password','')
+    if not valid_password(temporary) or len(temporary)>128:
+        flash('Le mot de passe temporaire doit contenir de 12 à 128 caractères, avec lettres et chiffres.','error')
+        return redirect(url_for('edit_person_page',uid=uid))
+    if temporary!=confirm:
+        flash('Les deux mots de passe temporaires ne correspondent pas.','error')
+        return redirect(url_for('edit_person_page',uid=uid))
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        c.execute('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=? AND school_id=?',
+                  (generate_password_hash(temporary),uid,school_id()))
+        c.execute('DELETE FROM invites WHERE user_id=? AND used=0',(uid,))
+    audit('user.temporary_password_set',str(uid))
+    flash('Mot de passe temporaire défini pour '+person['name']+'. Transmettez-le par un canal privé sécurisé ; le changement sera obligatoire à la connexion.','success')
+    return redirect(url_for('edit_person_page',uid=uid))
+
 @app.post('/people/<int:uid>/edit')
 @roles('admin','administratif')
 def edit_person_details(uid):
