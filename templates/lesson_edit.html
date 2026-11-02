@@ -6,6 +6,23 @@
 <label>Date<input name="lesson_date" type="date" value="{{lesson.starts_at[:10]}}" required></label>
 <label>Heure de début<input name="start_time" type="time" value="{{lesson.starts_at[11:16]}}" step="1800" required></label>
 <label>Durée (heures, pas de 30 min)<select name="duration_hours" required>{% for i in range(1,25) %}<option value="{{i/2}}" {% if duration_hours==i/2 %}selected{% endif %}>{{i/2}} h</option>{% endfor %}</select></label>
-<label>Salle<input name="room" value="{{lesson.room or ''}}" maxlength="80"></label>
+<label>Salle<select id="lesson-room-choice" aria-label="Choisir une salle"><option value="">Sans salle</option>{% for room in rooms %}<option value="{{room}}" {% if lesson.room==room %}selected{% endif %}>{{room}}</option>{% endfor %}<option value="__new__" {% if lesson.room and lesson.room not in rooms %}selected{% endif %}>+ Ajouter une nouvelle salle…</option></select><input id="lesson-room-value" name="room" value="{{lesson.room or ''}}" maxlength="80" placeholder="Nom de la nouvelle salle" aria-label="Nouvelle salle" hidden disabled></label>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
+ const select=document.getElementById('lesson-room-choice');
+ const input=document.getElementById('lesson-room-value');
+ if(!select||!input)return;
+ const sync=()=>{
+  const adding=select.value==='__new__';
+  input.hidden=!adding;input.disabled=!adding;input.required=adding;
+  if(!adding)input.value='';
+ };
+ select.addEventListener('change',sync);
+ select.closest('form').addEventListener('submit',()=>{
+  if(select.value!=='__new__'){input.disabled=false;input.value=select.value;}
+ });
+ sync();
+});
+</script>
 <div class="form-actions"><button class="btn primary">Enregistrer la séance</button></div></form></section>
 {% else %}<section class="panel"><h3>Séance protégée</h3><p>Cette séance est déjà déclarée, annulée, reportée ou contient des présences. Elle ne peut pas être déplacée ou supprimée sans procédure spécifique de correction.</p></section>{% endif %}{% endblock %}
