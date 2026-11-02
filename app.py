@@ -2430,7 +2430,7 @@ def planning():
     elif u['role']=='etudiant':query+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     events=allrows(query,args)
-    return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
+    return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
 
 def lesson_utc_iso(value):
     """Existing lesson timestamps are historical Africa/Abidjan local times."""
@@ -2480,6 +2480,7 @@ def lesson_edit(lid):
     if request.method=='GET':
         return render_template('lesson_edit.html',lesson=lesson,editable=editable,
             duration_hours=(datetime.datetime.fromisoformat(lesson['ends_at'])-datetime.datetime.fromisoformat(lesson['starts_at'])).total_seconds()/3600,
+            rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],
             courses=scoped("""SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id
                     WHERE c.school_id=? ORDER BY cl.name,c.name"""))
     if not editable:abort(400,'Séance historisée : modification interdite')
