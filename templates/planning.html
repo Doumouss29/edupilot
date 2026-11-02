@@ -135,5 +135,36 @@ if(printButton&&printHeading)printButton.addEventListener('click',()=>{
  const title=c.view.title;
  printHeading.textContent='Planning — '+title+' · Vue '+viewLabel+' · '+classLabel+' · '+teacherLabel;
  // FullCalendar has already filtered events according to these selections.
- window.print();
+ const onMobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.matchMedia('(max-width: 720px)').matches;
+ if(!onMobile){window.print();return;}
+ // Opening a new document synchronously from the tap works better than window.print()
+ // in iOS/Android standalone PWAs and embedded browsers.
+ const printable=window.open('','_blank');
+ if(!printable){
+   alert('Le navigateur bloque la fenêtre d’impression. Ouvrez EduPilot dans Safari ou Chrome, puis réessayez.');
+   return;
+ }
+ const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+ const items=c.getEvents().slice().sort((a,b)=>a.start-b.start);
+ const period=c.view.activeStart,periodEnd=c.view.activeEnd;
+ const dateLabel=date=>new Intl.DateTimeFormat('fr-FR',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}).format(date);
+ const timeLabel=date=>new Intl.DateTimeFormat('fr-FR',{hour:'2-digit',minute:'2-digit'}).format(date);
+ let rows='';
+ for(const event of items){
+   if(!event.start || event.start>=periodEnd || (event.end||event.start)<period)continue;
+   const p=event.extendedProps||{};
+   const state=String(p.status||'programmee');
+   const color={realisee:'#2b9769',partielle:'#d59a36',programmee:'#4383d5',non_effectuee:'#d15b65',annulee:'#d15b65',reportee:'#866ac4'}[state]||'#4383d5';
+   rows+='<tr><td>'+escapeHtml(dateLabel(event.start))+'</td><td>'+escapeHtml(timeLabel(event.start))+' – '+escapeHtml(event.end?timeLabel(event.end):'—')+'</td><td><span class="course" style="border-left-color:'+color+'">'+escapeHtml(event.title)+'</span></td><td>'+escapeHtml(state.replaceAll('_',' '))+'</td></tr>';
+ }
+ const markup='<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Planning EduPilot — '+escapeHtml(title)+'</title><style>'+
+ 'body{font:14px Arial,sans-serif;color:#223449;margin:20px;background:#fff}h1{font-size:22px;margin:0 0 8px}.subtitle{color:#5c6c7f;margin:0 0 16px}.actions{margin-bottom:18px}.actions button{padding:11px 19px;background:#db7934;color:#fff;border:0;border-radius:9px;font-weight:700;cursor:pointer}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{text-align:left;vertical-align:top;border:1px solid #d7e0ea;padding:10px;overflow-wrap:anywhere;line-height:1.4}th{background:#edf2f7}th:nth-child(1){width:19%}th:nth-child(2){width:16%}th:nth-child(4){width:12%}.course{display:block;padding-left:8px;border-left:4px solid #4383d5}tr{break-inside:avoid}@page{size:A4 landscape;margin:10mm}@media print{.actions{display:none}body{margin:0;font-size:11px}th,td{padding:7px}print-color-adjust:exact;-webkit-print-color-adjust:exact}</style></head><body>'+
+ '<div class="actions"><button type="button" onclick="window.print()">Imprimer / Enregistrer en PDF</button> <span>Sur téléphone, utilisez aussi le menu Partager → Imprimer du navigateur.</span></div>'+
+ '<h1>EduPilot — Planning</h1><p class="subtitle">'+escapeHtml(printHeading.textContent)+'</p>'+
+ '<table><thead><tr><th>Date</th><th>Heures</th><th>Cours / classe / enseignant</th><th>Statut</th></tr></thead><tbody>'+
+ (rows||'<tr><td colspan="4">Aucun cours pour ces filtres et cette période.</td></tr>')+
+ '</tbody></table></body></html>';
+ printable.document.open();
+ printable.document.write(markup);
+ printable.document.close();
 });})</script>{% endblock %}
