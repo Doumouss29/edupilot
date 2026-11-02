@@ -7,6 +7,27 @@
 #calendar .fc-timegrid-event .fc-event-title-container {min-width:0;overflow:visible}
 #calendar .fc-timegrid-event .fc-event-title {display:block;white-space:normal!important;overflow:visible!important;overflow-wrap:anywhere;word-break:normal;line-height:1.35}
 #calendar .fc-daygrid-event .fc-event-title {white-space:normal;overflow-wrap:anywhere}
+.planning-print-tools{display:flex;justify-content:flex-end;margin:0 0 12px}
+#planning-print-heading{display:none}
+@media print{
+ @page{size:A4 landscape;margin:9mm}
+ html,body{background:#fff!important;color:#172b3a!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+ body *{visibility:hidden!important}
+ .calendar-panel,.calendar-panel *{visibility:visible!important}
+ .calendar-panel{position:absolute!important;left:0!important;top:0!important;width:100%!important;padding:0!important;margin:0!important;border:0!important;box-shadow:none!important;background:white!important}
+ .calendar-panel > :not(#calendar):not(#planning-print-heading){display:none!important}
+ .calendar-panel #calendar{display:block!important;width:100%!important}
+ #planning-print-heading{display:block!important;margin:0 0 10px;font:600 13px/1.4 Arial,sans-serif;color:#233d55!important}
+ #calendar .fc-header-toolbar{display:none!important}
+ #calendar .fc-view-harness{height:auto!important;min-height:0!important}
+ #calendar .fc-scroller{overflow:visible!important;height:auto!important;max-height:none!important}
+ #calendar .fc-timegrid-event .fc-event-title{white-space:normal!important;overflow-wrap:anywhere!important}
+ #calendar .fc-event{break-inside:avoid!important}
+ #calendar .fc-timegrid-slot{height:1.1em!important}
+ #calendar .fc-timegrid-slot-label{font-size:9px!important}
+ #calendar .fc-col-header-cell-cushion{font-size:10px!important}
+ #calendar .fc-timegrid-event{font-size:9px!important}
+}
 </style>{% endblock %}{% block content %}<div class="page-actions"><a class="btn primary" href="{{url_for('video_classes')}}">Rejoindre un cours en visio</a></div><div class="section-intro"><span class="eyebrow">ORGANISATION DES COURS</span><h2>Calendrier des enseignements</h2><p>Planning interactif en mode jour, semaine et mois. Cliquez sur un cours pour consulter son statut.</p></div>{% if me.role in ('admin','administratif') %}<section class="panel"><div class="panel-title"><h3>Programmer une séance</h3></div><form method="post" class="inline-form planning-form" id="planning-create-form"><input type="hidden" name="csrf" value="{{csrf}}">
 <label>Type de planification<select name="mode" id="planning-mode"><option value="unique">Séance unique</option><option value="hebdomadaire">Répéter chaque semaine</option></select></label>
 <label>Classe<select name="class_id" id="planning-class" required><option value="">Choisir une classe</option>{% for cl in classes %}<option value="{{cl.id}}">{{cl.name}}</option>{% endfor %}</select></label>
@@ -51,7 +72,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   open();
  });
 });
-</script></section>{% endif %}<section class="panel calendar-panel">{% if me.role=='admin' %}<div class="page-actions" style="margin-bottom:14px"><a class="btn {{'primary' if request.args.get('mine')=='1' else 'outline'}}" href="{{url_for('planning',mine=1)}}">Mes séances d’enseignement</a><a class="btn {{'outline' if request.args.get('mine')=='1' else 'primary'}}" href="{{url_for('planning')}}">Planning de l’établissement</a></div>{% endif %}<div class="live-filter-bar" id="planning-live-filters"><label>Classe<select id="calendar-filter-class"><option value="">Toutes les classes</option></select></label><label>Enseignant<select id="calendar-filter-teacher"><option value="">Tous les enseignants</option></select></label></div><p class="muted" id="planning-timezone-label"></p><div id="calendar"></div></section><div class="legend"><span><i style="background:#2b9769"></i> Réalisée</span><span><i style="background:#4383d5"></i> Programmée</span><span><i style="background:#d59a36"></i> À confirmer</span><span><i style="background:#d15b65"></i> Non effectuée</span></div>{% if me.role in ('admin','administratif') %}<section class="panel"><div class="panel-title"><h3>Gérer plusieurs séances</h3><span class="muted">Sélectionnez des séances programmées pour les modifier ou les supprimer.</span></div>
+</script></section>{% endif %}<section class="panel calendar-panel">{% if me.role=='admin' %}<div class="page-actions" style="margin-bottom:14px"><a class="btn {{'primary' if request.args.get('mine')=='1' else 'outline'}}" href="{{url_for('planning',mine=1)}}">Mes séances d’enseignement</a><a class="btn {{'outline' if request.args.get('mine')=='1' else 'primary'}}" href="{{url_for('planning')}}">Planning de l’établissement</a></div>{% endif %}<div class="live-filter-bar" id="planning-live-filters"><label>Classe<select id="calendar-filter-class"><option value="">Toutes les classes</option></select></label><label>Enseignant<select id="calendar-filter-teacher"><option value="">Tous les enseignants</option></select></label></div><div class="planning-print-tools"><button class="btn outline" type="button" id="print-planning">🖨 Imprimer le planning</button></div><div id="planning-print-heading" aria-hidden="true"></div><p class="muted" id="planning-timezone-label"></p><div id="calendar"></div></section><div class="legend"><span><i style="background:#2b9769"></i> Réalisée</span><span><i style="background:#4383d5"></i> Programmée</span><span><i style="background:#d59a36"></i> À confirmer</span><span><i style="background:#d15b65"></i> Non effectuée</span></div>{% if me.role in ('admin','administratif') %}<section class="panel"><div class="panel-title"><h3>Gérer plusieurs séances</h3><span class="muted">Sélectionnez des séances programmées pour les modifier ou les supprimer.</span></div>
 <form method="post" action="{{url_for('lessons_bulk')}}" id="bulk-lessons"><input type="hidden" name="csrf" value="{{csrf}}">
 <div class="page-actions"><label>Action<select name="action" id="bulk-lesson-action"><option value="modify">Modifier les séances</option><option value="delete">Supprimer les séances</option></select></label><label>Décalage en jours<input type="number" name="day_offset" value="0" min="-365" max="365"></label><label>Décalage en minutes (multiples de 30)<input type="number" name="minute_offset" value="0" step="30" min="-1440" max="1440"></label><label><input type="checkbox" name="change_room" value="1"> Modifier la salle</label><label>Nouvelle salle<input name="room" maxlength="80" placeholder="Salle B12"></label><button class="btn primary" type="submit">Appliquer aux séances</button></div>
 <div class="table-scroll"><table><thead><tr><th><input type="checkbox" id="all-lessons" aria-label="Sélectionner les séances"></th><th>Cours / classe</th><th>Début</th><th>Fin</th><th>Enseignant</th><th>Salle</th><th>Statut</th><th>Modifier</th></tr></thead><tbody>{% for e in events %}<tr><td><input type="checkbox" name="lesson_ids" value="{{e.id}}" {% if e.status!='programmee' or e.actual_minutes or e.validated %}disabled{% endif %}></td><td>{{e.course_name}} — {{e.class_name}}</td><td><time data-abidjan-time="{{e.starts_at}}">{{e.starts_at|replace('T',' ')}}</time></td><td><time data-abidjan-time="{{e.ends_at}}">{{e.ends_at|replace('T',' ')}}</time></td><td>{{e.teacher_name or '—'}}</td><td>{{e.room or '—'}}</td><td><span class="tag">{{e.status}}</span></td><td><a class="btn outline sm" href="{{url_for('lesson_edit',lid=e.id)}}">Modifier</a></td></tr>{% else %}<tr><td colspan="8">Aucune séance à gérer.</td></tr>{% endfor %}</tbody></table></div></form></section>
@@ -104,4 +125,15 @@ declare.action='/lessons/'+encodeURIComponent(info.event.id)+'/declare';cancel.a
 const ended=new Date(info.event.end),allowed=new Date(ended.getTime()-30*60000),now=new Date(),done=['realisee','partielle','annulee','reportee'].includes(p.status);
 declare.hidden=now<allowed||done;hint.textContent=now<allowed?'Validation possible à partir de 30 minutes avant la fin.':'';
 cancel.hidden=done;const elapsed=(ended-info.event.start)/60000;declare.querySelector('[name=actual_minutes]').value=Math.round(elapsed);
-}});for(const select of [filterClass,filterTeacher])select.addEventListener('change',()=>c.refetchEvents());c.render()})</script>{% endblock %}
+}});for(const select of [filterClass,filterTeacher])select.addEventListener('change',()=>c.refetchEvents());c.render();
+const printButton=document.getElementById('print-planning');
+const printHeading=document.getElementById('planning-print-heading');
+if(printButton&&printHeading)printButton.addEventListener('click',()=>{
+ const classLabel=filterClass.selectedOptions[0]?.textContent||'Toutes les classes';
+ const teacherLabel=filterTeacher.selectedOptions[0]?.textContent||'Tous les enseignants';
+ const viewLabel={timeGridDay:'Jour',timeGridWeek:'Semaine',dayGridMonth:'Mois'}[c.view.type]||c.view.type;
+ const title=c.view.title;
+ printHeading.textContent='Planning — '+title+' · Vue '+viewLabel+' · '+classLabel+' · '+teacherLabel;
+ // FullCalendar has already filtered events according to these selections.
+ window.print();
+});})</script>{% endblock %}
