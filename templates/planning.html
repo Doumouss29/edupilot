@@ -66,6 +66,12 @@ document.addEventListener('DOMContentLoaded',()=>{
  for(const [key,val] of Object.entries(draft)){
   const input=form.elements.namedItem(key);if(input&&typeof val==='string')input.value=val;
  }
+ if(roomChoice&&roomInput&&draft.room){
+  const known=[...roomChoice.options].some(option=>option.value===draft.room);
+  roomChoice.value=known?draft.room:'__new__';
+  roomChoice.dispatchEvent(new Event('change'));
+  if(!known)roomInput.value=draft.room;
+ }
  if(draft.class_id){
   const course=form.elements.namedItem('course_id');
   if(course){for(const option of course.options){if(option.value){option.hidden=option.dataset.classId!==draft.class_id;option.disabled=option.hidden;}}course.value=draft.course_id||'';}
