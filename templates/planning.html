@@ -36,7 +36,7 @@
 <label>Heure de début<input type="time" name="start_time" step="1800" required></label>
 <label>Durée du cours (heures)<select name="duration_hours" required>{% for x in range(1,25) %}<option value="{{x/2}}" {% if x==4 %}selected{% endif %}>{{x/2|int if x%2==0 else x/2}} h</option>{% endfor %}</select></label>
 <label class="repeat-until" style="display:none">Répéter jusqu'au<input type="date" name="repeat_until" id="repeat-until"></label>
-<label>Salle<input name="room" placeholder="Salle A12"></label>
+<label>Salle<select id="planning-room-choice" aria-label="Choisir une salle"><option value="">Sans salle</option>{% for room in rooms %}<option value="{{room}}">{{room}}</option>{% endfor %}<option value="__new__">+ Ajouter une nouvelle salle…</option></select><input id="planning-room-value" name="room" maxlength="80" placeholder="Nom de la nouvelle salle" aria-label="Nouvelle salle" hidden disabled></label>
 <button class="btn primary" id="planning-submit" type="submit">Ajouter au planning</button></form>
 <dialog id="planning-feedback" aria-labelledby="planning-feedback-title" style="max-width:min(92vw,460px);border:0;border-radius:16px;padding:25px;box-shadow:0 18px 55px #0004">
 <h3 id="planning-feedback-title">Planification</h3>
@@ -46,6 +46,18 @@
 <script>
 document.addEventListener('DOMContentLoaded',()=>{
  const form=document.getElementById('planning-create-form'),dialog=document.getElementById('planning-feedback');
+ const roomChoice=document.getElementById('planning-room-choice'),roomInput=document.getElementById('planning-room-value');
+ if(roomChoice&&roomInput){
+  const updateRoom=()=>{
+   const adding=roomChoice.value==='__new__';
+   roomInput.hidden=!adding;roomInput.disabled=!adding;roomInput.required=adding;
+   if(!adding)roomInput.value='';
+  };
+  roomChoice.addEventListener('change',updateRoom);
+  form?.addEventListener('submit',()=>{if(roomChoice.value!=='__new__'){roomInput.disabled=false;roomInput.value=roomChoice.value;}});
+  updateRoom();
+ }
+
  if(!form||!dialog)return;
  const draft={{planning_draft|tojson}},result={{planning_result|tojson}};
  const title=document.getElementById('planning-feedback-title'),message=document.getElementById('planning-feedback-message'),close=document.getElementById('planning-feedback-close');
