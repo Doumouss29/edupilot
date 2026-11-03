@@ -2253,7 +2253,12 @@ def courses():
 @app.post('/courses/<int:cid>/delete')
 @roles('admin','administratif')
 def course_delete(cid):
-    """Delete an unused course, preserving academic records and issued memos."""
+    """Delete an unused course, or explicitly remove all of its history as school admin."""
+    force=request.form.get('force_delete')=='1'
+    if force and current_user()['role']!='admin':abort(403)
+    if force and request.form.get('confirm_word','').strip()!='SUPPRIMER':
+        flash('Pour supprimer un cours avec son historique, confirmez en saisissant SUPPRIMER.','error')
+        return redirect(url_for('courses'))
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
         course=c.execute('SELECT id,name FROM courses WHERE id=? AND school_id=?',
@@ -2266,17 +2271,38 @@ def course_delete(cid):
         )
         blockers=[description for table,description in dependencies
                   if c.execute(f'SELECT 1 FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone()]
-        if blockers:
+        if blockers and not force:
             flash('Suppression impossible pour « '+course['name']+' » : le cours possède '
-                  +', '.join(blockers)+'. Conservez les données pédagogiques.','error')
+                  +', '.join(blockers)+'. L’admin école peut utiliser « Supprimer avec historique » si cette suppression est réellement voulue.','error')
             return redirect(url_for('courses'))
+        if force:
+            # Explicit destructive path: all statements run in one transaction.
+            # Preserve other courses and their academic records.
+            c.execute("""DELETE FROM grade_history WHERE grade_id IN (
+                SELECT g.id FROM grades g JOIN assessments a ON a.id=g.assessment_id
+                WHERE a.course_id=? AND a.school_id=?)""",(cid,school_id()))
+            c.execute("""DELETE FROM grades WHERE assessment_id IN (
+                SELECT id FROM assessments WHERE course_id=? AND school_id=?)""",(cid,school_id()))
+            c.execute("""DELETE FROM submissions WHERE assessment_id IN (
+                SELECT id FROM assessments WHERE course_id=? AND school_id=?)""",(cid,school_id()))
+            c.execute("""DELETE FROM assessment_files WHERE assessment_id IN (
+                SELECT id FROM assessments WHERE course_id=? AND school_id=?)""",(cid,school_id()))
+            c.execute('DELETE FROM assessments WHERE course_id=? AND school_id=?',(cid,school_id()))
+            c.execute("""DELETE FROM attendance WHERE lesson_id IN (
+                SELECT id FROM lessons WHERE course_id=? AND school_id=?)""",(cid,school_id()))
+            c.execute('DELETE FROM lessons WHERE course_id=? AND school_id=?',(cid,school_id()))
+            c.execute('DELETE FROM teacher_memos WHERE course_id=? AND school_id=?',(cid,school_id()))
+            # A previously published bulletin may have used grades from this course.
+            # Invalidate publication for its class so stale results are not exposed.
+            c.execute("""DELETE FROM bulletin_publications WHERE school_id=? AND class_id=(
+                SELECT class_id FROM courses WHERE id=? AND school_id=?)""",(school_id(),cid,school_id()))
         # Pricing overrides and teacher assignments have no independent academic record
         # once the course has no sessions, assessments or generated memo.
         c.execute('DELETE FROM memo_rates WHERE course_id=? AND school_id=?',(cid,school_id()))
         c.execute('DELETE FROM teacher_history WHERE course_id=?',(cid,))
         c.execute('DELETE FROM courses WHERE id=? AND school_id=?',(cid,school_id()))
-    audit('course.deleted',str(cid))
-    flash('Cours « '+course['name']+' » supprimé.','success')
+    audit('course.deleted_with_history' if force else 'course.deleted',str(cid))
+    flash('Cours « '+course['name']+' » supprimé'+(' avec son historique pédagogique.' if force else '.') ,'success')
     return redirect(url_for('courses'))
 
 
