@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block heading %}Maquette de formation{% endblock %}
+{% block content %}
+<style>
+.maquette-layout{display:grid;gap:20px}
+.maquette-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.maquette-subtitle{color:#68788b;margin-top:5px}
+.maquette-meta{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px}
+.maquette-meta span{background:#edf3f9;color:#28435d;border-radius:8px;padding:8px 12px;font-size:.92rem}
+.maquette-summary{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.maquette-summary div{padding:13px 18px;background:#f4f7fb;border:1px solid #e1e9f1;border-radius:12px;min-width:120px}
+.maquette-summary strong{display:block;font-size:1.3rem;color:#203950}
+.maquette-summary small{color:#65768a}
+.maquette-table-wrap{overflow-x:auto;max-width:100%}
+.maquette-table{width:100%;border-collapse:collapse}
+.maquette-table th,.maquette-table td{text-align:left;padding:12px;border-bottom:1px solid #e6edf3;vertical-align:top}
+.maquette-table th{background:#f3f6fa;white-space:nowrap;color:#324a63}
+.maquette-table td:nth-child(3),.maquette-table td:nth-child(4){white-space:nowrap}
+.maquette-table tfoot td{font-weight:700;background:#f7f9fc}
+@media(max-width:600px){.maquette-table th,.maquette-table td{padding:10px 8px;font-size:.88rem}.maquette-meta span{font-size:.85rem}}
+</style>
+<div class="section-intro"><span class="eyebrow">ESPACE ÉTUDIANT</span><h2>Maquette de ma formation</h2><p>Consultez les enseignements de votre classe, leurs coefficients et leurs volumes horaires prévus.</p></div>
+<div class="maquette-layout">
+{% for formation in curricula %}
+<section class="panel">
+<div class="maquette-header"><h3>{{formation.class_name}}</h3></div>
+<div class="maquette-meta">
+{% if formation.filiere_name %}<span><strong>Filière :</strong> {{formation.filiere_name}}</span>{% endif %}
+<span><strong>Année scolaire :</strong> {{formation.year_label}}</span>
+</div>
+<div class="maquette-summary">
+<div><strong>{{formation.courses|length}}</strong><small>Cours</small></div>
+<div><strong>{{'%g'|format(formation.total_coefficients)}}</strong><small>Total coefficients</small></div>
+<div><strong>{{'%g'|format(formation.total_hours)}} h</strong><small>Volume horaire prévu</small></div>
+</div>
+{% if formation.courses %}
+<div class="maquette-table-wrap"><table class="maquette-table"><thead><tr><th>Cours / matière</th><th>Code</th><th>Coefficient</th><th>Volume horaire</th></tr></thead><tbody>
+{% for course in formation.courses %}
+<tr><td><strong>{{course.name}}</strong></td><td>{{course.code or '—'}}</td><td>{{'%g'|format(course.coefficient or 0)}}</td><td>{{'%g'|format(course.hours)}} h</td></tr>
+{% endfor %}
+</tbody><tfoot><tr><td colspan="2">Total</td><td>{{'%g'|format(formation.total_coefficients)}}</td><td>{{'%g'|format(formation.total_hours)}} h</td></tr></tfoot></table></div>
+{% else %}<p class="muted">Aucun cours n'a encore été ajouté à la maquette de cette classe.</p>{% endif %}
+</section>
+{% else %}
+<section class="panel"><h3>Aucune formation disponible</h3><p class="muted">Vous n'êtes actuellement inscrit dans aucune classe de cet établissement. Contactez l'administration de votre école.</p></section>
+{% endfor %}
+</div>
+{% endblock %}
