@@ -2250,6 +2250,36 @@ def courses():
     rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
     return render_template('courses_manage.html',selected_class_id=session.get(f'course_create_class_{school_id()}_{current_user()["id"]}', ''),courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') ORDER BY LOWER(name),id"))
 
+@app.post('/courses/<int:cid>/delete')
+@roles('admin','administratif')
+def course_delete(cid):
+    """Delete an unused course, preserving academic records and issued memos."""
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        course=c.execute('SELECT id,name FROM courses WHERE id=? AND school_id=?',
+                         (cid,school_id())).fetchone()
+        if not course:abort(404)
+        dependencies=(
+            ('lessons','séances planifiées ou historisées'),
+            ('assessments','évaluations et notes associées'),
+            ('teacher_memos','mémos enseignants générés'),
+        )
+        blockers=[description for table,description in dependencies
+                  if c.execute(f'SELECT 1 FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone()]
+        if blockers:
+            flash('Suppression impossible pour « '+course['name']+' » : le cours possède '
+                  +', '.join(blockers)+'. Conservez les données pédagogiques.','error')
+            return redirect(url_for('courses'))
+        # Pricing overrides and teacher assignments have no independent academic record
+        # once the course has no sessions, assessments or generated memo.
+        c.execute('DELETE FROM memo_rates WHERE course_id=? AND school_id=?',(cid,school_id()))
+        c.execute('DELETE FROM teacher_history WHERE course_id=?',(cid,))
+        c.execute('DELETE FROM courses WHERE id=? AND school_id=?',(cid,school_id()))
+    audit('course.deleted',str(cid))
+    flash('Cours « '+course['name']+' » supprimé.','success')
+    return redirect(url_for('courses'))
+
+
 @app.post('/courses/bulk')
 @roles('admin','administratif')
 def courses_bulk():
