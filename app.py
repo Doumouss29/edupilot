@@ -2196,6 +2196,40 @@ def students():
         class_choices=[c for c in class_choices if one('SELECT id FROM courses WHERE class_id=? AND school_id=? AND teacher_id=?',(c['id'],school_id(),u['id']))]
     return render_template('students.html',enrollments=entries,classes=class_choices,years=year_choices,can_edit=u['role'] in ('admin','administratif'),chosen_class=requested_class,chosen_year=requested_year)
 
+@app.get('/maquette')
+@roles('etudiant')
+def student_maquette():
+    """Read-only academic curriculum, isolated to the student's own enrollments."""
+    u=current_user()
+    enrollment_rows=allrows("""SELECT DISTINCT cl.id class_id,cl.name class_name,
+                              y.id year_id,y.label year_label,
+                              f.name filiere_name
+        FROM enrollments e
+        JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id
+                        AND cl.year_id=e.year_id
+        JOIN years y ON y.id=e.year_id AND y.school_id=e.school_id
+        LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id
+        WHERE e.student_id=? AND e.school_id=?
+        ORDER BY y.label DESC,cl.name""",(u['id'],school_id()))
+    curricula=[]
+    for enrollment in enrollment_rows:
+        courses_rows=allrows("""SELECT c.id,c.name,c.code,c.coefficient,c.planned_minutes
+            FROM courses c
+            WHERE c.school_id=? AND c.class_id=?
+            ORDER BY LOWER(c.name),c.id""",(school_id(),enrollment['class_id']))
+        courses_data=[dict(name=c['name'],code=c['code'],
+                           coefficient=c['coefficient'],
+                           hours=(c['planned_minutes'] or 0)/60)
+                      for c in courses_rows]
+        curricula.append(dict(class_name=enrollment['class_name'],
+                              filiere_name=enrollment['filiere_name'],
+                              year_label=enrollment['year_label'],
+                              courses=courses_data,
+                              total_hours=sum(c['hours'] for c in courses_data),
+                              total_coefficients=sum(float(c['coefficient'] or 0) for c in courses_data)))
+    return render_template('student_maquette.html',curricula=curricula)
+
+
 @app.route('/courses',methods=['GET','POST'])
 @roles('admin','administratif')
 def courses():
