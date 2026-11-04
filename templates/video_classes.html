@@ -2,6 +2,7 @@
 {% block heading %}Cours en visioconférence{% endblock %}
 {% block content %}
 <div class="section-intro"><span class="eyebrow">COURS EN LIGNE</span><h2>Rejoindre une visioconférence</h2><p>Sélectionnez d'abord une filière, puis la classe dont vous souhaitez rejoindre la visioconférence.</p></div>
+<style>#video-join[aria-disabled="true"]{opacity:.5;cursor:not-allowed;pointer-events:none}</style>
 <section class="panel">
 {% if classes %}
 <div class="modern-form" style="max-width:650px;display:grid;gap:16px">
@@ -24,7 +25,7 @@
 <option value="{{cl.id}}" data-filiere="{{cl.filiere_id if cl.filiere_id else 'sans_filiere'}}" data-link="{{cl.video_url}}" data-year="{{cl.academic_year}}" hidden disabled>{{cl.name}} — {{cl.academic_year}}</option>
 {% endfor %}
 </select></label>
-<div><button type="button" id="video-join" class="btn primary" disabled>Rejoindre le cours en visio</button></div>
+<div><a id="video-join" class="btn primary" href="#" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" aria-disabled="true">Rejoindre le cours en visio</a></div>
 <p class="muted" id="video-join-help" aria-live="polite">Le lien de visioconférence est configuré par classe, et non par cours.</p>
 </div>
 <script>
@@ -41,15 +42,20 @@ document.addEventListener('DOMContentLoaded',()=>{
    option.hidden=!available;option.disabled=!available;
   }
   classe.value=[...classe.options].some(o=>o.value===previous&&!o.disabled)?previous:'';
-  join.disabled=!classe.value;
+  const selected=classe.selectedOptions[0];
+  join.href=selected?.dataset.link||'#';
+  join.setAttribute('aria-disabled',!selected?.dataset.link?'true':'false');
  };
  filiere.addEventListener('change',()=>{classe.value='';updateClasses();});
- classe.addEventListener('change',()=>{join.disabled=!classe.value;});
- join.addEventListener('click',()=>{
-  const selected=classe.selectedOptions[0],url=selected?.dataset.link;
-  if(!url)return;
-  const destination=window.open(url,'_blank','noopener,noreferrer');
-  if(!destination){help.textContent='Ouverture bloquée : autorisez les fenêtres contextuelles ou ouvrez le lien depuis votre navigateur.';}
+ classe.addEventListener('change',()=>{
+  join.href=classe.selectedOptions[0]?.dataset.link||'#';
+  join.setAttribute('aria-disabled',classe.value?'false':'true');
+ });
+ join.addEventListener('click',event=>{
+  if(!classe.value || !classe.selectedOptions[0]?.dataset.link){
+   event.preventDefault();
+   help.textContent='Choisissez une filière puis une classe pour rejoindre le cours.';
+  }
  });
  updateClasses();
 });
