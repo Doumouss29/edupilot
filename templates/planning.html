@@ -227,17 +227,70 @@ dateClick:function(info){
  }
 },
 {% endif %}
-eventDidMount:function(info){const status=info.event.extendedProps.status;const colors={realisee:'#2b9769',partielle:'#d59a36',programmee:'#4383d5',non_effectuee:'#d15b65',annulee:'#d15b65',reportee:'#866ac4'};info.el.style.backgroundColor=colors[status]||'#4383d5';info.el.style.borderColor=colors[status]||'#4383d5';info.el.title=info.event.title},eventClick:function(info){const p=info.event.extendedProps,panel=document.getElementById('lesson-action-panel');
-if(!panel || !p.actionable){alert(info.event.title+'\nStatut : '+p.status);return;}
-panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'center'});
-document.getElementById('lesson-action-details').textContent=info.event.title;
-const declare=document.getElementById('lesson-declare-form'), cancel=document.getElementById('lesson-cancel-form'),hint=document.getElementById('lesson-validation-info');
-declare.action='/lessons/'+encodeURIComponent(info.event.id)+'/declare';cancel.action='/lessons/'+encodeURIComponent(info.event.id)+'/cancel';{% if me.role in ('admin','administratif') %}const del=document.getElementById('lesson-delete-form');if(del){del.action='/lessons/'+encodeURIComponent(info.event.id)+'/delete';del.hidden=p.status!=='programmee'||new Date(info.event.start)<=new Date();}const hideCancelled=document.getElementById('lesson-hide-cancelled-form');if(hideCancelled){hideCancelled.action='/lessons/'+encodeURIComponent(info.event.id)+'/hide-cancelled';hideCancelled.hidden=p.status!=='annulee';}{% endif %}
-{% if me.role in ('admin','administratif') %}const editLink=document.getElementById('lesson-edit-from-calendar');if(editLink)editLink.href='/lessons/'+encodeURIComponent(info.event.id)+'/edit';{% endif %}
-const ended=new Date(info.event.end),allowed=new Date(ended.getTime()-30*60000),now=new Date(),done=['realisee','partielle','annulee','reportee'].includes(p.status);
-declare.hidden=now<allowed||done;hint.textContent=now<allowed?'Validation possible à partir de 30 minutes avant la fin.':'';
-cancel.hidden=done;const elapsed=(ended-info.event.start)/60000;declare.querySelector('[name=actual_minutes]').value=Math.round(elapsed);
+eventDidMount:function(info){const status=info.event.extendedProps.status;const colors={realisee:'#2b9769',partielle:'#d59a36',programmee:'#4383d5',non_effectuee:'#d15b65',annulee:'#d15b65',reportee:'#866ac4'};info.el.style.backgroundColor=colors[status]||'#4383d5';info.el.style.borderColor=colors[status]||'#4383d5';info.el.title=info.event.title},eventClick:function(info){
+ const p=info.event.extendedProps,dialog=document.getElementById('lesson-action-panel');
+ if(!dialog || !p.actionable){alert(info.event.title+'\nStatut : '+p.status);return;}
+ const detail=document.getElementById('lesson-action-details'),hint=document.getElementById('lesson-action-hint');
+ const showValidate=document.getElementById('show-lesson-validate');
+ const showCancel=document.getElementById('show-lesson-cancel');
+ const declare=document.getElementById('lesson-declare-form'),cancel=document.getElementById('lesson-cancel-form');
+ const forms=[declare,cancel];
+ {% if me.role in ('admin','administratif') %}
+ const edit=document.getElementById('lesson-edit-calendar-form');
+ const showEdit=document.getElementById('show-lesson-edit');
+ forms.push(edit);
+ {% endif %}
+ const showOnly=form=>{forms.forEach(f=>{if(f)f.hidden=f!==form;});hint.textContent='';};
+ detail.textContent=info.event.title;
+ const lid=encodeURIComponent(info.event.id);
+ declare.action='/lessons/'+lid+'/declare';
+ cancel.action='/lessons/'+lid+'/cancel';
+ const endTime=info.event.end,now=new Date();
+ const completed=['realisee','partielle','non_effectuee','annulee','reportee'].includes(p.status);
+ const canValidate=!completed&&endTime&&now>=new Date(endTime.getTime()-15*60000);
+ showValidate.hidden=!canValidate;
+ showCancel.hidden=completed;
+ declare.querySelector('[name="actual_minutes"]').value=Math.round(((endTime||now)-info.event.start)/60000);
+ showValidate.onclick=()=>showOnly(declare);
+ showCancel.onclick=()=>showOnly(cancel);
+ {% if me.role in ('admin','administratif') %}
+ const editable=Boolean(p.editable)&&!completed;
+ showEdit.hidden=!editable;
+ edit.action='/lessons/'+lid+'/edit';
+ edit.elements.namedItem('course_id').value=String(p.courseId||'');
+ const dateTime=String(p.startsAt||'');
+ const endDateTime=String(p.endsAt||'');
+ edit.elements.namedItem('lesson_date').value=dateTime.slice(0,10);
+ edit.elements.namedItem('start_time').value=dateTime.slice(11,16);
+ edit.elements.namedItem('duration_hours').value=String((new Date(endDateTime+'Z')-new Date(dateTime+'Z'))/3600000);
+ edit.elements.namedItem('room').value=p.room||'';
+ showEdit.onclick=()=>showOnly(edit);
+ {% endif %}
+ forms.forEach(f=>{if(f)f.hidden=true;});
+ if(!canValidate && !completed)hint.textContent='Validation disponible à partir de 15 minutes avant la fin.';
+ if(completed)hint.textContent='Cette séance est déjà déclarée ou annulée.';
+ if(!dialog.open){if(typeof dialog.showModal==='function')dialog.showModal();else dialog.setAttribute('open','');}
 }});for(const select of [filterClass,filterTeacher])select.addEventListener('change',()=>c.refetchEvents());c.render();
+const actionDialog=document.getElementById('lesson-action-panel');
+document.getElementById('lesson-action-close')?.addEventListener('click',()=>{if(actionDialog?.close)actionDialog.close();else actionDialog?.removeAttribute('open');});
+{% if me.role in ('admin','administratif') %}
+const videoToggle=document.getElementById('toggle-video-choices'),videoArea=document.getElementById('planning-video-choices');
+const videoFiliere=document.getElementById('planning-video-filiere'),videoClasse=document.getElementById('planning-video-classe'),videoJoin=document.getElementById('planning-video-join');
+const toggleVideo=open=>{if(!videoArea)return;videoArea.hidden=!open;videoToggle?.setAttribute('aria-expanded',String(open));};
+videoToggle?.addEventListener('click',()=>toggleVideo(videoArea.hidden));
+document.getElementById('close-video-choices')?.addEventListener('click',()=>toggleVideo(false));
+videoFiliere?.addEventListener('change',()=>{
+ videoClasse.value='';videoClasse.disabled=!videoFiliere.value;
+ for(const option of [...videoClasse.options].slice(1)){option.disabled=option.dataset.filiere!==videoFiliere.value;option.hidden=option.disabled;}
+ videoJoin?.setAttribute('aria-disabled','true');
+ if(videoJoin)videoJoin.href='#';
+});
+videoClasse?.addEventListener('change',()=>{
+ const url=videoClasse.selectedOptions[0]?.dataset.url;
+ if(videoJoin){videoJoin.href=url||'#';videoJoin.setAttribute('aria-disabled',url?'false':'true');}
+});
+videoJoin?.addEventListener('click',e=>{if(videoJoin.getAttribute('aria-disabled')==='true')e.preventDefault();});
+{% endif %}
 const printButton=document.getElementById('print-planning');
 const printHeading=document.getElementById('planning-print-heading');
 if(printButton&&printHeading)printButton.addEventListener('click',()=>{
