@@ -1859,8 +1859,11 @@ def classes():
 @roles('admin','administratif','enseignant','etudiant')
 def video_classes():
     u=current_user()
-    query="""SELECT cl.id,cl.name,cl.video_url,y.label academic_year
-        FROM classes cl JOIN years y ON y.id=cl.year_id
+    query="""SELECT cl.id,cl.name,cl.video_url,y.label academic_year,
+               f.id filiere_id,f.name filiere_name
+        FROM classes cl
+        JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id
+        LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id
         WHERE cl.school_id=? AND cl.video_url IS NOT NULL AND cl.video_url<>''"""
     args=[school_id()]
     if u['role']=='enseignant':
@@ -1869,7 +1872,7 @@ def video_classes():
     elif u['role']=='etudiant':
         query+=" AND EXISTS (SELECT 1 FROM enrollments e WHERE e.school_id=cl.school_id AND e.class_id=cl.id AND e.student_id=? AND e.year_id=cl.year_id)"
         args.append(u['id'])
-    query+=' ORDER BY LOWER(cl.name),cl.id'
+    query+=' ORDER BY LOWER(f.name),LOWER(cl.name),cl.id'
     return render_template('video_classes.html',classes=allrows(query,args))
 
 @app.route('/classes/<int:cid>/edit',methods=['GET','POST'])
