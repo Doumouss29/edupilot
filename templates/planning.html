@@ -39,7 +39,7 @@
  #calendar .fc-col-header-cell-cushion{font-size:10px!important}
  #calendar .fc-timegrid-event{font-size:9px!important}
 }
-</style>{% endblock %}{% block content %}<div class="page-actions planning-top-actions"><a class="btn outline" href="{{url_for('video_classes')}}">Rejoindre un cours en visio</a>{% if me.role in ('admin','administratif') %}<button type="button" class="btn primary" id="open-planning-modal">+ Programmer une séance</button>{% endif %}</div><div class="section-intro"><span class="eyebrow">ORGANISATION DES COURS</span><h2>Calendrier des enseignements</h2><p>Planning interactif en mode jour, semaine et mois. Cliquez sur un cours pour consulter son statut.</p></div>{% if me.role in ('admin','administratif') %}<dialog id="planning-create-dialog" class="planning-create-dialog" aria-labelledby="planning-create-heading"><div class="planning-dialog-header"><div><span class="eyebrow">CALENDRIER</span><h2 id="planning-create-heading">Programmer une séance</h2></div><button type="button" class="btn outline sm" id="close-planning-modal" aria-label="Fermer la planification">✕</button></div><p class="muted">Choisissez une classe et un cours. Les horaires sont saisis dans le fuseau sélectionné.</p><form method="post" class="inline-form planning-form" id="planning-create-form"><input type="hidden" name="csrf" value="{{csrf}}">
+</style>{% endblock %}{% block content %}<div class="page-actions planning-top-actions"><a class="btn outline" href="{{url_for('video_classes')}}">Rejoindre un cours en visio</a>{% if me.role in ('admin','administratif') %}<button type="button" class="btn primary" id="open-planning-modal">+ Programmer une séance</button>{% endif %}</div><div class="section-intro"><span class="eyebrow">ORGANISATION DES COURS</span><h2>Calendrier des enseignements</h2><p>Planning interactif en mode jour, semaine et mois. Cliquez sur un cours pour consulter son statut{% if me.role in ('admin','administratif') %}, ou sur une case libre pour programmer une séance à cette date et cette heure{% endif %}.</p></div>{% if me.role in ('admin','administratif') %}<dialog id="planning-create-dialog" class="planning-create-dialog" aria-labelledby="planning-create-heading"><div class="planning-dialog-header"><div><span class="eyebrow">CALENDRIER</span><h2 id="planning-create-heading">Programmer une séance</h2></div><button type="button" class="btn outline sm" id="close-planning-modal" aria-label="Fermer la planification">✕</button></div><p class="muted">Choisissez une classe et un cours. Les horaires sont saisis dans le fuseau sélectionné.</p><form method="post" class="inline-form planning-form" id="planning-create-form"><input type="hidden" name="csrf" value="{{csrf}}">
 <label>Type de planification<select name="mode" id="planning-mode"><option value="unique">Séance unique</option><option value="hebdomadaire">Répéter chaque semaine</option></select></label>
 <label>Classe<select name="class_id" id="planning-class" required><option value="">Choisir une classe</option>{% for cl in classes %}<option value="{{cl.id}}">{{cl.name}}</option>{% endfor %}</select></label>
 <label>Cours<select name="course_id" id="planning-course" required><option value="">Choisir un cours</option>{% for c in courses %}<option value="{{c.id}}" data-class-id="{{c.class_id}}">{{c.name}}</option>{% endfor %}</select></label>
@@ -172,7 +172,34 @@ async function loadPlanning(){
 const c=new FullCalendar.Calendar(el,{initialView:window.innerWidth<720?'timeGridDay':'timeGridWeek',locale:'fr',firstDay:1,nowIndicator:true,slotMinTime:'07:00:00',slotMaxTime:'21:00:00',height:'auto',headerToolbar:{left:'prev,next today',center:'title',right:'timeGridDay,timeGridWeek,dayGridMonth'},buttonText:{today:"Aujourd'hui",day:'Jour',week:'Semaine',month:'Mois'},events:function(info,success,failure){loadPlanning().then(records=>success(records.filter(item=>{
 const props=item.extendedProps||{};
 return (!filterClass.value||String(props.classId)===filterClass.value)&&(!filterTeacher.value||String(props.teacherId)===filterTeacher.value);
-}))).catch(failure)},eventDidMount:function(info){const status=info.event.extendedProps.status;const colors={realisee:'#2b9769',partielle:'#d59a36',programmee:'#4383d5',non_effectuee:'#d15b65',annulee:'#d15b65',reportee:'#866ac4'};info.el.style.backgroundColor=colors[status]||'#4383d5';info.el.style.borderColor=colors[status]||'#4383d5';info.el.title=info.event.title},eventClick:function(info){const p=info.event.extendedProps,panel=document.getElementById('lesson-action-panel');
+}))).catch(failure)},
+{% if me.role in ('admin','administratif') %}
+dateClick:function(info){
+ const date=info.date;
+ const chosenClass=filterClass.value;
+ // The month view supplies a date but no hour. Default to 08:00 in the form's timezone.
+ if(info.view.type==='dayGridMonth'){
+  const selected=document.querySelector('#planning-create-form [name="planning_timezone"]')?.value||'Africa/Abidjan';
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{
+   timeZone:selected,year:'numeric',month:'2-digit',day:'2-digit'
+  }).formatToParts(date).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
+  const form=document.getElementById('planning-create-form');
+  if(form){
+   form.elements.namedItem('lesson_date').value=info.dateStr.slice(0,10);
+   form.elements.namedItem('start_time').value='08:00';
+   if(chosenClass){
+    const select=document.getElementById('planning-class');
+    select.value=chosenClass;select.dispatchEvent(new Event('change'));
+   }
+   const dialog=document.getElementById('planning-create-dialog');
+   if(dialog&&!dialog.open)dialog.showModal();
+  }
+ }else if(window.openEduPilotPlanning){
+  window.openEduPilotPlanning(date,chosenClass);
+ }
+},
+{% endif %}
+eventDidMount:function(info){const status=info.event.extendedProps.status;const colors={realisee:'#2b9769',partielle:'#d59a36',programmee:'#4383d5',non_effectuee:'#d15b65',annulee:'#d15b65',reportee:'#866ac4'};info.el.style.backgroundColor=colors[status]||'#4383d5';info.el.style.borderColor=colors[status]||'#4383d5';info.el.title=info.event.title},eventClick:function(info){const p=info.event.extendedProps,panel=document.getElementById('lesson-action-panel');
 if(!panel || !p.actionable){alert(info.event.title+'\nStatut : '+p.status);return;}
 panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'center'});
 document.getElementById('lesson-action-details').textContent=info.event.title;
