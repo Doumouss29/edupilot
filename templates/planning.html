@@ -179,10 +179,6 @@ dateClick:function(info){
  const chosenClass=filterClass.value;
  // The month view supplies a date but no hour. Default to 08:00 in the form's timezone.
  if(info.view.type==='dayGridMonth'){
-  const selected=document.querySelector('#planning-create-form [name="planning_timezone"]')?.value||'Africa/Abidjan';
-  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{
-   timeZone:selected,year:'numeric',month:'2-digit',day:'2-digit'
-  }).formatToParts(date).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
   const form=document.getElementById('planning-create-form');
   if(form){
    form.elements.namedItem('lesson_date').value=info.dateStr.slice(0,10);
