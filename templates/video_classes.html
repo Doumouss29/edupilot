@@ -1,15 +1,60 @@
 {% extends 'base.html' %}
 {% block heading %}Cours en visioconférence{% endblock %}
 {% block content %}
-<div class="section-intro"><span class="eyebrow">COURS EN LIGNE</span><h2>Rejoindre une visioconférence</h2><p>Accédez aux salles virtuelles des classes auxquelles vous êtes affecté.</p></div>
+<div class="section-intro"><span class="eyebrow">COURS EN LIGNE</span><h2>Rejoindre une visioconférence</h2><p>Sélectionnez d'abord une filière, puis la classe dont vous souhaitez rejoindre la visioconférence.</p></div>
 <section class="panel">
 {% if classes %}
-<div class="table-scroll"><table><thead><tr><th>Classe</th><th>Année scolaire</th><th>Rejoindre</th></tr></thead><tbody>
+<div class="modern-form" style="max-width:650px;display:grid;gap:16px">
+<label>Filière
+<select id="video-filiere" required>
+<option value="">Choisir une filière</option>
+{% set namespace_f = namespace(ids=[]) %}
 {% for cl in classes %}
-<tr><td>{{cl.name}}</td><td>{{cl.academic_year}}</td><td><a class="btn primary sm" href="{{cl.video_url}}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Rejoindre le cours en visio</a></td></tr>
+{% set key = cl.filiere_id|string if cl.filiere_id else 'sans_filiere' %}
+{% if key not in namespace_f.ids %}
+<option value="{{key}}">{{cl.filiere_name or 'Sans filière'}}</option>
+{% set namespace_f.ids = namespace_f.ids + [key] %}
+{% endif %}
 {% endfor %}
-</tbody></table></div>
+</select></label>
+<label>Classe
+<select id="video-classe" disabled required>
+<option value="">Choisir d'abord une filière</option>
+{% for cl in classes %}
+<option value="{{cl.id}}" data-filiere="{{cl.filiere_id if cl.filiere_id else 'sans_filiere'}}" data-link="{{cl.video_url}}" data-year="{{cl.academic_year}}" hidden disabled>{{cl.name}} — {{cl.academic_year}}</option>
+{% endfor %}
+</select></label>
+<div><button type="button" id="video-join" class="btn primary" disabled>Rejoindre le cours en visio</button></div>
+<p class="muted" id="video-join-help" aria-live="polite">Le lien de visioconférence est configuré par classe, et non par cours.</p>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
+ const filiere=document.getElementById('video-filiere'),classe=document.getElementById('video-classe');
+ const join=document.getElementById('video-join'),help=document.getElementById('video-join-help');
+ if(!filiere||!classe||!join)return;
+ const updateClasses=()=>{
+  const previous=classe.value;
+  classe.options[0].textContent=filiere.value?'Choisir une classe':'Choisir d’abord une filière';
+  classe.disabled=!filiere.value;
+  for(const option of Array.from(classe.options).slice(1)){
+   const available=option.dataset.filiere===filiere.value;
+   option.hidden=!available;option.disabled=!available;
+  }
+  classe.value=[...classe.options].some(o=>o.value===previous&&!o.disabled)?previous:'';
+  join.disabled=!classe.value;
+ };
+ filiere.addEventListener('change',()=>{classe.value='';updateClasses();});
+ classe.addEventListener('change',()=>{join.disabled=!classe.value;});
+ join.addEventListener('click',()=>{
+  const selected=classe.selectedOptions[0],url=selected?.dataset.link;
+  if(!url)return;
+  const destination=window.open(url,'_blank','noopener,noreferrer');
+  if(!destination){help.textContent='Ouverture bloquée : autorisez les fenêtres contextuelles ou ouvrez le lien depuis votre navigateur.';}
+ });
+ updateClasses();
+});
+</script>
 {% else %}<p class="muted">Aucun lien de visioconférence n'est disponible pour vos classes pour le moment.</p>{% endif %}
-{% if me.role in ('admin','administratif') %}<p class="muted">Pour ajouter ou modifier un lien, ouvrez Classes, puis Modifier sur la classe concernée.</p><a class="btn outline" href="{{url_for('classes')}}">Gérer les classes</a>{% endif %}
+{% if me.role in ('admin','administratif') %}<p class="muted" style="margin-top:20px">Pour ajouter ou modifier un lien, ouvrez Classes, puis Modifier sur la classe concernée.</p><a class="btn outline" href="{{url_for('classes')}}">Gérer les classes</a>{% endif %}
 </section>
 {% endblock %}
