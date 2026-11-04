@@ -2523,7 +2523,7 @@ def planning():
     elif u['role']=='etudiant':query+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     events=allrows(query,args)
-    return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
+    return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,video_classes=allrows("""SELECT cl.id,cl.name,cl.video_url,cl.filiere_id,f.name filiere_name,y.label academic_year FROM classes cl JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id WHERE cl.school_id=? AND cl.video_url IS NOT NULL AND cl.video_url<>'' ORDER BY LOWER(f.name),LOWER(cl.name)""",(school_id(),)) if u['role'] in ('admin','administratif') else [],rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
 
 def lesson_utc_iso(value):
     """Existing lesson timestamps are historical Africa/Abidjan local times."""
@@ -2697,10 +2697,12 @@ def lessons_bulk():
 def declare(lid):
     u=current_user();les=one('SELECT * FROM lessons WHERE id=? AND school_id=?',(lid,school_id()))
     if not les or (u['role']=='enseignant' and les['teacher_id']!=u['id']):abort(403)
-    # A teacher may confirm a session starting 30 minutes before its planned end, never earlier.
-    window_start=datetime.datetime.fromisoformat(les['ends_at'])-datetime.timedelta(minutes=30)
-    if datetime.datetime.now()<window_start:abort(400,'Validation disponible 30 minutes avant la fin')
-    if les['status'] in ('annulee','reportee'):abort(400,'Séance annulée ou reportée')
+    # Validation allowed only from 15 minutes before the scheduled end, in school time.
+    window_start=datetime.datetime.fromisoformat(les['ends_at'])-datetime.timedelta(minutes=15)
+    now_abidjan=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).replace(tzinfo=None)
+    if now_abidjan<window_start:abort(400,'Validation disponible 15 minutes avant la fin')
+    if les['status'] in ('realisee','partielle','non_effectuee','annulee','reportee'):
+        abort(400,'Séance déjà déclarée ou annulée')
     status=request.form.get('status')
     if status not in ('realisee','partielle','non_effectuee'):abort(400)
     mins=int(request.form.get('actual_minutes','0')) if status!='non_effectuee' else 0
@@ -3387,12 +3389,12 @@ def attendance_save(lid):
 def planning_json():
     u=current_user()
     if u['role']=='superadmin':abort(403)
-    sql='''SELECT l.id,l.starts_at,l.ends_at,l.status,l.room,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? AND l.hidden_from_planning=0'''; args=[school_id()]
+    sql='''SELECT l.id,l.course_id,l.starts_at,l.ends_at,l.status,l.room,l.validated,l.actual_minutes,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? AND l.hidden_from_planning=0'''; args=[school_id()]
     if u['role']=='enseignant' or (u['role']=='admin' and request.args.get('mine')=='1'):
         sql+=' AND l.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND e.class_id=c.class_id AND p.active=1 AND cl.parents_enabled=1)';args.append(u['id'])
-    response=jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':lesson_utc_iso(x['starts_at']),'end':lesson_utc_iso(x['ends_at']),'extendedProps':{'status':x['status'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
+    response=jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':lesson_utc_iso(x['starts_at']),'end':lesson_utc_iso(x['ends_at']),'extendedProps':{'status':x['status'],'courseId':x['course_id'],'startsAt':x['starts_at'],'endsAt':x['ends_at'],'editable':x['status']=='programmee' and not x['validated'] and not x['actual_minutes'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
     response.headers['Cache-Control']='private, max-age=10'
     response.headers['Vary']='Cookie'
     return response
