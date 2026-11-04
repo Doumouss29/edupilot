@@ -48,7 +48,7 @@
 <label>Durée du cours (heures)<select name="duration_hours" required>{% for x in range(1,25) %}<option value="{{x/2}}" {% if x==4 %}selected{% endif %}>{{x/2|int if x%2==0 else x/2}} h</option>{% endfor %}</select></label>
 <label class="repeat-until" style="display:none">Répéter jusqu'au<input type="date" name="repeat_until" id="repeat-until"></label>
 <label>Salle<select id="planning-room-choice" aria-label="Choisir une salle"><option value="">Sans salle</option>{% for room in rooms %}<option value="{{room}}">{{room}}</option>{% endfor %}<option value="__new__">+ Ajouter une nouvelle salle…</option></select><input id="planning-room-value" name="room" maxlength="80" placeholder="Nom de la nouvelle salle" aria-label="Nouvelle salle" hidden disabled></label>
-<button class="btn primary" id="planning-submit" type="submit">Ajouter au planning</button></form>
+<button class="btn primary" id="planning-submit" type="submit">Ajouter au planning</button></form></dialog>
 <dialog id="planning-feedback" aria-labelledby="planning-feedback-title" style="max-width:min(92vw,460px);border:0;border-radius:16px;padding:25px;box-shadow:0 18px 55px #0004">
 <h3 id="planning-feedback-title">Planification</h3>
 <p id="planning-feedback-message" aria-live="polite"></p>
@@ -57,6 +57,33 @@
 <script>
 document.addEventListener('DOMContentLoaded',()=>{
  const form=document.getElementById('planning-create-form'),dialog=document.getElementById('planning-feedback');
+ const scheduleDialog=document.getElementById('planning-create-dialog');
+ const launch=document.getElementById('open-planning-modal');
+ const dismiss=document.getElementById('close-planning-modal');
+ const showSchedule=()=>{if(!scheduleDialog)return;if(typeof scheduleDialog.showModal==='function'){if(!scheduleDialog.open)scheduleDialog.showModal();}else scheduleDialog.setAttribute('open','');};
+ const hideSchedule=()=>{if(!scheduleDialog)return;if(typeof scheduleDialog.close==='function')scheduleDialog.close();else scheduleDialog.removeAttribute('open');};
+ launch?.addEventListener('click',showSchedule);
+ dismiss?.addEventListener('click',hideSchedule);
+ // Calendar dateClick uses this same entry point, including the selected class.
+ window.openEduPilotPlanning=(date,chosenClass)=>{
+  if(!form||!scheduleDialog)return;
+  const zone=form.elements.namedItem('planning_timezone')?.value||'Africa/Abidjan';
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{
+   timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',
+   hour:'2-digit',minute:'2-digit',hourCycle:'h23'
+  }).formatToParts(date).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
+  form.elements.namedItem('lesson_date').value=parts.year+'-'+parts.month+'-'+parts.day;
+  form.elements.namedItem('start_time').value=parts.hour+':'+parts.minute;
+  if(chosenClass){
+   const classInput=document.getElementById('planning-class');
+   if(classInput&&[...classInput.options].some(o=>o.value===chosenClass)){
+    classInput.value=chosenClass;
+    classInput.dispatchEvent(new Event('change'));
+   }
+  }
+  showSchedule();
+ };
+
  const roomChoice=document.getElementById('planning-room-choice'),roomInput=document.getElementById('planning-room-value');
  if(roomChoice&&roomInput){
   const updateRoom=()=>{
@@ -87,6 +114,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   const course=form.elements.namedItem('course_id');
   if(course){for(const option of course.options){if(option.value){option.hidden=option.dataset.classId!==draft.class_id;option.disabled=option.hidden;}}course.value=draft.course_id||'';}
  }
+ if(Object.keys(draft).length && !result?.ok)showSchedule();
  if(result){
   title.textContent=result.ok?'Planification enregistrée':'Planification non enregistrée';
   message.textContent=result.text||'';
@@ -101,7 +129,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   open();
  });
 });
-</script></dialog>{% endif %}<section class="panel calendar-panel">{% if me.role=='admin' %}<div class="page-actions" style="margin-bottom:14px"><a class="btn {{'primary' if request.args.get('mine')=='1' else 'outline'}}" href="{{url_for('planning',mine=1)}}">Mes séances d’enseignement</a><a class="btn {{'outline' if request.args.get('mine')=='1' else 'primary'}}" href="{{url_for('planning')}}">Planning de l’établissement</a></div>{% endif %}<div class="live-filter-bar" id="planning-live-filters"><label>Classe<select id="calendar-filter-class"><option value="">Toutes les classes</option></select></label><label>Enseignant<select id="calendar-filter-teacher"><option value="">Tous les enseignants</option></select></label></div><div class="planning-print-tools"><button class="btn outline" type="button" id="print-planning">🖨 Imprimer le planning</button></div><div id="planning-print-heading" aria-hidden="true"></div><p class="muted" id="planning-timezone-label"></p><div id="calendar"></div></section><div class="legend"><span><i style="background:#2b9769"></i> Réalisée</span><span><i style="background:#4383d5"></i> Programmée</span><span><i style="background:#d59a36"></i> À confirmer</span><span><i style="background:#d15b65"></i> Non effectuée</span></div>{% if me.role in ('admin','administratif') %}<section class="panel"><div class="panel-title"><h3>Gérer plusieurs séances</h3><span class="muted">Sélectionnez des séances programmées pour les modifier ou les supprimer.</span></div>
+</script>{% endif %}<section class="panel calendar-panel">{% if me.role=='admin' %}<div class="page-actions" style="margin-bottom:14px"><a class="btn {{'primary' if request.args.get('mine')=='1' else 'outline'}}" href="{{url_for('planning',mine=1)}}">Mes séances d’enseignement</a><a class="btn {{'outline' if request.args.get('mine')=='1' else 'primary'}}" href="{{url_for('planning')}}">Planning de l’établissement</a></div>{% endif %}<div class="live-filter-bar" id="planning-live-filters"><label>Classe<select id="calendar-filter-class"><option value="">Toutes les classes</option></select></label><label>Enseignant<select id="calendar-filter-teacher"><option value="">Tous les enseignants</option></select></label></div><div class="planning-print-tools"><button class="btn outline" type="button" id="print-planning">🖨 Imprimer le planning</button></div><div id="planning-print-heading" aria-hidden="true"></div><p class="muted" id="planning-timezone-label"></p><div id="calendar"></div></section><div class="legend"><span><i style="background:#2b9769"></i> Réalisée</span><span><i style="background:#4383d5"></i> Programmée</span><span><i style="background:#d59a36"></i> À confirmer</span><span><i style="background:#d15b65"></i> Non effectuée</span></div>{% if me.role in ('admin','administratif') %}<section class="panel"><div class="panel-title"><h3>Gérer plusieurs séances</h3><span class="muted">Sélectionnez des séances programmées pour les modifier ou les supprimer.</span></div>
 <form method="post" action="{{url_for('lessons_bulk')}}" id="bulk-lessons"><input type="hidden" name="csrf" value="{{csrf}}">
 <div class="page-actions"><label>Action<select name="action" id="bulk-lesson-action"><option value="modify">Modifier les séances</option><option value="delete">Supprimer les séances</option></select></label><label>Décalage en jours<input type="number" name="day_offset" value="0" min="-365" max="365"></label><label>Décalage en minutes (multiples de 30)<input type="number" name="minute_offset" value="0" step="30" min="-1440" max="1440"></label><label><input type="checkbox" name="change_room" value="1"> Modifier la salle</label><label>Nouvelle salle<input name="room" maxlength="80" placeholder="Salle B12"></label><button class="btn primary" type="submit">Appliquer aux séances</button></div>
 <div class="table-scroll"><table><thead><tr><th><input type="checkbox" id="all-lessons" aria-label="Sélectionner les séances"></th><th>Cours / classe</th><th>Début</th><th>Fin</th><th>Enseignant</th><th>Salle</th><th>Statut</th><th>Modifier</th></tr></thead><tbody>{% for e in events %}<tr><td><input type="checkbox" name="lesson_ids" value="{{e.id}}" {% if e.status!='programmee' or e.actual_minutes or e.validated %}disabled{% endif %}></td><td>{{e.course_name}} — {{e.class_name}}</td><td><time data-abidjan-time="{{e.starts_at}}">{{e.starts_at|replace('T',' ')}}</time></td><td><time data-abidjan-time="{{e.ends_at}}">{{e.ends_at|replace('T',' ')}}</time></td><td>{{e.teacher_name or '—'}}</td><td>{{e.room or '—'}}</td><td><span class="tag">{{e.status}}</span></td><td><a class="btn outline sm" href="{{url_for('lesson_edit',lid=e.id)}}">Modifier</a></td></tr>{% else %}<tr><td colspan="8">Aucune séance à gérer.</td></tr>{% endfor %}</tbody></table></div></form></section>
