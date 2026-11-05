@@ -296,6 +296,39 @@ editLessonForm?.addEventListener('submit',e=>{
 });
 {% endif %}
 const actionDialog=document.getElementById('lesson-action-panel');
+{% if me.role in ('admin','administratif') %}
+const modalEditForm=document.getElementById('lesson-edit-calendar-form');
+modalEditForm?.addEventListener('submit',async event=>{
+ event.preventDefault();
+ if(!modalEditForm.reportValidity())return;
+ const submit=document.getElementById('lesson-edit-submit');
+ const hint=document.getElementById('lesson-action-hint');
+ if(submit){submit.disabled=true;submit.textContent='Enregistrement…';}
+ if(hint)hint.textContent='Enregistrement de la séance…';
+ try{
+  const response=await fetch(modalEditForm.action,{
+   method:'POST',headers:{'Accept':'application/json'},
+   body:new FormData(modalEditForm),credentials:'same-origin'
+  });
+  const kind=response.headers.get('Content-Type')||'';
+  const result=kind.includes('application/json')?await response.json():null;
+  if(!response.ok||!result?.ok){
+   throw new Error(result?.error||'La modification n’a pas pu être enregistrée. Vérifiez le créneau et réessayez.');
+  }
+  if(actionDialog?.close)actionDialog.close();
+  else actionDialog?.removeAttribute('open');
+  calendarItems=null;c.refetchEvents();
+  const notice=document.createElement('div');
+  notice.className='flash success';notice.setAttribute('role','status');
+  notice.textContent=result.message||'Séance modifiée.';
+  document.querySelector('.calendar-panel')?.prepend(notice);
+ }catch(error){
+  if(hint)hint.textContent=error.message||'Erreur lors de la modification.';
+ }finally{
+  if(submit){submit.disabled=false;submit.textContent='Enregistrer les modifications';}
+ }
+});
+{% endif %}
 document.getElementById('lesson-action-close')?.addEventListener('click',()=>{if(actionDialog?.close)actionDialog.close();else actionDialog?.removeAttribute('open');});
 {% if me.role in ('admin','administratif') %}
 const videoToggle=document.getElementById('toggle-video-choices'),videoArea=document.getElementById('planning-video-choices');
