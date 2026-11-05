@@ -2658,7 +2658,11 @@ def lesson_edit(lid):
         notify_event([lesson['course_id'],course_id],message,'/planning',
                      teacher_ids=[lesson['teacher_id'],course['teacher_id']],email_roles=('etudiant',) if schedule_changed else (),defer_external=True)
     audit('lesson.updated',str(lid)+(':changed' if changed else ':unchanged'))
-    flash('Séance modifiée. Les personnes concernées ont été notifiées.' if changed else 'Aucun changement détecté : aucune notification envoyée.','success')
+    result_message=('Séance modifiée. Les notifications sont enregistrées et les envois sont pris en charge par la file de traitement.'
+                    if changed else 'Aucun changement détecté : aucune notification envoyée.')
+    if request.headers.get('Accept','').startswith('application/json'):
+        return jsonify({'ok':True,'message':result_message,'changed':changed})
+    flash(result_message,'success')
     return redirect(url_for('planning'))
 
 @app.post('/lessons/bulk')
@@ -3471,6 +3475,9 @@ def denied(e):return render_template('error.html',message='Accès non autorisé.
 @app.errorhandler(404)
 def missing(e):return render_template('error.html',message='Page introuvable.'),404
 @app.errorhandler(400)
-def invalid(e):return render_template('error.html',message='Données ou demande invalides.'),400
+def invalid(e):
+    if request.path.startswith('/lessons/') and request.headers.get('Accept','').startswith('application/json'):
+        return jsonify({'ok':False,'error':getattr(e,'description','Données ou demande invalides.')}),400
+    return render_template('error.html',message='Données ou demande invalides.'),400
 
 if __name__=='__main__':app.run(debug=False,port=int(os.getenv('PORT',5000)))
