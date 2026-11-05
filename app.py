@@ -461,9 +461,10 @@ def enqueue_external_notification(sid,recipients,message,href,skip_email_ids=(),
         rows.append((sid,uid,'email',address,'EduPilot — Nouvelle notification',message,href))
     if rows:
         with db() as c:
-            c.executemany("""INSERT INTO notification_delivery_queue
-                (school_id,user_id,channel,address,subject,message,href)
-                VALUES (?,?,?,?,?,?,?)""",rows)
+            for record in rows:
+                c.execute("""INSERT INTO notification_delivery_queue
+                    (school_id,user_id,channel,address,subject,message,href)
+                    VALUES (?,?,?,?,?,?,?)""",record)
 
 
 def notify(ids,message,href='',skip_email_ids=(),email_roles=None,defer_external=False):
@@ -473,8 +474,9 @@ def notify(ids,message,href='',skip_email_ids=(),email_roles=None,defer_external
     recipients=[r['id'] for r in allrows('SELECT id FROM users WHERE school_id=? AND active=1',(sid,)) if r['id'] in candidate]
     if recipients:
         with db() as c:
-            c.executemany('INSERT INTO notifications(school_id,user_id,message,href) VALUES (?,?,?,?)',
-                          [(sid,uid,message,href) for uid in recipients])
+            for uid in recipients:
+                c.execute('INSERT INTO notifications(school_id,user_id,message,href) VALUES (?,?,?,?)',
+                          (sid,uid,message,href))
     if defer_external:
         enqueue_external_notification(sid,recipients,message,href,skip_email_ids,email_roles)
         return
@@ -710,8 +712,9 @@ def generate_recovery_codes(uid):
     codes=['-'.join((secrets.token_hex(4),secrets.token_hex(4))) for _ in range(8)]
     with db() as c:
         c.execute('DELETE FROM mfa_recovery_codes WHERE user_id=?',(uid,))
-        c.executemany('INSERT INTO mfa_recovery_codes(user_id,code_hash) VALUES (?,?)',
-                      [(uid,hashlib.sha256(code.encode()).hexdigest()) for code in codes])
+        for code in codes:
+            c.execute('INSERT INTO mfa_recovery_codes(user_id,code_hash) VALUES (?,?)',
+                      (uid,hashlib.sha256(code.encode()).hexdigest()))
     return codes
 
 
