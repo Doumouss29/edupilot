@@ -2646,6 +2646,7 @@ def lesson_edit(lid):
                   (course_id,course['teacher_id'],item['start'],item['end'],room,lid,school_id()))
     schedule_changed=(current['starts_at']!=item['start'] or current['ends_at']!=item['end'])
     changed=(schedule_changed or current['course_id']!=course_id or (current['room'] or '')!=room)
+    notification_queued=True
     if changed:
         old_course=one('SELECT name FROM courses WHERE id=? AND school_id=?',(lesson['course_id'],school_id()))
         message=('Planning modifié — Cours : '+course['name']+' ; classe : '+course['class_name']
@@ -2655,10 +2656,20 @@ def lesson_edit(lid):
             message+=' Ancien cours : '+(old_course['name'] if old_course else '—')+'.'
         if (lesson['room'] or '')!=room:
             message+=' Salle : '+(room or 'non précisée')+'.'
-        notify_event([lesson['course_id'],course_id],message,'/planning',
-                     teacher_ids=[lesson['teacher_id'],course['teacher_id']],email_roles=('etudiant',) if schedule_changed else (),defer_external=True)
-    audit('lesson.updated',str(lid)+(':changed' if changed else ':unchanged'))
-    result_message=('Séance modifiée. Les notifications sont enregistrées et les envois sont pris en charge par la file de traitement.'
+        try:
+            notify_event([lesson['course_id'],course_id],message,'/planning',
+                         teacher_ids=[lesson['teacher_id'],course['teacher_id']],
+                         email_roles=('etudiant',) if schedule_changed else (),defer_external=True)
+        except Exception:
+            notification_queued=False
+            app.logger.exception('Séance %s enregistrée mais notification non mise en file',lid)
+    try:
+        audit('lesson.updated',str(lid)+(':changed' if changed else ':unchanged'))
+    except Exception:
+        app.logger.exception('Séance %s enregistrée mais audit non journalisé',lid)
+    result_message=('Séance modifiée. Notifications en attente de traitement.'
+                    if changed and notification_queued else
+                    'Séance modifiée, mais la notification n’a pas pu être mise en file. Contactez le support.'
                     if changed else 'Aucun changement détecté : aucune notification envoyée.')
     if request.headers.get('Accept','').startswith('application/json'):
         return jsonify({'ok':True,'message':result_message,'changed':changed})
