@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-wri
 WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py postgres_sql.py postgres_rehearsal.py teacher_schedule_digest.py memo_documents.py /app/
+COPY app.py postgres_sql.py postgres_rehearsal.py teacher_schedule_digest.py notification_delivery_worker.py memo_documents.py /app/
 RUN python -c "import memo_documents; print('Memo document module OK')"
 COPY templates/ /app/templates/
 COPY static/ /app/static/
