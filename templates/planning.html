@@ -170,8 +170,8 @@ document.addEventListener('DOMContentLoaded',()=>{
 <label>Date du cours<input type="date" name="lesson_date" required></label>
 <label>Heure de début (heure d'Abidjan)<input type="time" name="start_time" step="60" required></label>
 <label>Durée (heures)<input type="number" name="duration_hours" min="0.5" max="12" step="0.5" required></label>
-<label>Salle<input name="room" maxlength="80"></label>
-<button class="btn primary" type="submit">Enregistrer les modifications</button></form>
+<label>Salle<select id="lesson-edit-room-choice" aria-label="Choisir une salle"><option value="">Sans salle</option>{% for room in rooms %}<option value="{{room}}">{{room}}</option>{% endfor %}<option value="__new__">+ Ajouter une nouvelle salle…</option></select><input id="lesson-edit-room-value" name="room" maxlength="80" placeholder="Nom de la nouvelle salle" aria-label="Nouvelle salle" hidden disabled></label>
+<button class="btn primary" type="submit" id="lesson-edit-submit">Enregistrer les modifications</button></form>
 {% endif %}
 <form id="lesson-cancel-form" method="post" class="inline-form" hidden onsubmit="return confirm('Confirmer l’annulation de cette séance et prévenir les étudiants ?')"><input type="hidden" name="csrf" value="{{csrf}}">
 <label>Motif de l'annulation {% if me.role!='enseignant' %}(facultatif){% endif %}<input name="reason" maxlength="1500" {% if me.role=='enseignant' %}required{% endif %}></label>
@@ -263,7 +263,15 @@ eventDidMount:function(info){const status=info.event.extendedProps.status;const 
  edit.elements.namedItem('lesson_date').value=dateTime.slice(0,10);
  edit.elements.namedItem('start_time').value=dateTime.slice(11,16);
  edit.elements.namedItem('duration_hours').value=String((new Date(endDateTime+'Z')-new Date(dateTime+'Z'))/3600000);
- edit.elements.namedItem('room').value=p.room||'';
+ const roomChoice=document.getElementById('lesson-edit-room-choice');
+ const roomInput=document.getElementById('lesson-edit-room-value');
+ const existingRoom=(p.room||'').trim();
+ if(roomChoice&&roomInput){
+  roomChoice.value=[...roomChoice.options].some(o=>o.value===existingRoom)?existingRoom:'__new__';
+  const isNew=roomChoice.value==='__new__';
+  roomInput.hidden=!isNew;roomInput.disabled=!isNew;roomInput.required=isNew;
+  roomInput.value=isNew?existingRoom:'';
+ }
  showEdit.onclick=()=>showOnly(edit);
  {% endif %}
  forms.forEach(f=>{if(f)f.hidden=true;});
@@ -271,6 +279,22 @@ eventDidMount:function(info){const status=info.event.extendedProps.status;const 
  if(completed)hint.textContent='Cette séance est déjà déclarée ou annulée.';
  if(!dialog.open){if(typeof dialog.showModal==='function')dialog.showModal();else dialog.setAttribute('open','');}
 }});for(const select of [filterClass,filterTeacher])select.addEventListener('change',()=>c.refetchEvents());c.render();
+{% if me.role in ('admin','administratif') %}
+const editRoomChoice=document.getElementById('lesson-edit-room-choice');
+const editRoomInput=document.getElementById('lesson-edit-room-value');
+editRoomChoice?.addEventListener('change',()=>{
+ const isNew=editRoomChoice.value==='__new__';
+ editRoomInput.hidden=!isNew;editRoomInput.disabled=!isNew;editRoomInput.required=isNew;
+ editRoomInput.value='';
+});
+const editLessonForm=document.getElementById('lesson-edit-calendar-form');
+editLessonForm?.addEventListener('submit',e=>{
+ if(!editLessonForm.reportValidity()){e.preventDefault();return;}
+ if(editRoomChoice.value!=='__new__'){editRoomInput.disabled=false;editRoomInput.value=editRoomChoice.value;}
+ const submit=document.getElementById('lesson-edit-submit');
+ if(submit){submit.disabled=true;submit.textContent='Enregistrement…';}
+});
+{% endif %}
 const actionDialog=document.getElementById('lesson-action-panel');
 document.getElementById('lesson-action-close')?.addEventListener('click',()=>{if(actionDialog?.close)actionDialog.close();else actionDialog?.removeAttribute('open');});
 {% if me.role in ('admin','administratif') %}
