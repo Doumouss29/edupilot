@@ -1,5 +1,5 @@
 """EduPilot — plateforme de gestion scolaire multi-établissements."""
-import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib, csv, io, hashlib, time, hmac, base64, struct
+import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib, csv, io, hashlib, time, hmac, base64, struct, zipfile
 from openpyxl import load_workbook
 from flask import Response
 from contextlib import contextmanager
@@ -279,6 +279,44 @@ def subscription_blocked(user=None):
     school=one('SELECT active,subscription_end FROM schools WHERE id=?',(user['school_id'],))
     if not school:return True
     return not school['active'] or bool(school['subscription_end'] and school['subscription_end']<=datetime.date.today().isoformat())
+
+def validate_office_archive(raw, kind):
+    """Bound archive expansion before processing untrusted XLSX/DOCX content."""
+    if kind not in ('xlsx','docx'):
+        raise ValueError('Format Office invalide')
+    expected={'xlsx':'xl/workbook.xml','docx':'word/document.xml'}[kind]
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            infos=archive.infolist()
+            if not infos or len(infos)>1500:
+                raise ValueError('Archive Office trop complexe')
+            if not any(item.filename==expected for item in infos):
+                raise ValueError('Structure Office invalide')
+            if not any(item.filename=='[Content_Types].xml' for item in infos):
+                raise ValueError('Manifest Office manquant')
+            total=0
+            for item in infos:
+                if item.flag_bits & 1 or item.file_size>16*1024*1024:
+                    raise ValueError('Entrée Office chiffrée ou trop volumineuse')
+                if item.filename.startswith('/') or '..' in item.filename.split('/'):
+                    raise ValueError('Chemin Office invalide')
+                total+=item.file_size
+                if total>32*1024*1024:
+                    raise ValueError('Archive Office trop volumineuse après décompression')
+            if archive.testzip() is not None:
+                raise ValueError('Archive Office corrompue')
+    except (zipfile.BadZipFile,zipfile.LargeZipFile,RuntimeError,OverflowError,EOFError) as exc:
+        raise ValueError('Archive Office invalide') from exc
+
+
+def csv_safe_cell(value):
+    """Keep untrusted text as text when a CSV is opened in Excel/LibreOffice."""
+    if not isinstance(value,str):
+        return value
+    if value.lstrip(' \\t\\r\\n\\ufeff').startswith(('=','+','-','@')) or value.startswith(('\\t','\\r','\\n')):
+        return "'"+value
+    return value
+
 
 def read_logo(file):
     if not file or not file.filename:return None,None
@@ -1811,6 +1849,7 @@ def people_import():
             dialect=csv.Sniffer().sniff(text[:2048],delimiters=',;\t') if text.strip() else csv.excel
             rows=list(csv.reader(io.StringIO(text),dialect))
         else:
+            validate_office_archive(content,'xlsx')
             workbook=load_workbook(io.BytesIO(content),read_only=True,data_only=True)
             sheet=workbook.active
             rows=list(sheet.iter_rows(values_only=True,max_row=2002))
@@ -2170,8 +2209,11 @@ def memo_settings_page():
             if not upload or not upload.filename.lower().endswith('.docx') or not data.startswith(b'PK') or len(data)>2*1024*1024:
                 abort(400,'Modèle Word .docx requis (2 Mo maximum)')
             from docxtpl import DocxTemplate
-            try:DocxTemplate(io.BytesIO(data))
-            except Exception:abort(400,'Modèle Word non valide')
+            try:
+                validate_office_archive(data,'docx')
+                DocxTemplate(io.BytesIO(data))
+            except Exception:
+                abort(400,'Modèle Word non valide ou trop volumineux après décompression')
             execute('UPDATE memo_templates SET active=0 WHERE school_id=?',(sid,))
             execute('INSERT INTO memo_templates(school_id,name,filename,content,active) VALUES (?,?,?,?,1)',
                 (sid,request.form.get('name','Modèle personnalisé')[:100],secure_filename(upload.filename),data))
@@ -4482,7 +4524,7 @@ def reports():
     if request.args.get('format')=='csv':
         import csv,io
         b=io.StringIO();w=csv.writer(b,delimiter=';');w.writerow(['Cours','Classe','Séances planifiées','Heures prévues','Heures réalisées','Taux %'])
-        for x in rows:w.writerow([x['name'],x['class_name'],x['lessons'],x['planned_minutes']/60,x['actual_minutes']/60,round(x['actual_minutes']/x['planned_minutes']*100,1) if x['planned_minutes'] else 0])
+        for x in rows:w.writerow([csv_safe_cell(x['name']),csv_safe_cell(x['class_name']),x['lessons'],x['planned_minutes']/60,x['actual_minutes']/60,round(x['actual_minutes']/x['planned_minutes']*100,1) if x['planned_minutes'] else 0])
         return Response('\ufeff'+b.getvalue(),headers={'Content-Disposition':'attachment; filename=edupilot-rapport.csv'},mimetype='text/csv')
     return render_template('reports.html',rows=rows,years=years,classes=classes,teachers=teachers,filters=filters)
 
