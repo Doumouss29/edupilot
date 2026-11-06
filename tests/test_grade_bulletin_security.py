@@ -101,7 +101,8 @@ class GradeAndBulletinSecurityTests(unittest.TestCase):
         self.user(1)
         result=self.client.post('/grades/bulletins/publish',
                                 data={"csrf":"csrf-test","class_id":"3"})
-        self.assertEqual(result.status_code,403)
+        # Unknown or foreign resources are deliberately indistinguishable (404).
+        self.assertEqual(result.status_code,404)
         with project.db() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM bulletin_publications").fetchone()[0],0)
 
