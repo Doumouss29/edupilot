@@ -25,6 +25,9 @@ class GradeAndBulletinSecurityTests(unittest.TestCase):
             conn.executescript(project.SCHEMA)
             # The baseline SCHEMA predates the academic-year lifecycle migration.
             conn.execute("ALTER TABLE years ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+            # Error pages also render the academic navigation for administrators.
+            conn.execute("ALTER TABLE classes ADD COLUMN filiere_id INTEGER")
+            conn.execute("CREATE TABLE IF NOT EXISTS filieres(id INTEGER PRIMARY KEY, school_id INTEGER, name TEXT)")
             conn.execute("INSERT INTO schools(id,name,slug) VALUES (1,'School A','a'),(2,'School B','b')")
             for uid,sid,role in [(1,1,'admin'),(2,1,'enseignant'),(3,1,'etudiant'),
                                   (4,1,'parent'),(5,2,'etudiant'),(6,1,'etudiant'),(7,2,'admin')]:
