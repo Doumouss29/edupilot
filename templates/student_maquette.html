@@ -34,11 +34,11 @@
 <div><strong>{{'%g'|format(formation.total_hours)}} h</strong><small>Volume horaire prévu</small></div>
 </div>
 {% if formation.courses %}
-<div class="maquette-table-wrap"><table class="maquette-table"><thead><tr><th>Cours / matière</th><th>Code</th><th>Coefficient</th><th>Volume horaire</th></tr></thead><tbody>
+<div class="maquette-table-wrap"><table class="maquette-table"><thead><tr><th>Cours / matière</th><th>Code</th><th>Coefficient</th><th>Volume horaire</th><th>Documents</th></tr></thead><tbody>
 {% for course in formation.courses %}
-<tr><td><strong>{{course.name}}</strong></td><td>{{course.code or '—'}}</td><td>{{'%g'|format(course.coefficient or 0)}}</td><td>{{'%g'|format(course.hours)}} h</td></tr>
+<tr><td><strong>{{course.name}}</strong></td><td>{{course.code or '—'}}</td><td>{{'%g'|format(course.coefficient or 0)}}</td><td>{{'%g'|format(course.hours)}} h</td><td><a class="btn outline sm" href="{{url_for('course_documents',cid=course.id)}}">Consulter</a></td></tr>
 {% endfor %}
-</tbody><tfoot><tr><td colspan="2">Total</td><td>{{'%g'|format(formation.total_coefficients)}}</td><td>{{'%g'|format(formation.total_hours)}} h</td></tr></tfoot></table></div>
+</tbody><tfoot><tr><td colspan="2">Total</td><td>{{'%g'|format(formation.total_coefficients)}}</td><td>{{'%g'|format(formation.total_hours)}} h</td><td>—</td></tr></tfoot></table></div>
 {% else %}<p class="muted">Aucun cours n'a encore été ajouté à la maquette de cette classe.</p>{% endif %}
 </section>
 {% else %}
