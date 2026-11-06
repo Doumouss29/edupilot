@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block heading %}Archives — {{year.label}}{% endblock %}
+{% block content %}
+<style>
+.archive-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}
+.archive-tabs a{padding:9px 13px;border:1px solid #d9e3eb;border-radius:9px;text-decoration:none;font-weight:600}
+.archive-section{margin:22px 0}.archive-section h3{margin:0 0 14px}
+.archive-tag{display:inline-block;border-radius:18px;padding:4px 9px;background:#eef0f4;color:#536477;font-size:.83rem}
+</style>
+<div class="section-intro">
+<span class="eyebrow">ORGANISATION ACADÉMIQUE / HISTORIQUE</span>
+<h2>Archives de l'année {{year.label}}</h2>
+<p>Consultation uniquement — les données historiques sont conservées sans possibilité de modification depuis cette page.</p>
+</div>
+<p><a class="btn outline sm" href="{{url_for('academic_years',section='history')}}">← Retour aux archives</a> <span class="archive-tag">Année archivée</span></p>
+<nav class="archive-tabs" aria-label="Rubriques de l'année archivée">
+<a href="#classes">Classes ({{classes|length}})</a>
+<a href="#enseignants">Enseignants ({{teachers|length}})</a>
+<a href="#etudiants">Étudiants ({{students|length}})</a>
+<a href="#cours">Cours ({{courses|length}})</a>
+<a href="#evaluations">Évaluations ({{assessments|length}})</a>
+<a href="#notes">Notes ({{grades|length}})</a>
+</nav>
+<section class="panel archive-section" id="classes"><h3>Classes et filières</h3>
+<div class="table-scroll"><table><thead><tr><th>Filière</th><th>Classe</th><th>Étudiants</th><th>Cours</th><th>Détails</th></tr></thead><tbody>
+{% for cl in classes %}<tr><td>{{cl.filiere_name or 'Sans filière'}}</td><td>{{cl.name}}</td><td>{{cl.students_count}}</td><td>{{cl.courses_count}}</td><td><a href="{{url_for('class_details',cid=cl.id)}}">Voir la classe</a></td></tr>
+{% else %}<tr><td colspan="5">Aucune classe pour cette année.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel archive-section" id="enseignants"><h3>Enseignants affectés aux cours</h3>
+<div class="table-scroll"><table><thead><tr><th>Enseignant</th></tr></thead><tbody>
+{% for teacher in teachers %}<tr><td>{{teacher.name}}</td></tr>
+{% else %}<tr><td>Aucun enseignant affecté.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel archive-section" id="etudiants"><h3>Étudiants inscrits</h3>
+<div class="table-scroll"><table><thead><tr><th>Étudiant</th><th>Matricule</th><th>Classe</th><th>Statut d'inscription</th></tr></thead><tbody>
+{% for student in students %}<tr><td>{{student.name}}</td><td>{{student.matricule or '—'}}</td><td>{{student.class_name}}</td><td>{{student.enrollment_status}}</td></tr>
+{% else %}<tr><td colspan="4">Aucune inscription pour cette année.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel archive-section" id="cours"><h3>Cours dispensés</h3>
+<div class="table-scroll"><table><thead><tr><th>Cours</th><th>Code</th><th>Classe</th><th>Enseignant</th><th>Volume prévu</th><th>Coefficient</th></tr></thead><tbody>
+{% for course in courses %}<tr><td>{{course.name}}</td><td>{{course.code}}</td><td>{{course.class_name}}</td><td>{{course.teacher_name or 'Non affecté'}}</td><td>{{(course.planned_minutes or 0)/60}} h</td><td>{{course.coefficient}}</td></tr>
+{% else %}<tr><td colspan="6">Aucun cours pour cette année.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel archive-section" id="evaluations"><h3>Évaluations</h3>
+<div class="table-scroll"><table><thead><tr><th>Évaluation</th><th>Type</th><th>Cours</th><th>Classe</th><th>Date limite</th></tr></thead><tbody>
+{% for assessment in assessments %}<tr><td>{{assessment.title}}</td><td>{{assessment.kind}}</td><td>{{assessment.course_name}}</td><td>{{assessment.class_name}}</td><td>{{assessment.due_date or '—'}}</td></tr>
+{% else %}<tr><td colspan="5">Aucune évaluation pour cette année.</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel archive-section" id="notes"><h3>Notes enregistrées</h3>
+<div class="table-scroll"><table><thead><tr><th>Étudiant</th><th>Classe</th><th>Cours</th><th>Évaluation</th><th>Note</th><th>Commentaire</th></tr></thead><tbody>
+{% for grade in grades %}<tr><td>{{grade.student_name}}</td><td>{{grade.class_name}}</td><td>{{grade.course_name}}</td><td>{{grade.assessment_title}}</td><td>{{grade.value}}</td><td>{{grade.comment or '—'}}</td></tr>
+{% else %}<tr><td colspan="6">Aucune note pour cette année.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}
