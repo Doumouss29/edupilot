@@ -2440,6 +2440,7 @@ def course_documents(cid):
     return render_template('course_documents.html',course=course,documents=docs,
                            can_manage=can_manage,categories=DOC_CATEGORIES,
                            quota_bytes=quota,used_bytes=int(used or 0),max_file_mb=25,
+                           current_publish_time=doc_utc_now(),
                            school_admin=u['role']=='admin')
 
 
