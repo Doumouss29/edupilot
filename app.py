@@ -2315,8 +2315,10 @@ with db() as c:
         ON course_documents(school_id,course_id,published)""")
     c.execute("""CREATE TABLE IF NOT EXISTS school_document_limits (
         school_id INTEGER PRIMARY KEY REFERENCES schools(id),
-        quota_bytes INTEGER NOT NULL DEFAULT 1073741824
+        quota_bytes BIGINT NOT NULL DEFAULT 1073741824
     )""")
+    if DB_ENGINE=='postgresql':
+        c.execute('ALTER TABLE school_document_limits ALTER COLUMN quota_bytes TYPE BIGINT')
 
 
 # Private teaching resources. Never expose UPLOAD_DIR through Flask static routes.
