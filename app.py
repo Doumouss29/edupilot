@@ -4426,8 +4426,10 @@ def notifications_api():
 @login_required
 def notifications_read():
     uid=current_user()['id']
-    ids=(request.get_json(silent=True) or {}).get('ids',[])
-    if not isinstance(ids,list) or len(ids)>100 or any(not isinstance(i,int) for i in ids):abort(400)
+    payload=request.get_json(silent=True)
+    if not isinstance(payload,dict):abort(400,'Objet JSON attendu')
+    ids=payload.get('ids',[])
+    if not isinstance(ids,list) or len(ids)>100 or any(type(i) is not int for i in ids):abort(400)
     with db() as c:
         if ids:
             c.execute('UPDATE notifications SET read=1 WHERE user_id=? AND id IN ('+','.join('?' for _ in ids)+')',(uid,*ids))
@@ -4439,12 +4441,13 @@ def notifications_read():
 @login_required
 def notifications_delete():
     uid=current_user()['id']
-    payload=request.get_json(silent=True) or {}
+    payload=request.get_json(silent=True)
+    if not isinstance(payload,dict):abort(400,'Objet JSON attendu')
     if payload.get('all') is True:
         execute('DELETE FROM notifications WHERE user_id=?',(uid,))
     else:
         ids=payload.get('ids',[])
-        if not isinstance(ids,list) or not ids or len(ids)>100 or any(not isinstance(i,int) for i in ids):abort(400)
+        if not isinstance(ids,list) or not ids or len(ids)>100 or any(type(i) is not int for i in ids):abort(400)
         with db() as c:
             c.execute('DELETE FROM notifications WHERE user_id=? AND id IN ('+','.join('?' for _ in ids)+')',(uid,*ids))
     return jsonify(ok=True)
@@ -4486,7 +4489,9 @@ def push_subscribe():
 @app.post('/api/push/unsubscribe')
 @login_required
 def push_unsubscribe():
-    endpoint=(request.get_json(silent=True) or {}).get('endpoint','')
+    payload=request.get_json(silent=True)
+    if not isinstance(payload,dict):abort(400,'Objet JSON attendu')
+    endpoint=payload.get('endpoint','')
     if not isinstance(endpoint,str) or len(endpoint)>2048:abort(400)
     execute('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?',(current_user()['id'],endpoint))
     return jsonify(ok=True)
