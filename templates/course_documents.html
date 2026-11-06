@@ -28,7 +28,7 @@
 <input type="hidden" name="csrf" value="{{csrf}}">
 <div class="doc-form-grid">
 <label class="full">Fichiers (jusqu'à 4 fichiers, 25 Mo chacun)<input type="file" name="files" id="doc-upload-files" accept=".pdf,.docx,.pptx,.xlsx,.csv,.jpg,.jpeg,.png,.zip" multiple required></label>
-<label>Catégorie<select name="category" required>{% for category in categories %}<option value="{{category}}">{{category}}</option>{% endfor %}</select></label>
+<label>Catégorie<select name="category" required>{% for category in categories %}{% if category not in ('Exercices','Corrigés') %}<option value="{{category}}">{{category}}</option>{% endif %}{% endfor %}</select></label>
 <label>Titre personnalisé (facultatif, pour un fichier)<input name="title" maxlength="180" placeholder="Ex. TP 01 — Géoréférencement"></label>
 <label class="full">Description (facultative)<textarea name="description" maxlength="1500" rows="2" placeholder="Objectif du document, consignes de lecture..."></textarea></label>
 <label class="full" style="display:flex;align-items:center;gap:9px"><input type="checkbox" name="published" id="doc-published" value="1" style="width:auto" checked> Publier pour les étudiants</label>
@@ -42,7 +42,7 @@
 <section class="panel">
 <div class="doc-header"><h3>Documents du cours ({{documents|length}})</h3><div><strong>Stockage établissement :</strong> {{'%.1f'|format(used_bytes/1048576)}} Mo / {{'%.0f'|format(quota_bytes/1048576)}} Mo</div></div>
 <div class="live-filter-bar" data-filter-target="document-list">
-<label>Catégorie<select id="doc-category-filter"><option value="">Toutes les catégories</option>{% for cat in categories %}<option value="{{cat}}">{{cat}}</option>{% endfor %}</select></label>
+<label>Catégorie<select id="doc-category-filter"><option value="">Toutes les catégories</option>{% for cat in categories %}{% if cat not in ('Exercices','Corrigés') %}<option value="{{cat}}">{{cat}}</option>{% endif %}{% endfor %}</select></label>
 <label>Rechercher<input type="search" id="doc-search" placeholder="Titre ou description"></label></div>
 <div class="doc-files" id="document-list">
 {% for d in documents %}<article class="doc-file" data-doc-category="{{d.category}}" data-doc-text="{{(d.title ~ ' ' ~ d.description ~ ' ' ~ d.filename)|lower}}">
