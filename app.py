@@ -3133,6 +3133,142 @@ def cancel_lesson(lid):
     flash('Séance annulée. Les étudiants ont été notifiés.','success')
     return redirect(url_for('planning'))
 
+# Evaluation corrections are separated from subjects and unpublished by default.
+with db() as c:
+    c.execute("""CREATE TABLE IF NOT EXISTS assessment_corrections(
+        assessment_id INTEGER PRIMARY KEY REFERENCES assessments(id) ON DELETE CASCADE,
+        school_id INTEGER NOT NULL REFERENCES schools(id),
+        author_id INTEGER NOT NULL REFERENCES users(id),
+        body TEXT NOT NULL DEFAULT '',
+        filename TEXT,
+        stored_name TEXT,
+        mime_type TEXT,
+        bytes_size INTEGER NOT NULL DEFAULT 0,
+        published INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+CORRECTION_ROOT=UPLOAD_DIR/'assessment_corrections'
+CORRECTION_MIMES={
+    '.pdf':'application/pdf',
+    '.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg',
+}
+CORRECTION_MAX_BYTES=10*1024*1024
+
+
+def correction_target(sid,stored_name):
+    if not stored_name or not re.fullmatch(r'[0-9a-f]{32}',stored_name):abort(404)
+    return CORRECTION_ROOT/str(sid)/stored_name
+
+
+def correction_assessment(aid,write=False):
+    u=current_user()
+    if not u or not u['school_id']:abort(403)
+    item=one("""SELECT a.id,a.title,a.course_id,c.class_id,c.teacher_id,cl.year_id,
+                       a.school_id FROM assessments a
+                JOIN courses c ON c.id=a.course_id AND c.school_id=a.school_id
+                JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
+                WHERE a.id=? AND a.school_id=?""",(aid,school_id()))
+    if not item:abort(404)
+    if u['role'] in ('admin','administratif'):
+        if write and u['role']!='admin':abort(403)
+    elif u['role']=='enseignant':
+        if item['teacher_id']!=u['id']:abort(403)
+    elif u['role']=='etudiant' and not write:
+        membership=one("""SELECT 1 FROM enrollments
+            WHERE school_id=? AND class_id=? AND year_id=? AND student_id=?""",
+            (school_id(),item['class_id'],item['year_id'],u['id']))
+        if not membership:abort(403)
+    else:abort(403)
+    return item
+
+
+@app.route('/assessments/<int:aid>/correction',methods=['GET','POST'])
+@roles('enseignant','admin')
+def assessment_correction_edit(aid):
+    correction_assessment(aid,write=True)
+    existing=one('SELECT * FROM assessment_corrections WHERE assessment_id=? AND school_id=?',
+                 (aid,school_id()))
+    if request.method=='GET':
+        return render_template('assessment_correction.html',item=correction_assessment(aid),
+                               correction=existing)
+    body=request.form.get('body','').strip()
+    action=request.form.get('action','save')
+    if action not in ('save','publish','unpublish','delete_file') or len(body)>20000:
+        abort(400,'Correction invalide')
+    supplied=request.files.get('correction_file')
+    has_file=bool(supplied and supplied.filename)
+    new_file=None
+    if has_file:
+        filename=supplied.filename.replace('\\','/').split('/')[-1].strip()
+        ext=Path(filename).suffix.lower()
+        if (ext not in CORRECTION_MIMES or not filename or len(filename)>200 or
+                any(ord(ch)<32 for ch in filename)):
+            abort(400,'Format de correction non autorisé')
+        raw=supplied.stream.read(CORRECTION_MAX_BYTES+1)
+        if not raw or len(raw)>CORRECTION_MAX_BYTES:abort(400,'Correction limitée à 10 Mo')
+        if ((ext=='.pdf' and not raw.startswith(b'%PDF-')) or
+            (ext in ('.jpg','.jpeg') and not raw.startswith(bytes((255,216,255)))) or
+            (ext=='.png' and not raw.startswith(bytes((137,80,78,71,13,10,26,10)))) or
+            (ext=='.docx' and not raw.startswith(b'PK'))):
+            abort(400,'Contenu non conforme au format annoncé')
+        stored_name=secrets.token_hex(16)
+        target=correction_target(school_id(),stored_name)
+        target.parent.mkdir(parents=True,exist_ok=True)
+        with target.open('xb') as out:out.write(raw)
+        new_file=(filename,stored_name,CORRECTION_MIMES[ext],len(raw))
+    if action=='publish' and not (body or new_file or (existing and existing['stored_name'])):
+        if new_file:correction_target(school_id(),new_file[1]).unlink(missing_ok=True)
+        abort(400,'Ajoutez du texte ou un document avant de publier la correction')
+    prior_file=existing['stored_name'] if existing else None
+    try:
+        with db() as c:
+            if existing:
+                changed_file=(action=='delete_file' or bool(new_file))
+                fields=new_file if new_file else (None,None,None,0) if action=='delete_file' else (
+                    existing['filename'],existing['stored_name'],existing['mime_type'],existing['bytes_size'])
+                visible=1 if action=='publish' else 0 if action=='unpublish' else existing['published']
+                c.execute("""UPDATE assessment_corrections
+                    SET body=?,filename=?,stored_name=?,mime_type=?,bytes_size=?,published=?,author_id=?,updated_at=CURRENT_TIMESTAMP
+                    WHERE school_id=? AND assessment_id=?""",
+                    (body,*fields,visible,current_user()['id'],school_id(),aid))
+            else:
+                fields=new_file if new_file else (None,None,None,0)
+                c.execute("""INSERT INTO assessment_corrections
+                    (assessment_id,school_id,author_id,body,filename,stored_name,mime_type,bytes_size,published)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (aid,school_id(),current_user()['id'],body,*fields,int(action=='publish')))
+    except Exception:
+        if new_file:correction_target(school_id(),new_file[1]).unlink(missing_ok=True)
+        raise
+    if prior_file and (new_file or action=='delete_file'):
+        correction_target(school_id(),prior_file).unlink(missing_ok=True)
+    audit('assessment.correction.'+action,str(aid))
+    flash('Correction enregistrée'+(' et publiée.' if action=='publish' else ' et dépubliée.' if action=='unpublish' else '.'),'success')
+    return redirect(url_for('assessment_correction_edit',aid=aid))
+
+
+@app.get('/assessments/<int:aid>/correction/file')
+@roles('enseignant','admin','administratif','etudiant')
+def assessment_correction_file(aid):
+    correction_assessment(aid)
+    row=one('SELECT * FROM assessment_corrections WHERE school_id=? AND assessment_id=?',
+            (school_id(),aid))
+    if not row or not row['stored_name']:abort(404)
+    if current_user()['role']=='etudiant' and not row['published']:abort(404)
+    target=correction_target(school_id(),row['stored_name'])
+    if not target.is_file():abort(404)
+    preview=request.args.get('preview')=='1' and row['mime_type'] in (
+        'application/pdf','image/png','image/jpeg')
+    response=send_file(target,mimetype=row['mime_type'],download_name=row['filename'],
+                       as_attachment=not preview,conditional=False)
+    response.headers['Cache-Control']='private,no-store'
+    response.headers['X-Content-Type-Options']='nosniff'
+    response.headers['X-Frame-Options']='SAMEORIGIN'
+    return response
+
+
 @app.get('/assessments/<int:aid>/attachment')
 @login_required
 def assessment_attachment(aid):
@@ -3236,7 +3372,10 @@ def assessments():
         notify_event([course_id],'Nouvelle évaluation : '+title+' ('+course['name']+').','/assessments',teacher_ids=[course['teacher_id']])
         audit('assessment.created',title);flash('Évaluation créée.','success')
         return redirect(url_for('assessments'))
-    sql='''SELECT a.id,a.school_id,a.course_id,a.title,a.kind,a.due_date,a.coefficient,a.description,a.attachment_name,c.name course_name,cl.name class_name,c.teacher_id
+    sql='''SELECT a.id,a.school_id,a.course_id,a.title,a.kind,a.due_date,a.coefficient,a.description,a.attachment_name,c.name course_name,cl.name class_name,c.teacher_id,
+           (SELECT ac.body FROM assessment_corrections ac WHERE ac.assessment_id=a.id AND ac.school_id=a.school_id) correction_body,
+           (SELECT ac.filename FROM assessment_corrections ac WHERE ac.assessment_id=a.id AND ac.school_id=a.school_id) correction_filename,
+           (SELECT ac.published FROM assessment_corrections ac WHERE ac.assessment_id=a.id AND ac.school_id=a.school_id) correction_published
            FROM assessments a JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id WHERE a.school_id=?''';args=[school_id()]
     if u['role']=='enseignant':sql+=' AND c.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.class_id=c.class_id AND e.student_id=? AND e.school_id=a.school_id)';args.append(u['id'])
