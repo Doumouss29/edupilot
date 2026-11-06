@@ -4,6 +4,10 @@ Usage: docker exec edupilot python /app/scripts/check_pg_tls.py
 """
 import os
 import sys
+from pathlib import Path
+
+# Allow running this standalone script by its absolute path from any working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 if os.getenv('DB_ENGINE') != 'postgresql':
     sys.exit('EduPilot is not configured for PostgreSQL')
