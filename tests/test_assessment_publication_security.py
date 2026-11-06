@@ -24,7 +24,7 @@ class AssessmentPublicationSecurityTests(unittest.TestCase):
         with project.db() as conn:
             conn.executescript(project.SCHEMA)
             conn.execute("INSERT INTO schools(id,name,slug) VALUES (1,'School A','school-a'),(2,'School B','school-b')")
-            for uid,sid,role in [(1,1,'etudiant'),(2,1,'parent'),(3,1,'enseignant'),(4,2,'etudiant'),(5,1,'admin')]:
+            for uid,sid,role in [(1,1,'etudiant'),(2,1,'parent'),(3,1,'enseignant'),(4,2,'etudiant'),(5,1,'admin'),(6,1,'etudiant')]:
                 conn.execute("INSERT INTO users(id,school_id,name,email,password_hash,role) VALUES (?,?,?,?,?,?)",
                              (uid,sid,role,str(uid)+'@test.invalid',generate_password_hash('PasswordTest123'),role))
             conn.execute("INSERT INTO years(id,school_id,label,is_active) VALUES (1,1,'2026-2027',1),(2,2,'2026-2027',1)")
@@ -77,6 +77,11 @@ class AssessmentPublicationSecurityTests(unittest.TestCase):
         self.user(4)
         self.assertEqual(self.client.get('/assessments/11/attachment').status_code,404)
         self.assertEqual(self.client.get('/assessments/files/'+str(self.files[11])).status_code,404)
+
+    def test_same_school_unenrolled_student_cannot_read_published_file(self):
+        self.user(6)
+        self.assertEqual(self.client.get('/assessments/11/attachment').status_code,403)
+        self.assertEqual(self.client.get('/assessments/files/'+str(self.files[11])).status_code,403)
 
 
 if __name__=='__main__':
