@@ -2470,7 +2470,8 @@ def academic_year_select():
         session[key]=row['id']
     destination=request.form.get('return_to','')
     parsed=urlsplit(destination)
-    if destination.startswith('/') and not destination.startswith('//') and not parsed.netloc and not parsed.scheme:
+    if (destination.startswith('/') and not destination.startswith('//') and
+            '\\' not in destination and not parsed.netloc and not parsed.scheme):
         return redirect(destination)
     return redirect(url_for('dashboard'))
 
@@ -2511,7 +2512,8 @@ def academic_year_copy(target_id):
         c.execute('BEGIN IMMEDIATE')
         source=c.execute('SELECT id,status FROM years WHERE id=? AND school_id=?',(source_id,sid)).fetchone()
         target=c.execute('SELECT id,status FROM years WHERE id=? AND school_id=?',(target_id,sid)).fetchone()
-        if not source or not target or target['status']!='draft':abort(403,'L’année cible doit être en préparation')
+        if not source or source['status']=='draft' or not target or target['status']!='draft':
+            abort(403,'L’année source doit être en cours ou archivée ; la cible doit être en préparation')
         originals=c.execute("""SELECT * FROM classes WHERE school_id=? AND year_id=?
                               ORDER BY id""",(sid,source_id)).fetchall()
         copied=0
@@ -2576,6 +2578,9 @@ def academic_year_promote(target_id):
                          (sid,source_class_id)).fetchone()
         year=c.execute('SELECT id,status FROM years WHERE school_id=? AND id=?',(sid,target_id)).fetchone()
         if not source or not year or year['status']!='draft' or source['year_id']==target_id:abort(403)
+        source_year=c.execute('SELECT status FROM years WHERE id=? AND school_id=?',
+                              (source['year_id'],sid)).fetchone()
+        if not source_year or source_year['status']=='draft':abort(403,'Une année en préparation ne peut servir de source')
         if decision in ('promoted','repeat'):
             target=c.execute('SELECT id FROM classes WHERE school_id=? AND id=? AND year_id=?',
                              (sid,target_class_id,target_id)).fetchone()
