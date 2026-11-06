@@ -1,4 +1,7 @@
 """Read-only post-deployment checks for EduPilot pedagogical documents."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import app, one, UPLOAD_DIR
 
 ROUTES = (
