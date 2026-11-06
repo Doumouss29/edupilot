@@ -2633,6 +2633,9 @@ def academic_year_activate(target_id):
         c.execute('BEGIN IMMEDIATE')
         target=c.execute('SELECT id,label,status FROM years WHERE school_id=? AND id=?',(sid,target_id)).fetchone()
         if not target or target['status']!='draft':abort(403,'Cette année n’est pas en préparation')
+        ready=c.execute('SELECT COUNT(*) AS total FROM classes WHERE school_id=? AND year_id=?',
+                        (sid,target_id)).fetchone()['total']
+        if ready<1:abort(400,'Créez ou reconduisez au moins une classe avant d’activer la rentrée')
         previous=c.execute("SELECT id FROM years WHERE school_id=? AND is_active=1",(sid,)).fetchone()
         c.execute("UPDATE years SET is_active=0,status='archived',archived_at=CURRENT_TIMESTAMP WHERE school_id=? AND is_active=1",(sid,))
         c.execute("UPDATE years SET is_active=1,status='active',archived_at=NULL WHERE school_id=? AND id=?",(sid,target_id))
