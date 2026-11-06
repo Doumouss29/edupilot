@@ -2205,6 +2205,7 @@ def memo_download(mid,kind):
 def enroll():
     student=request.form.get('student_id');cl=request.form.get('class_id')
     if not has_school('classes',cl) or not one("SELECT id FROM users WHERE id=? AND school_id=? AND role='etudiant'",(student,school_id())):abort(403)
+    writable_academic_class(cl,allow_draft=True)
     clazz=one('SELECT * FROM classes WHERE id=? AND school_id=?',(cl,school_id()))
     execute('INSERT OR IGNORE INTO enrollments(school_id,student_id,class_id,year_id) VALUES (?,?,?,?)',(school_id(),student,cl,clazz['year_id']))
     audit('student.enrolled',f'{student}:{cl}');flash('Inscription enregistrée.','success')
@@ -2456,8 +2457,10 @@ def academic_years():
 def academic_year_select():
     value=request.form.get('year_id','')
     if not value.isdigit():abort(400,'Année invalide')
-    row=one('SELECT id FROM years WHERE school_id=? AND id=?',(school_id(),int(value)))
+    row=one('SELECT id,status FROM years WHERE school_id=? AND id=?',(school_id(),int(value)))
     if not row:abort(403)
+    if current_user()['role']=='etudiant' and row['status']=='draft':
+        abort(403,'La prochaine année scolaire n’est pas encore ouverte aux étudiants')
     key=f'academic_selected_year_{school_id()}'
     active=active_academic_year()
     if active and active['id']==row['id']:
