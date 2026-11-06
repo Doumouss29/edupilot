@@ -21,11 +21,11 @@
 <div><a class="btn primary sm" href="{{url_for('course_documents',cid=c.id)}}">Voir les documents</a></div>
 </article>{% else %}<p class="muted">Aucun cours accessible dans cet établissement.</p>{% endfor %}
 </div></section>
-{% if me.role=='admin' %}<section class="panel"><h3>Stockage pédagogique par établissement</h3><p class="muted">Quota initial : 1 Go par établissement. La limite choisie s'applique aux nouveaux dépôts ; les documents existants restent accessibles.</p>
+{% if me.role=='admin' %}<section class="panel"><h3>Stockage pédagogique par établissement</h3><p class="muted">Stockage utilisé : <strong>{{school_used_mb}} Mo</strong> sur <strong>{{school_quota_mb}} Mo</strong>. La limite choisie s'applique aux nouveaux dépôts ; les documents existants restent accessibles.</p>
 <form action="{{url_for('course_document_quota')}}" method="post" class="inline-form">
 <input type="hidden" name="csrf" value="{{csrf}}">
-<label>Quota autorisé (Mo)<input type="number" name="quota_mb" min="100" max="10240" value="1024" required></label>
+<label>Quota autorisé (Mo)<input type="number" name="quota_mb" min="100" max="10240" value="{{school_quota_mb}}" required></label>
 <button class="btn outline" type="submit">Modifier le quota</button></form>
-<p class="muted">Pour voir le stockage utilisé et le quota réel, ouvrez un cours.</p>
+<p class="muted">La limite initiale est de 1 Go, personnalisable pour chaque établissement.</p>
 </section>{% endif %}
 {% endblock %}
