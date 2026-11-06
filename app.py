@@ -2053,16 +2053,67 @@ def class_grade_summary():
 @app.route('/periods',methods=['GET','POST'])
 @roles('admin','administratif')
 def periods():
+    """Organisation académique : années, périodes et historique par établissement."""
+    sid=school_id()
     if request.method=='POST':
-        pid=request.form.get('period_id');action=request.form.get('action')
-        if not one('SELECT id FROM periods WHERE id=? AND school_id=?',(pid,school_id())):abort(403)
-        if action=='lock':execute('UPDATE periods SET locked=1 WHERE id=?',(pid,))
-        elif action=='publish':execute('UPDATE periods SET locked=1,published=1 WHERE id=?',(pid,))
-        elif action=='unpublish':execute('UPDATE periods SET published=0 WHERE id=?',(pid,))
-        elif action=='unlock':execute('UPDATE periods SET locked=0 WHERE id=?',(pid,))
-        else:abort(400)
-        audit('period.'+action,str(pid));flash('Période mise à jour.','success');return redirect(url_for('periods'))
-    return render_template('periods.html',periods=scoped('SELECT p.*,c.name class_name FROM periods p JOIN classes c ON c.id=p.class_id WHERE p.school_id=?'))
+        action=request.form.get('action','')
+        if action=='create_year':
+            label=request.form.get('label','').strip()
+            if not re.fullmatch(r'\\d{4}-\\d{4}',label) or int(label[5:])!=int(label[:4])+1:
+                flash('Utilisez le format AAAA-AAAA (deux années consécutives).','error')
+                return redirect(url_for('periods'))
+            with db() as c:
+                exists=c.execute('SELECT id FROM years WHERE school_id=? AND label=?',(sid,label)).fetchone()
+                if exists:
+                    flash('Cette année scolaire existe déjà.','error')
+                    return redirect(url_for('periods'))
+                active=c.execute('SELECT id FROM years WHERE school_id=? AND is_active=1 LIMIT 1',(sid,)).fetchone()
+                c.execute('INSERT INTO years(school_id,label,is_active) VALUES (?,?,?)',(sid,label,0 if active else 1))
+            audit('year.created',label)
+            flash('Année scolaire créée. Activez-la au moment de la rentrée.','success')
+            return redirect(url_for('periods',section='years'))
+        if action=='activate_year':
+            year_id=request.form.get('year_id','')
+            if not year_id.isdecimal():abort(400)
+            with db() as c:
+                year=c.execute('SELECT id,label FROM years WHERE id=? AND school_id=?',(year_id,sid)).fetchone()
+                if not year:abort(404)
+                c.execute('UPDATE years SET is_active=0 WHERE school_id=?',(sid,))
+                c.execute('UPDATE years SET is_active=1 WHERE school_id=? AND id=?',(sid,year_id))
+            audit('year.activated',year['label'])
+            flash('Année scolaire active : '+year['label'],'success')
+            return redirect(url_for('periods',section='years'))
+        if action not in ('lock','publish','unlock','unpublish'):abort(400)
+        pid=request.form.get('period_id','')
+        period=one('''SELECT p.id,y.id year_id FROM periods p
+                      JOIN classes c ON c.id=p.class_id
+                      JOIN years y ON y.id=c.year_id
+                      WHERE p.id=? AND p.school_id=? AND c.school_id=? AND y.school_id=?''',
+                   (pid,sid,sid,sid))
+        if not period:abort(403)
+        if action=='lock':execute('UPDATE periods SET locked=1 WHERE id=? AND school_id=?',(pid,sid))
+        elif action=='publish':execute('UPDATE periods SET locked=1,published=1 WHERE id=? AND school_id=?',(pid,sid))
+        elif action=='unpublish':execute('UPDATE periods SET published=0 WHERE id=? AND school_id=?',(pid,sid))
+        else:execute('UPDATE periods SET locked=0 WHERE id=? AND school_id=?',(pid,sid))
+        audit('period.'+action,str(pid))
+        flash('Période mise à jour.','success')
+        return redirect(url_for('periods',section='periods',year_id=period['year_id']))
+    years=scoped('SELECT * FROM years WHERE school_id=? ORDER BY is_active DESC,label DESC,id DESC')
+    active_year=next((y for y in years if y['is_active']),None)
+    selected_year=request.args.get('year_id',type=int)
+    if selected_year is None and active_year:selected_year=active_year['id']
+    if selected_year is not None and not any(y['id']==selected_year for y in years):abort(404)
+    period_rows=scoped('''SELECT p.*,c.name class_name,y.label year_label,y.id year_id
+                          FROM periods p JOIN classes c ON c.id=p.class_id
+                          JOIN years y ON y.id=c.year_id
+                          WHERE p.school_id=? AND c.school_id=p.school_id
+                            AND y.school_id=p.school_id
+                          ORDER BY y.label DESC,c.name,p.name''')
+    if selected_year is not None:
+        period_rows=[p for p in period_rows if p['year_id']==selected_year]
+    return render_template('periods.html',years=years,active_year=active_year,
+                           selected_year=selected_year,periods=period_rows,
+                           section=request.args.get('section','years'))
 
 @app.get('/api/notifications')
 @login_required
