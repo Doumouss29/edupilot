@@ -361,9 +361,11 @@ def globals_template():
 
 def session_auth_stamp(user):
     # Credential-bound Flask session: password rotation invalidates every old cookie.
+    # Bind identity, tenant and privilege as well as credentials. Promoting,
+    # demoting or transferring an account invalidates its previous session.
+    identity=':'.join(str(user[key]) for key in ('id','school_id','role','email','password_hash'))
     return hmac.new(app.secret_key.encode('utf-8'),
-                    (str(user['id'])+':'+user['password_hash']).encode('utf-8'),
-                    hashlib.sha256).hexdigest()
+                    identity.encode('utf-8'),hashlib.sha256).hexdigest()
 
 def current_user():
     uid=session.get('uid')
