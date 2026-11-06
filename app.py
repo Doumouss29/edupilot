@@ -1395,6 +1395,14 @@ def school_update(sid):
         if request.form.get('confirm_slug')!=school['slug']:abort(400,'Confirmation requise.')
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
+            # Prevent irreversible deletion of populated schools; deactivation
+            # preserves student records, financial memos and uploaded documents.
+            guarded_tables=('users','classes','courses','course_documents',
+                            'teacher_memos','memo_settings','memo_templates',
+                            'class_memo_bundles','assessments','notifications')
+            if any(c.execute(f'SELECT 1 FROM {table} WHERE school_id=? LIMIT 1',(sid,)).fetchone()
+                   for table in guarded_tables):
+                abort(403,'Cet établissement contient des données. Désactivez-le plutôt que de le supprimer.')
             # Remove academic-year mappings before their referenced classes, documents and users.
             c.execute('DELETE FROM academic_year_document_copies WHERE school_id=?',(sid,))
             c.execute('DELETE FROM academic_year_promotions WHERE school_id=?',(sid,))
