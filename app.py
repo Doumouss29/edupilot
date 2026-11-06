@@ -331,8 +331,9 @@ def globals_template():
     menu_filieres=[]
     menu_filiere_classes={}
     year_context=selected_academic_year() if user and user['role']!='superadmin' else None
-    year_choices=allrows('SELECT id,label,status FROM years WHERE school_id=? ORDER BY label DESC',
-                         (user['school_id'],)) if year_context else []
+    year_choices=allrows("""SELECT id,label,status FROM years
+                          WHERE school_id=? AND (?=0 OR status<>'draft') ORDER BY label DESC""",
+                         (user['school_id'],int(user['role'] in ('parent','etudiant')))) if year_context else []
     if user and user['role'] in ('admin','administratif') and user['school_id']:
         menu_filieres=allrows("""SELECT f.id,f.name FROM filieres f
             WHERE f.school_id=? ORDER BY LOWER(f.name),f.id""",(user['school_id'],))
@@ -2453,13 +2454,13 @@ def academic_years():
 
 
 @app.post('/academic-years/select')
-@roles('admin','administratif','enseignant','etudiant')
+@roles('admin','administratif','enseignant','etudiant','parent')
 def academic_year_select():
     value=request.form.get('year_id','')
     if not value.isdigit():abort(400,'Année invalide')
     row=one('SELECT id,status FROM years WHERE school_id=? AND id=?',(school_id(),int(value)))
     if not row:abort(403)
-    if current_user()['role']=='etudiant' and row['status']=='draft':
+    if current_user()['role'] in ('etudiant','parent') and row['status']=='draft':
         abort(403,'La prochaine année scolaire n’est pas encore ouverte aux étudiants')
     key=f'academic_selected_year_{school_id()}'
     active=active_academic_year()
