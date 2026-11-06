@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-writer fonts-dejavu-core fonts-liberation && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-writer fonts-dejavu-core fonts-liberation postgresql-client && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt /app/
