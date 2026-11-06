@@ -2586,6 +2586,7 @@ def course_delete(cid):
     if force and request.form.get('confirm_word','').strip()!='SUPPRIMER':
         flash('Pour supprimer un cours avec son historique, confirmez en saisissant SUPPRIMER.','error')
         return redirect(url_for('courses'))
+    deleted_document_files=[]
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
         course=c.execute('SELECT id,name FROM courses WHERE id=? AND school_id=?',
@@ -2595,6 +2596,7 @@ def course_delete(cid):
             ('lessons','séances planifiées ou historisées'),
             ('assessments','évaluations et notes associées'),
             ('teacher_memos','mémos enseignants générés'),
+            ('course_documents','documents pédagogiques'),
         )
         blockers=[description for table,description in dependencies
                   if c.execute(f'SELECT 1 FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone()]
@@ -2604,6 +2606,10 @@ def course_delete(cid):
             return redirect(url_for('courses'))
         if force:
             # Explicit destructive path: all statements run in one transaction.
+            deleted_document_files=[row['stored_name'] for row in
+                c.execute('SELECT stored_name FROM course_documents WHERE course_id=? AND school_id=?',
+                          (cid,school_id())).fetchall()]
+            c.execute('DELETE FROM course_documents WHERE course_id=? AND school_id=?',(cid,school_id()))
             # Preserve other courses and their academic records.
             c.execute("""DELETE FROM grade_history WHERE grade_id IN (
                 SELECT g.id FROM grades g JOIN assessments a ON a.id=g.assessment_id
@@ -2628,6 +2634,9 @@ def course_delete(cid):
         c.execute('DELETE FROM memo_rates WHERE course_id=? AND school_id=?',(cid,school_id()))
         c.execute('DELETE FROM teacher_history WHERE course_id=?',(cid,))
         c.execute('DELETE FROM courses WHERE id=? AND school_id=?',(cid,school_id()))
+    for stored_name in deleted_document_files:
+        try:doc_path(school_id(),stored_name).unlink(missing_ok=True)
+        except OSError:app.logger.exception('Fichier documentaire non effacé après suppression cours=%s',cid)
     audit('course.deleted_with_history' if force else 'course.deleted',str(cid))
     flash('Cours « '+course['name']+' » supprimé'+(' avec son historique pédagogique.' if force else '.') ,'success')
     return redirect(url_for('courses'))
@@ -2659,7 +2668,7 @@ def courses_bulk():
             if len(rows)!=len(ids):abort(403)
             if action=='delete':
                 for cid in ids:
-                    for table in ('lessons','assessments'):
+                    for table in ('lessons','assessments','teacher_memos','course_documents'):
                         if c.execute(f'SELECT id FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone():
                             flash('Suppression refusée : un cours possède des séances ou évaluations. Conservez les historiques.','error')
                             return redirect(url_for('courses'))
