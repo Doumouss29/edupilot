@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% block heading %}Documents pédagogiques — {{course.name}}{% endblock %}
+{% block content %}
+<style>
+.doc-header{display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap}
+.doc-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+.doc-tabs a{border-radius:10px;border:1px solid #d7e2ec;padding:8px 14px;text-decoration:none;color:#32485f}
+.doc-tabs a.active{background:#203950;color:#fff;border-color:#203950}
+.doc-files{display:grid;gap:12px}.doc-file{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;border:1px solid #e0e8f0;border-radius:12px;padding:15px}
+.doc-file-details{flex:1;min-width:210px}.doc-file-details p{margin:4px 0}
+.doc-file-actions{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+.doc-file-actions form{display:inline}
+.doc-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.doc-form-grid label{display:grid;gap:5px;min-width:0}
+.doc-form-grid input,.doc-form-grid select,.doc-form-grid textarea{width:100%;min-width:0;box-sizing:border-box}
+.doc-form-grid .full{grid-column:1/-1}
+.doc-upload-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.doc-badge{display:inline-block;padding:4px 9px;border-radius:14px;background:#eaf4ed;color:#18683a;font-size:.8rem}
+.doc-badge.draft{background:#fff2dd;color:#885d1e}
+@media(max-width:640px){.doc-form-grid{grid-template-columns:1fr}.doc-form-grid .full{grid-column:1}}
+</style>
+<div class="section-intro"><span class="eyebrow">RESSOURCES PÉDAGOGIQUES</span><div class="doc-header"><div><h2>{{course.name}}</h2><p>{{course.filiere_name or 'Sans filière'}} / {{course.class_name}} · {{course.year_label}}</p></div><a class="btn outline sm" href="{{url_for('course_documents_index')}}">← Tous les cours</a></div></div>
+<div class="doc-tabs"><a href="{{url_for('course_documents',cid=course.id)}}" class="active">📄 Documents</a><a href="{{url_for('planning')}}">🗓 Planning</a>{% if me.role=='etudiant' %}<a href="{{url_for('student_maquette')}}">▤ Maquette</a>{% elif me.role in ('admin','administratif') %}<a href="{{url_for('courses')}}">▤ Gestion des cours</a>{% endif %}</div>
+{% if can_manage %}
+<section class="panel">
+<div class="panel-title"><h3>Ajouter des documents</h3><span class="muted">Formats : PDF, Word, PowerPoint, Excel, CSV, JPG, PNG et ZIP.</span></div>
+<form method="post" action="{{url_for('course_documents_upload',cid=course.id)}}" enctype="multipart/form-data" class="modern-form" id="doc-upload-form">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<div class="doc-form-grid">
+<label class="full">Fichiers (jusqu'à 4 fichiers, 25 Mo chacun)<input type="file" name="files" id="doc-upload-files" accept=".pdf,.docx,.pptx,.xlsx,.csv,.jpg,.jpeg,.png,.zip" multiple required></label>
+<label>Catégorie<select name="category" required>{% for category in categories %}<option value="{{category}}">{{category}}</option>{% endfor %}</select></label>
+<label>Titre personnalisé (facultatif, pour un fichier)<input name="title" maxlength="180" placeholder="Ex. TP 01 — Géoréférencement"></label>
+<label class="full">Description (facultative)<textarea name="description" maxlength="1500" rows="2" placeholder="Objectif du document, consignes de lecture..."></textarea></label>
+<label class="full" style="display:flex;align-items:center;gap:9px"><input type="checkbox" name="published" value="1" style="width:auto" checked> Publier immédiatement pour les étudiants</label>
+</div>
+<div class="doc-upload-actions"><button class="btn primary" id="doc-upload-button" type="submit">Ajouter les documents</button><small class="muted" id="doc-upload-help">Décochez « Publier » pour conserver les documents en brouillon.</small></div>
+</form>
+</section>
+{% endif %}
+<section class="panel">
+<div class="doc-header"><h3>Documents du cours ({{documents|length}})</h3><div><strong>Stockage établissement :</strong> {{'%.1f'|format(used_bytes/1048576)}} Mo / {{'%.0f'|format(quota_bytes/1048576)}} Mo</div></div>
+<div class="live-filter-bar" data-filter-target="document-list">
+<label>Catégorie<select id="doc-category-filter"><option value="">Toutes les catégories</option>{% for cat in categories %}<option value="{{cat}}">{{cat}}</option>{% endfor %}</select></label>
+<label>Rechercher<input type="search" id="doc-search" placeholder="Titre ou description"></label></div>
+<div class="doc-files" id="document-list">
+{% for d in documents %}<article class="doc-file" data-doc-category="{{d.category}}" data-doc-text="{{(d.title ~ ' ' ~ d.description ~ ' ' ~ d.filename)|lower}}">
+<div style="font-size:1.6rem" aria-hidden="true">📄</div>
+<div class="doc-file-details"><strong>{{d.title}}</strong>
+<p class="muted">{{d.category}} · {{d.filename}} · {{'%.1f'|format(d.bytes_size/1048576)}} Mo</p>
+{% if d.description %}<p>{{d.description}}</p>{% endif %}
+<p class="muted">Ajouté par {{d.uploader_name}} · {{d.created_at}}
+{% if can_manage %}{% if d.published %}<span class="doc-badge">Publié</span>{% else %}<span class="doc-badge draft">Brouillon</span>{% endif %}{% endif %}</p>
+</div>
+<div class="doc-file-actions">
+{% if d.mime_type in ('application/pdf','image/jpeg','image/png') %}<a class="btn outline sm" href="{{url_for('course_document_file',did=d.id,preview=1)}}" target="_blank" rel="noopener">Voir</a>{% endif %}
+<a class="btn outline sm" href="{{url_for('course_document_file',did=d.id)}}">Télécharger</a>
+{% if can_manage %}
+<form method="post" action="{{url_for('course_document_visibility',cid=course.id,did=d.id)}}">
+<input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="published" value="{{'0' if d.published else '1'}}">
+<button class="btn outline sm" type="submit">{{'Dépublier' if d.published else 'Publier'}}</button></form>
+{% if school_admin or d.uploader_id==me.id %}
+<form method="post" action="{{url_for('course_document_delete',cid=course.id,did=d.id)}}" onsubmit="return confirm('Supprimer définitivement ce document ? Cette action est irréversible.')">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<button class="btn outline sm" style="color:#ad2c29;border-color:#d4aaa6" type="submit">Supprimer</button></form>
+{% endif %}{% endif %}
+</div>
+</article>{% else %}<p class="muted">Aucun document accessible pour le moment.</p>{% endfor %}
+</div>
+</section>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
+ const category=document.getElementById('doc-category-filter'),search=document.getElementById('doc-search');
+ const filter=()=>{document.querySelectorAll('#document-list [data-doc-category]').forEach(row=>{
+  row.hidden=Boolean((category?.value&&row.dataset.docCategory!==category.value)||
+   (search?.value&&!row.dataset.docText.includes(search.value.trim().toLowerCase())));
+ });};
+ category?.addEventListener('change',filter);search?.addEventListener('input',filter);
+ const form=document.getElementById('doc-upload-form'),files=document.getElementById('doc-upload-files');
+ form?.addEventListener('submit',e=>{
+  const selection=[...(files?.files||[])];
+  if(!selection.length||selection.length>4||selection.some(f=>f.size>25*1024*1024||f.size===0)){
+   e.preventDefault();alert('Sélectionnez de 1 à 4 fichiers non vides, de 25 Mo maximum chacun.');return;
+  }
+  const button=document.getElementById('doc-upload-button');
+  if(button){button.disabled=true;button.textContent='Téléversement en cours…';}
+ });
+});
+</script>
+{% endblock %}
