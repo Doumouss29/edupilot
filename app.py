@@ -995,10 +995,10 @@ def dashboard():
         lessons=allrows("""SELECT l.id,l.starts_at,l.ends_at,l.room,l.status,c.name course_name,cl.name class_name,t.name teacher_name
                          FROM lessons l JOIN courses c ON c.id=l.course_id
                          JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id
-                         WHERE l.school_id=? AND l.ends_at>? AND l.starts_at<?
+                         WHERE l.school_id=? AND l.ends_at>? AND l.starts_at<? AND cl.year_id=?
                          AND EXISTS (SELECT 1 FROM enrollments e
                            WHERE e.school_id=l.school_id AND e.student_id=? AND e.class_id=c.class_id)
-                         ORDER BY l.starts_at,c.name""",(u['school_id'],max(datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),week_start),week_end,u['id']))
+                         ORDER BY l.starts_at,c.name""",(u['school_id'],max(datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),week_start),week_end,(selected_academic_year() or {'id':-1})['id'],u['id']))
         week_days=[{'date':monday+datetime.timedelta(days=n),'lessons':[]} for n in range(7)]
         for item in lessons:
             index=(datetime.date.fromisoformat(item['starts_at'][:10])-monday).days
@@ -1010,17 +1010,19 @@ def dashboard():
     if u['role']=='parent':
         return render_template('dashboard.html',stats={'classes':0,'courses':0,'lessons':0,'total':0,'actual':0,'percent':0},classes=[],events=[],courses=[],schools=[])
     sid=school_id()
-    classes=scoped('SELECT * FROM classes WHERE school_id=?')
-    courses=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
+    chosen=selected_academic_year()
+    year_id=chosen['id'] if chosen else -1
+    classes=allrows('SELECT * FROM classes WHERE school_id=? AND year_id=?',(sid,year_id))
+    courses=allrows('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=? AND cl.year_id=?',(sid,year_id))
     if u['role']=='enseignant': courses=[x for x in courses if x['teacher_id']==u['id']]
     lesson_minutes_expr = ("CAST(ROUND(EXTRACT(EPOCH FROM (l.ends_at::timestamp - l.starts_at::timestamp))/60) AS INTEGER)" if DB_ENGINE == 'postgresql' else "CAST(ROUND((julianday(l.ends_at)-julianday(l.starts_at))*1440) AS INTEGER)")
-    lessonlist=scoped(f'SELECT l.*,{lesson_minutes_expr} scheduled_minutes,c.name course_name,cl.name class_name,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? ORDER BY l.starts_at DESC LIMIT 80')
+    lessonlist=scoped(f'SELECT l.*,{lesson_minutes_expr} scheduled_minutes,c.name course_name,cl.name class_name,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? AND cl.year_id=? ORDER BY l.starts_at DESC LIMIT 80',(year_id,))
     if u['role']=='enseignant': lessonlist=[x for x in lessonlist if any(y['id']==x['course_id'] for y in courses)]
     upcoming=scoped("""SELECT l.*,c.name course_name,cl.name class_name
         FROM lessons l JOIN courses c ON c.id=l.course_id
         JOIN classes cl ON cl.id=c.class_id
-        WHERE l.school_id=? AND l.starts_at>=? AND l.status='programmee'
-        ORDER BY l.starts_at ASC LIMIT 80""",(datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),))
+        WHERE l.school_id=? AND cl.year_id=? AND l.starts_at>=? AND l.status='programmee'
+        ORDER BY l.starts_at ASC LIMIT 80""",(year_id,datetime.datetime.now().strftime('%Y-%m-%dT%H:%M')))
     if u['role']=='enseignant':
         upcoming=[x for x in upcoming if x['teacher_id']==u['id']]
     upcoming=upcoming[:8]
