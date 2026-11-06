@@ -2408,7 +2408,7 @@ def document_record(did,allow_draft=False):
 @roles('admin','administratif','enseignant','etudiant')
 def course_documents_index():
     u=current_user()
-    sql="""SELECT c.id,c.name,c.code,cl.name class_name,f.name filiere_name,
+    sql="""SELECT c.id,c.name,c.code,c.class_id,cl.name class_name,f.name filiere_name,
           (SELECT COUNT(*) FROM course_documents d WHERE d.school_id=c.school_id
            AND d.course_id=c.id AND (?=1 OR (d.published=1 AND d.publish_at<=?))) documents_count
           FROM courses c
