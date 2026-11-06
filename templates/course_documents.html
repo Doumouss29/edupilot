@@ -31,7 +31,9 @@
 <label>Catégorie<select name="category" required>{% for category in categories %}<option value="{{category}}">{{category}}</option>{% endfor %}</select></label>
 <label>Titre personnalisé (facultatif, pour un fichier)<input name="title" maxlength="180" placeholder="Ex. TP 01 — Géoréférencement"></label>
 <label class="full">Description (facultative)<textarea name="description" maxlength="1500" rows="2" placeholder="Objectif du document, consignes de lecture..."></textarea></label>
-<label class="full" style="display:flex;align-items:center;gap:9px"><input type="checkbox" name="published" value="1" style="width:auto" checked> Publier immédiatement pour les étudiants</label>
+<label class="full" style="display:flex;align-items:center;gap:9px"><input type="checkbox" name="published" id="doc-published" value="1" style="width:auto" checked> Publier pour les étudiants</label>
+<label>Publication programmée (facultatif, heure d'Abidjan)<input type="datetime-local" name="publish_at" id="doc-publish-at" aria-describedby="doc-publish-hint"></label>
+<p class="muted" id="doc-publish-hint">Laissez la date vide pour publier immédiatement, ou choisissez une date future. Décochez « Publier » pour conserver un brouillon.</p>
 </div>
 <div class="doc-upload-actions"><button class="btn primary" id="doc-upload-button" type="submit">Ajouter les documents</button><small class="muted" id="doc-upload-help">Décochez « Publier » pour conserver les documents en brouillon.</small></div>
 </form>
@@ -49,7 +51,7 @@
 <p class="muted">{{d.category}} · {{d.filename}} · {{'%.1f'|format(d.bytes_size/1048576)}} Mo</p>
 {% if d.description %}<p>{{d.description}}</p>{% endif %}
 <p class="muted">Ajouté par {{d.uploader_name}} · {{d.created_at}}
-{% if can_manage %}{% if d.published %}<span class="doc-badge">Publié</span>{% else %}<span class="doc-badge draft">Brouillon</span>{% endif %}{% endif %}</p>
+{% if can_manage %}{% if d.published and d.publish_at and d.publish_at > current_publish_time %}<span class="doc-badge draft">Publication programmée</span>{% elif d.published %}<span class="doc-badge">Publié</span>{% else %}<span class="doc-badge draft">Brouillon</span>{% endif %}{% endif %}</p>
 </div>
 <div class="doc-file-actions">
 {% if d.mime_type in ('application/pdf','image/jpeg','image/png') %}<a class="btn outline sm" href="{{url_for('course_document_file',did=d.id,preview=1)}}" target="_blank" rel="noopener">Voir</a>{% endif %}
@@ -76,6 +78,8 @@ document.addEventListener('DOMContentLoaded',()=>{
  });};
  category?.addEventListener('change',filter);search?.addEventListener('input',filter);
  const form=document.getElementById('doc-upload-form'),files=document.getElementById('doc-upload-files');
+ const publish=document.getElementById('doc-published'),date=document.getElementById('doc-publish-at');
+ publish?.addEventListener('change',()=>{if(date){date.disabled=!publish.checked;if(!publish.checked)date.value='';}});
  form?.addEventListener('submit',e=>{
   const selection=[...(files?.files||[])];
   if(!selection.length||selection.length>4||selection.some(f=>f.size>25*1024*1024||f.size===0)){
