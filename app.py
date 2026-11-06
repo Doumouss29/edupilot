@@ -1510,7 +1510,10 @@ def resend_account_invite(uid):
         if person['role'] not in ('admin','administratif'):abort(403)
         target=url_for('school_accounts',sid=person['school_id'])
     else:
-        if person['school_id']!=actor['school_id'] or person['role']=='superadmin':abort(403)
+        if (person['school_id']!=actor['school_id'] or
+                person['role'] in ('admin','superadmin') or
+                (person['role']=='administratif' and actor['role']!='admin')):
+            abort(403)
         target=url_for('people')
     sent=create_invite(uid)
     flash('email_accepted' if sent else 'Échec de l’envoi Brevo : aucun nouvel e-mail confirmé. Consultez les journaux serveur et Brevo.', 'email_modal' if sent else 'error')
@@ -1539,6 +1542,8 @@ def edit_person_matricule(uid):
 def edit_person_page(uid):
     user=one('SELECT * FROM users WHERE id=? AND school_id=?',(uid,school_id()))
     if not user or user['role']=='superadmin':abort(404)
+    if user['role']=='admin' or (user['role']=='administratif' and current_user()['role']!='admin'):
+        abort(403)
     # Legacy/imported accounts may have only users.name populated.
     first=(user['first_name'] or '').strip()
     last=(user['last_name'] or '').strip()
@@ -1576,6 +1581,8 @@ def set_person_temporary_password(uid):
         c.execute('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=? AND school_id=?',
                   (generate_password_hash(temporary),uid,school_id()))
         c.execute('DELETE FROM invites WHERE user_id=? AND used=0',(uid,))
+        c.execute('DELETE FROM mfa_trusted_devices WHERE user_id=?',(uid,))
+        c.execute('UPDATE mfa_settings SET email_code_hash=NULL,email_expires=NULL WHERE user_id=?',(uid,))
     audit('user.temporary_password_set',str(uid))
     flash('Mot de passe temporaire défini pour '+person['name']+'. Transmettez-le par un canal privé sécurisé ; le changement sera obligatoire à la connexion.','success')
     return redirect(url_for('edit_person_page',uid=uid))
@@ -1585,6 +1592,8 @@ def set_person_temporary_password(uid):
 def edit_person_details(uid):
     user=one('SELECT id,role,matricule,email FROM users WHERE id=? AND school_id=?',(uid,school_id()))
     if not user or user['role']=='superadmin':abort(404)
+    if user['role']=='admin' or (user['role']=='administratif' and current_user()['role']!='admin'):
+        abort(403)
     name=request.form.get('name','').strip()
     entered_email=request.form.get('email','').strip().lower()
     email=entered_email or (user['email'] if user['role']=='enseignant' and is_pending_teacher_email(user['email']) else '')
@@ -1623,6 +1632,7 @@ def people():
     if request.method=='POST':
         role=request.form.get('role','etudiant')
         if role not in ('etudiant','enseignant','parent','administratif'):abort(400)
+        if role=='administratif' and current_user()['role']!='admin':abort(403)
         name=request.form.get('name','').strip()
         email=request.form.get('email','').strip().lower()
         phone=request.form.get('phone','').strip()[:40]
@@ -1715,14 +1725,19 @@ def people_bulk():
         return redirect(url_for('people'))
     if action=='invite':
         matches=allrows('SELECT id,role FROM users WHERE school_id=? AND active=1 AND id IN ('+','.join('?' for _ in selected)+')',(school_id(),*selected))
-        if len(matches)!=len(selected) or current_user()['id'] in selected or any(x['role']=='superadmin' for x in matches):abort(403)
+        if (len(matches)!=len(selected) or current_user()['id'] in selected or
+                any(x['role'] in ('admin','superadmin') or
+                    (x['role']=='administratif' and current_user()['role']!='admin') for x in matches)):
+            abort(403)
         successes=sum(1 for person in matches if create_invite(person['id']))
         flash(f'{successes} invitation(s) envoyée(s) sur {len(matches)}.','success' if successes==len(matches) else 'error')
         return redirect(url_for('people'))
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
         users=c.execute('SELECT id,role,name FROM users WHERE school_id=? AND id IN ('+','.join('?' for _ in selected)+')',(school_id(),*selected)).fetchall()
-        if len(users)!=len(selected) or any(x['role']=='superadmin' for x in users):
+        if (len(users)!=len(selected) or
+                any(x['role'] in ('admin','superadmin') or
+                    (x['role']=='administratif' and current_user()['role']!='admin') for x in users)):
             flash('Sélection invalide : certains comptes ne sont pas gérables dans cet établissement.','error')
             return redirect(url_for('people'))
         if action=='delete':
