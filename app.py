@@ -2363,8 +2363,13 @@ def protect_archived_academic_records():
                 JOIN courses c ON c.id=a.course_id AND c.school_id=a.school_id
                 WHERE a.id=? AND a.school_id=?""",(aid,school_id()))
             class_id=assessment['class_id'] if assessment else None
-    elif endpoint in ('school_bulletin_publish','periods'):
+    elif endpoint=='school_bulletin_publish':
         class_id=request.form.get('class_id')
+    elif endpoint=='periods':
+        pid=request.form.get('period_id')
+        period=one("""SELECT p.class_id FROM periods p
+            WHERE p.id=? AND p.school_id=?""",(pid,school_id())) if pid else None
+        class_id=period['class_id'] if period else None
     elif endpoint=='grades':
         aid=request.form.get('assessment_id')
         if aid:
@@ -4131,7 +4136,10 @@ def periods():
         elif action=='unlock':execute('UPDATE periods SET locked=0 WHERE id=?',(pid,))
         else:abort(400)
         audit('period.'+action,str(pid));flash('Période mise à jour.','success');return redirect(url_for('periods'))
-    return render_template('periods.html',periods=scoped('SELECT p.*,c.name class_name FROM periods p JOIN classes c ON c.id=p.class_id WHERE p.school_id=?'))
+    selected=selected_academic_year()
+    return render_template('periods.html',periods=allrows("""SELECT p.*,c.name class_name
+        FROM periods p JOIN classes c ON c.id=p.class_id
+        WHERE p.school_id=? AND c.year_id=?""",(school_id(),selected['id'] if selected else -1)))
 
 @app.get('/api/notifications')
 @login_required
