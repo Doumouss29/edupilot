@@ -1245,6 +1245,12 @@ def school_update(sid):
         if request.form.get('confirm_slug')!=school['slug']:abort(400,'Confirmation requise.')
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
+            # Remove academic-year mappings before their referenced classes, documents and users.
+            c.execute('DELETE FROM academic_year_document_copies WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM academic_year_promotions WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM academic_year_class_copies WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM course_documents WHERE school_id=?',(sid,))
+            c.execute('DELETE FROM school_document_limits WHERE school_id=?',(sid,))
             c.execute('DELETE FROM attendance WHERE lesson_id IN (SELECT id FROM lessons WHERE school_id=?)',(sid,))
             c.execute('DELETE FROM submissions WHERE assessment_id IN (SELECT id FROM assessments WHERE school_id=?)',(sid,))
             c.execute('DELETE FROM grade_history WHERE grade_id IN (SELECT g.id FROM grades g JOIN assessments a ON a.id=g.assessment_id WHERE a.school_id=?)',(sid,))
