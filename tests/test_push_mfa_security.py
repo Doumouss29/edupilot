@@ -75,6 +75,14 @@ class PushAndMfaSecurityTests(unittest.TestCase):
         self.assertEqual(self.subscribe(second).status_code,403)
         self.assertEqual(project.one('SELECT user_id FROM push_subscriptions WHERE endpoint=?',(ENDPOINT,))['user_id'],1)
 
+    def test_malformed_json_rejected_without_server_error(self):
+        self.login(1)
+        for endpoint in ('/api/notifications/read','/api/notifications/delete','/api/push/unsubscribe'):
+            with self.subTest(endpoint=endpoint):
+                response=self.client.post(endpoint,json=['unexpected','array'],
+                    headers={'X-CSRF-Token':'csrf-for-test'})
+                self.assertEqual(response.status_code,400)
+
     def test_wrong_mfa_code_does_not_consume_valid_code(self):
         code='456789'
         digest=hmac.new(project.app.secret_key.encode(),f'1:{code}'.encode(),hashlib.sha256).hexdigest()
