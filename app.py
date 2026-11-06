@@ -3025,7 +3025,7 @@ def course_documents_index():
     u=current_user()
     sql="""SELECT c.id,c.name,c.code,c.class_id,cl.name class_name,f.name filiere_name,
           (SELECT COUNT(*) FROM course_documents d WHERE d.school_id=c.school_id
-           AND d.course_id=c.id AND (?=1 OR (d.published=1 AND d.publish_at<=?))) documents_count
+           AND d.course_id=c.id AND (?=1 OR (d.published=1 AND (d.publish_at IS NULL OR d.publish_at<=?)))) documents_count
           FROM courses c
           JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
           LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id
@@ -3511,8 +3511,12 @@ def planning():
         args.append(selected['id'])
     if u['role']=='enseignant' or (u['role']=='admin' and request.args.get('mine')=='1'):
         query+=' AND l.teacher_id=?';args.append(u['id'])
-    elif u['role']=='etudiant':query+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
-    elif u['role']=='parent':query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
+    elif u['role']=='etudiant':
+        query+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.school_id=l.school_id AND e.student_id=? AND e.class_id=cl.id AND e.year_id=cl.year_id)'
+        args.append(u['id'])
+    elif u['role']=='parent':
+        query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id AND e.school_id=p.school_id WHERE p.school_id=l.school_id AND p.parent_id=? AND p.active=1 AND e.class_id=cl.id AND e.year_id=cl.year_id AND cl.parents_enabled=1)'
+        args.append(u['id'])
     events=allrows(query,args)
     return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,video_classes=allrows("""SELECT cl.id,cl.name,cl.video_url,cl.filiere_id,f.name filiere_name,y.label academic_year FROM classes cl JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id WHERE cl.school_id=? AND cl.video_url IS NOT NULL AND cl.video_url<>'' ORDER BY LOWER(f.name),LOWER(cl.name)""",(school_id(),)) if u['role'] in ('admin','administratif') else [],rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],courses=allrows('SELECT c.* FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? AND cl.year_id=? ORDER BY c.name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [],classes=allrows('SELECT id,name FROM classes WHERE school_id=? AND year_id=? ORDER BY name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [])
 
@@ -4551,15 +4555,26 @@ def parents():
 def attendance(lid):
     lesson=one('SELECT l.*,c.class_id,c.name course_name FROM lessons l JOIN courses c ON c.id=l.course_id WHERE l.id=? AND l.school_id=?',(lid,school_id()))
     if not lesson or (current_user()['role']=='enseignant' and lesson['teacher_id']!=current_user()['id']):abort(403)
-    students=allrows('SELECT u.id,u.name,u.matricule,a.status FROM enrollments e JOIN users u ON u.id=e.student_id LEFT JOIN attendance a ON a.lesson_id=? AND a.student_id=u.id WHERE e.school_id=? AND e.class_id=?',(lid,school_id(),lesson['class_id']))
+    students=allrows("""SELECT u.id,u.name,u.matricule,a.status FROM enrollments e
+        JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id AND cl.year_id=e.year_id
+        JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id AND u.role='etudiant'
+        LEFT JOIN attendance a ON a.lesson_id=? AND a.student_id=u.id
+        WHERE e.school_id=? AND e.class_id=?""",(lid,school_id(),lesson['class_id']))
     return render_template('attendance.html',lesson=lesson,students=students)
 
 @app.post('/attendance/<int:lid>')
 @roles('enseignant','admin','administratif')
 def attendance_save(lid):
-    lesson=one('SELECT l.*,c.class_id FROM lessons l JOIN courses c ON c.id=l.course_id WHERE l.id=? AND l.school_id=?',(lid,school_id()))
+    lesson=one('SELECT l.*,c.class_id,cl.year_id FROM lessons l
+        JOIN courses c ON c.id=l.course_id AND c.school_id=l.school_id
+        JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
+        WHERE l.id=? AND l.school_id=?',(lid,school_id()))
     if not lesson or (current_user()['role']=='enseignant' and lesson['teacher_id']!=current_user()['id']):abort(403)
-    students=allrows('SELECT student_id FROM enrollments WHERE school_id=? AND class_id=?',(school_id(),lesson['class_id']))
+    writable_academic_class(lesson['class_id'],allow_draft=True)
+    students=allrows("""SELECT e.student_id FROM enrollments e
+        JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id AND u.role='etudiant'
+        WHERE e.school_id=? AND e.class_id=? AND e.year_id=?""",
+        (school_id(),lesson['class_id'],lesson['year_id']))
     with db() as c:
         for x in students:
             v=request.form.get('student_'+str(x['student_id']))
@@ -4580,8 +4595,12 @@ def planning_json():
         args.append(selected['id'])
     if u['role']=='enseignant' or (u['role']=='admin' and request.args.get('mine')=='1'):
         sql+=' AND l.teacher_id=?';args.append(u['id'])
-    elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
-    elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND e.class_id=c.class_id AND p.active=1 AND cl.parents_enabled=1)';args.append(u['id'])
+    elif u['role']=='etudiant':
+        sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.school_id=l.school_id AND e.student_id=? AND e.class_id=cl.id AND e.year_id=cl.year_id)'
+        args.append(u['id'])
+    elif u['role']=='parent':
+        sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id AND e.school_id=p.school_id WHERE p.school_id=l.school_id AND p.parent_id=? AND e.class_id=cl.id AND e.year_id=cl.year_id AND p.active=1 AND cl.parents_enabled=1)'
+        args.append(u['id'])
     response=jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':lesson_utc_iso(x['starts_at']),'end':lesson_utc_iso(x['ends_at']),'extendedProps':{'status':x['status'],'courseId':x['course_id'],'startsAt':x['starts_at'],'endsAt':x['ends_at'],'editable':x['status']=='programmee' and not x['validated'] and not x['actual_minutes'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
     response.headers['Cache-Control']='private, max-age=10'
     response.headers['Vary']='Cookie'
