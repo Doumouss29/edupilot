@@ -42,7 +42,10 @@
 <span class="year-status {{year.status}}">{{'En cours' if year.status=='active' else 'En préparation' if year.status=='draft' else 'Archivée'}}</span></div>
 <p class="muted">{{year.start_date or 'Début non défini'}} — {{year.end_date or 'Fin non définie'}}</p>
 <p class="muted">{{classes|selectattr('year_id','equalto',year.id)|list|length}} classe(s)</p>
-{% if year.status=='draft' %}<p class="muted">Vous pouvez y reconduire les classes et enregistrer les décisions de passage avant son activation.</p>{% elif year.status=='archived' %}<p class="muted">Année conservée pour consultation des historiques.</p>{% endif %}
+{% if year.status=='draft' %}<p class="muted">Vous pouvez y reconduire les classes et enregistrer les décisions de passage avant son activation.</p>{% elif year.status=='archived' %}
+<p class="muted">Année conservée pour consultation des historiques.</p>
+<a class="btn primary sm" href="{{url_for('academic_year_archive',year_id=year.id)}}">Consulter les archives</a>
+{% endif %}
 </div>
 {% else %}<p class="muted">{{'Aucune année scolaire archivée.' if view=='history' else 'Aucune année scolaire en cours ou en préparation.'}}</p>
 {% endfor %}
