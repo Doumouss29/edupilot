@@ -1567,9 +1567,13 @@ def people():
             flash('Compte créé. '+('Lien d’activation envoyé par e-mail.' if sent else 'Invitation non envoyée : vérifiez la configuration Brevo.'),'success' if sent else 'error')
         return redirect(url_for('people'))
     users=scoped('SELECT * FROM users WHERE school_id=? ORDER BY LOWER(name),id')
-    classes=scoped('SELECT id,name,year_id FROM classes WHERE school_id=? ORDER BY name')
+    selected_year=selected_academic_year()
+    classes=allrows('SELECT id,name,year_id FROM classes WHERE school_id=? AND year_id=? ORDER BY name',
+                    (school_id(),selected_year['id'] if selected_year else -1))
     years=scoped('SELECT id,label FROM years WHERE school_id=? ORDER BY label DESC')
-    courses=scoped('SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? ORDER BY cl.name,c.name')
+    courses=allrows("""SELECT c.id,c.name,cl.name class_name FROM courses c JOIN classes cl
+                    ON cl.id=c.class_id WHERE c.school_id=? AND cl.year_id=?
+                    ORDER BY cl.name,c.name""",(school_id(),selected_year['id'] if selected_year else -1))
     rows_sql="""SELECT u.id,u.name,u.email,u.role,u.matricule,u.active,u.must_change_password,
                      GROUP_CONCAT(DISTINCT cl.name) class_names,
                      TRIM(COALESCE(GROUP_CONCAT(DISTINCT cl.id),'') || ',' ||
