@@ -2353,6 +2353,192 @@ with db() as c:
     )""")
 
 
+@app.get('/academic-years')
+@roles('admin','administratif')
+def academic_years():
+    sid=school_id()
+    years=allrows('SELECT * FROM years WHERE school_id=? ORDER BY label DESC,id DESC',(sid,))
+    current=active_academic_year()
+    classes=allrows("""SELECT cl.id,cl.name,cl.year_id,cl.filiere_id,f.name filiere_name,
+                 (SELECT COUNT(*) FROM courses co WHERE co.class_id=cl.id AND co.school_id=cl.school_id) course_count,
+                 (SELECT COUNT(*) FROM enrollments e WHERE e.class_id=cl.id AND e.school_id=cl.school_id) student_count
+                 FROM classes cl LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id
+                 WHERE cl.school_id=? ORDER BY LOWER(f.name),LOWER(cl.name)""",(sid,))
+    students=allrows("""SELECT e.student_id,u.name student_name,e.class_id,e.year_id
+                    FROM enrollments e JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id
+                    WHERE e.school_id=? ORDER BY LOWER(u.name),e.id""",(sid,))
+    return render_template('academic_years.html',years=years,active=current,classes=classes,
+                           enrollments=students,can_edit=current_user()['role']=='admin')
+
+
+@app.post('/academic-years/select')
+@roles('admin','administratif','enseignant','etudiant')
+def academic_year_select():
+    value=request.form.get('year_id','')
+    if not value.isdigit():abort(400,'Année invalide')
+    row=one('SELECT id FROM years WHERE school_id=? AND id=?',(school_id(),int(value)))
+    if not row:abort(403)
+    session[f'academic_selected_year_{school_id()}']=row['id']
+    destination=request.form.get('return_to','')
+    parsed=urlsplit(destination)
+    if destination.startswith('/') and not destination.startswith('//') and not parsed.netloc and not parsed.scheme:
+        return redirect(destination)
+    return redirect(url_for('dashboard'))
+
+
+@app.post('/academic-years/create')
+@roles('admin')
+def academic_year_create():
+    label=request.form.get('label','').strip()
+    match=re.fullmatch(r'(20\d\d)-(20\d\d)',label)
+    if not match or int(match.group(2))!=int(match.group(1))+1:abort(400,'Libellé au format 2027-2028')
+    start=request.form.get('start_date','').strip() or None
+    end=request.form.get('end_date','').strip() or None
+    try:
+        if start:datetime.date.fromisoformat(start)
+        if end:datetime.date.fromisoformat(end)
+    except ValueError:abort(400,'Dates invalides')
+    if start and end and start>=end:abort(400,'Dates dans le mauvais ordre')
+    with db() as c:
+        if c.execute('SELECT id FROM years WHERE school_id=? AND label=?',(school_id(),label)).fetchone():
+            flash('Cette année scolaire existe déjà.','error')
+            return redirect(url_for('academic_years'))
+        c.execute("""INSERT INTO years(school_id,label,is_active,status,start_date,end_date)
+                     VALUES (?,?,0,'draft',?,?)""",(school_id(),label,start,end))
+    audit('academic_year.created',label)
+    flash(f'Année {label} créée en préparation.','success')
+    return redirect(url_for('academic_years'))
+
+
+@app.post('/academic-years/<int:target_id>/copy')
+@roles('admin')
+def academic_year_copy(target_id):
+    sid=school_id()
+    try:source_id=int(request.form.get('source_year_id',''))
+    except ValueError:abort(400)
+    if source_id==target_id:abort(400)
+    include_teachers=request.form.get('include_teachers')=='1'
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        source=c.execute('SELECT id,status FROM years WHERE id=? AND school_id=?',(source_id,sid)).fetchone()
+        target=c.execute('SELECT id,status FROM years WHERE id=? AND school_id=?',(target_id,sid)).fetchone()
+        if not source or not target or target['status']!='draft':abort(403,'L’année cible doit être en préparation')
+        originals=c.execute("""SELECT * FROM classes WHERE school_id=? AND year_id=?
+                              ORDER BY id""",(sid,source_id)).fetchall()
+        copied=0
+        for old in originals:
+            existing=c.execute("""SELECT target_class_id FROM academic_year_class_copies
+                WHERE school_id=? AND source_class_id=? AND target_year_id=?""",
+                (sid,old['id'],target_id)).fetchone()
+            if existing:continue
+            duplicate=c.execute("""SELECT id FROM classes WHERE school_id=? AND year_id=?
+                AND name=? AND filiere_id=?""",
+                (sid,target_id,old['name'],old['filiere_id'])).fetchone()
+            if duplicate:
+                new_class_id=duplicate['id']
+            else:
+                new_class_id=c.execute("""INSERT INTO classes
+                    (school_id,year_id,campus_id,name,cycle,parents_enabled,filiere_id,video_url)
+                    VALUES (?,?,?,?,?,?,?,?)""",
+                    (sid,target_id,old['campus_id'],old['name'],old['cycle'],
+                     old['parents_enabled'],old['filiere_id'],old['video_url'])).lastrowid
+                period_name='Trimestre 1' if old['cycle']=='trimestre' else 'Semestre 1'
+                c.execute('INSERT INTO periods(school_id,class_id,name) VALUES (?,?,?)',
+                          (sid,new_class_id,period_name))
+            c.execute("""INSERT INTO academic_year_class_copies
+                (school_id,source_class_id,target_class_id,source_year_id,target_year_id)
+                VALUES (?,?,?,?,?)""",(sid,old['id'],new_class_id,source_id,target_id))
+            old_courses=c.execute("""SELECT * FROM courses WHERE school_id=? AND class_id=?""",
+                                  (sid,old['id'])).fetchall()
+            for course in old_courses:
+                if c.execute('SELECT id FROM courses WHERE school_id=? AND class_id=? AND code=? AND name=?',
+                             (sid,new_class_id,course['code'],course['name'])).fetchone():continue
+                teacher=course['teacher_id'] if include_teachers else None
+                course_id=c.execute("""INSERT INTO courses
+                    (school_id,class_id,name,code,planned_minutes,teacher_id,coefficient)
+                    VALUES (?,?,?,?,?,?,?)""",
+                    (sid,new_class_id,course['name'],course['code'],course['planned_minutes'],
+                     teacher,course['coefficient'])).lastrowid
+                if teacher:
+                    c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',
+                              (course_id,teacher,datetime.date.today().isoformat()))
+            copied+=1
+    audit('academic_year.copied',f'{source_id}->{target_id};classes={copied}')
+    flash(f'{copied} classe(s) et leurs cours reconduits. Aucune séance, note ou évaluation n’a été copiée.','success')
+    return redirect(url_for('academic_years'))
+
+
+@app.post('/academic-years/<int:target_id>/promote')
+@roles('admin')
+def academic_year_promote(target_id):
+    sid=school_id()
+    try:
+        source_class_id=int(request.form.get('source_class_id',''))
+        student_ids=list(dict.fromkeys(int(i) for i in request.form.getlist('student_ids')))
+        target_class_id=int(request.form.get('target_class_id','0'))
+    except ValueError:abort(400,'Sélection invalide')
+    decision=request.form.get('decision','')
+    if decision not in ('promoted','repeat','graduated','exit') or not student_ids or len(student_ids)>250:
+        abort(400,'Choisissez des étudiants et une décision')
+    if decision in ('promoted','repeat') and not target_class_id:abort(400,'Choisissez une classe de destination')
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        source=c.execute('SELECT id,year_id FROM classes WHERE school_id=? AND id=?',
+                         (sid,source_class_id)).fetchone()
+        year=c.execute('SELECT id,status FROM years WHERE school_id=? AND id=?',(sid,target_id)).fetchone()
+        if not source or not year or year['status']!='draft' or source['year_id']==target_id:abort(403)
+        if decision in ('promoted','repeat'):
+            target=c.execute('SELECT id FROM classes WHERE school_id=? AND id=? AND year_id=?',
+                             (sid,target_class_id,target_id)).fetchone()
+            if not target:abort(403)
+        else:target_class_id=None
+        placeholders=','.join('?' for _ in student_ids)
+        matches=c.execute(f"""SELECT DISTINCT e.student_id FROM enrollments e
+            JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id AND u.role='etudiant'
+            WHERE e.school_id=? AND e.year_id=? AND e.class_id=?
+              AND e.student_id IN ({placeholders})""",
+            (sid,source['year_id'],source_class_id,*student_ids)).fetchall()
+        if len(matches)!=len(student_ids):abort(403,'Étudiant hors de cette classe')
+        for student_id in student_ids:
+            existing=c.execute("""SELECT id FROM academic_year_promotions
+                WHERE school_id=? AND student_id=? AND source_year_id=? AND target_year_id=?""",
+                (sid,student_id,source['year_id'],target_id)).fetchone()
+            if existing:abort(400,'Un étudiant a déjà une décision pour cette rentrée')
+            if c.execute("""SELECT id FROM enrollments WHERE school_id=? AND student_id=? AND year_id=?""",
+                         (sid,student_id,target_id)).fetchone():
+                abort(400,'Un étudiant a déjà une inscription pour cette année')
+        for student_id in student_ids:
+            if target_class_id is not None:
+                c.execute("""INSERT INTO enrollments(school_id,student_id,class_id,year_id,status)
+                    VALUES (?,?,?,?,'inscrit')""",(sid,student_id,target_class_id,target_id))
+            c.execute("""INSERT INTO academic_year_promotions
+                (school_id,student_id,source_year_id,target_year_id,source_class_id,target_class_id,decision,actor_id)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (sid,student_id,source['year_id'],target_id,source_class_id,
+                 target_class_id,decision,current_user()['id']))
+    audit('academic_year.promotions',f'year={target_id};count={len(student_ids)};decision={decision}')
+    flash(f'{len(student_ids)} décision(s) de passage enregistrée(s).','success')
+    return redirect(url_for('academic_years'))
+
+
+@app.post('/academic-years/<int:target_id>/activate')
+@roles('admin')
+def academic_year_activate(target_id):
+    sid=school_id()
+    if request.form.get('confirm')!='ACTIVER':abort(400,'Confirmation obligatoire')
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        target=c.execute('SELECT id,label,status FROM years WHERE school_id=? AND id=?',(sid,target_id)).fetchone()
+        if not target or target['status']!='draft':abort(403,'Cette année n’est pas en préparation')
+        previous=c.execute("SELECT id FROM years WHERE school_id=? AND is_active=1",(sid,)).fetchone()
+        c.execute("UPDATE years SET is_active=0,status='archived',archived_at=CURRENT_TIMESTAMP WHERE school_id=? AND is_active=1",(sid,))
+        c.execute("UPDATE years SET is_active=1,status='active',archived_at=NULL WHERE school_id=? AND id=?",(sid,target_id))
+    session.pop(f'academic_selected_year_{sid}',None)
+    audit('academic_year.activated',f'{target_id};previous={previous["id"] if previous else "none"}')
+    flash('La nouvelle année est active. L’ancienne année reste consultable dans les archives.','success')
+    return redirect(url_for('academic_years'))
+
+
 # Documents pedagogiques: one private storage namespace and quota per school.
 # Cross-engine DDL: PostgreSQL uses IDENTITY, SQLite uses INTEGER PRIMARY KEY.
 with db() as c:
