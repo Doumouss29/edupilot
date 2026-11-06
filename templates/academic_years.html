@@ -69,7 +69,7 @@
 <input type="hidden" name="csrf" value="{{csrf}}">
 <label>Classe d'origine<select class="year-source-class" name="source_class_id" required data-target="{{target.id}}">
 <option value="">Choisir une classe</option>
-{% for cl in classes if cl.year_id!=target.id and (years|selectattr('id','equalto',cl.year_id)|first).status!='draft' %}
+{% for cl in source_classes if cl.year_id!=target.id %}
 <option value="{{cl.id}}">{{cl.name}} — {{cl.filiere_name or 'Sans filière'}} ({{(years|selectattr('id','equalto',cl.year_id)|first).label}})</option>
 {% endfor %}</select></label>
 <div class="year-table"><div class="year-students" data-year-students="{{target.id}}">
