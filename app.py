@@ -1890,8 +1890,8 @@ def filiere_delete(fid):
 @roles('admin','administratif')
 def classes():
     if request.method=='POST':
-        year=scoped('SELECT id FROM years WHERE school_id=? AND is_active=1 LIMIT 1')
-        if not year:abort(400)
+        year=selected_academic_year()
+        if not year or year['status']=='archived':abort(403,'Année archivée : création interdite')
         campus=request.form.get('campus_id')
         if campus and (not one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled'] or not has_school('campuses',campus)):abort(403)
         if campus and one('SELECT plan FROM schools WHERE id=?',(school_id(),))['plan']!='premium':
@@ -1900,11 +1900,11 @@ def classes():
         name=request.form.get('name','').strip()
         filiere_id=request.form.get('filiere_id','')
         if not name or not filiere_id.isdigit() or not one('SELECT id FROM filieres WHERE school_id=? AND id=?',(school_id(),filiere_id)):abort(400,'Choisissez une filière valide')
-        cid=execute('INSERT INTO classes(school_id,year_id,campus_id,name,cycle,parents_enabled,filiere_id) VALUES (?,?,?,?,?,?,?)',(school_id(),year[0]['id'],campus or None,name,request.form.get('cycle','semestre'),int('parents_enabled' in request.form),filiere_id))
+        cid=execute('INSERT INTO classes(school_id,year_id,campus_id,name,cycle,parents_enabled,filiere_id) VALUES (?,?,?,?,?,?,?)',(school_id(),year['id'],campus or None,name,request.form.get('cycle','semestre'),int('parents_enabled' in request.form),filiere_id))
         execute('INSERT INTO periods(school_id,class_id,name) VALUES (?,?,?)',(school_id(),cid,'Trimestre 1' if request.form.get('cycle')=='trimestre' else 'Semestre 1'))
         audit('class.created',name)
         return redirect(url_for('classes'))
-    return render_template('list.html',title='Classes',filieres=scoped('SELECT id,name FROM filieres WHERE school_id=? ORDER BY LOWER(name)'),columns=['Classe','Filière','Régime','Parents','Détails','Modifier'],rows=[(x['name'],x['filiere_name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif',{'link':url_for('class_details',cid=x['id']),'label':'Détails'},{'link':url_for('class_edit',cid=x['id']),'label':'Modifier'}) for x in scoped('SELECT cl.*,f.name filiere_name FROM classes cl LEFT JOIN filieres f ON f.id=cl.filiere_id WHERE cl.school_id=? ORDER BY LOWER(f.name),LOWER(cl.name)')],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?') if one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled'] else [])
+    return render_template('list.html',title='Classes',filieres=scoped('SELECT id,name FROM filieres WHERE school_id=? ORDER BY LOWER(name)'),columns=['Classe','Filière','Régime','Parents','Détails','Modifier'],rows=[(x['name'],x['filiere_name'],x['cycle'],'Actif' if x['parents_enabled'] else 'Inactif',{'link':url_for('class_details',cid=x['id']),'label':'Détails'},{'link':url_for('class_edit',cid=x['id']),'label':'Modifier'}) for x in allrows('SELECT cl.*,f.name filiere_name FROM classes cl LEFT JOIN filieres f ON f.id=cl.filiere_id WHERE cl.school_id=? AND cl.year_id=? ORDER BY LOWER(f.name),LOWER(cl.name)',(school_id(),(selected_academic_year() or {'id':-1})['id']))],form='classes',campuses=scoped('SELECT * FROM campuses WHERE school_id=?') if one('SELECT campus_enabled FROM schools WHERE id=?',(school_id(),))['campus_enabled'] else [])
 
 @app.get('/mes-visios')
 @roles('admin','administratif','enseignant','etudiant')
@@ -1932,6 +1932,7 @@ def class_edit(cid):
     item=one('SELECT * FROM classes WHERE id=? AND school_id=?',(cid,school_id()))
     if not item:abort(404)
     if request.method=='POST':
+        writable_academic_class(cid,allow_draft=True)
         name=request.form.get('name','').strip()
         cycle=request.form.get('cycle','')
         campus=request.form.get('campus_id') or None
@@ -2875,6 +2876,7 @@ def courses():
     if request.method=='POST':
         cl=request.form.get('class_id');teacher=request.form.get('teacher_id') or None
         if not has_school('classes',cl):abort(403)
+        writable_academic_class(cl,allow_draft=True)
         if teacher and not one("SELECT id FROM users WHERE school_id=? AND id=? AND role IN ('enseignant','admin')",(school_id(),teacher)):abort(403)
         name=request.form.get('name','').strip()
         if not name:abort(400)
@@ -2886,13 +2888,17 @@ def courses():
         if teacher:execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,datetime.date.today().isoformat()))
         session[f'course_create_class_{school_id()}_{current_user()["id"]}']=str(cl)
         audit('course.created',name);return redirect(url_for('courses'))
-    rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule,(SELECT COUNT(*) FROM course_documents d WHERE d.school_id=c.school_id AND d.course_id=c.id) doc_count FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
-    return render_template('courses_manage.html',selected_class_id=session.get(f'course_create_class_{school_id()}_{current_user()["id"]}', ''),courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') ORDER BY LOWER(name),id"))
+    selected=selected_academic_year()
+    rows=allrows('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule,(SELECT COUNT(*) FROM course_documents d WHERE d.school_id=c.school_id AND d.course_id=c.id) doc_count FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=? AND cl.year_id=?',(school_id(),selected['id'] if selected else -1))
+    return render_template('courses_manage.html',selected_class_id=session.get(f'course_create_class_{school_id()}_{current_user()["id"]}', ''),courses=rows,classes=allrows('SELECT * FROM classes WHERE school_id=? AND year_id=?',(school_id(),selected['id'] if selected else -1)),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') ORDER BY LOWER(name),id"),year_archived=bool(selected and selected['status']=='archived'))
 
 @app.post('/courses/<int:cid>/delete')
 @roles('admin','administratif')
 def course_delete(cid):
     """Delete an unused course, or explicitly remove all of its history as school admin."""
+    course_class=one('SELECT class_id FROM courses WHERE id=? AND school_id=?',(cid,school_id()))
+    if not course_class:abort(404)
+    writable_academic_class(course_class['class_id'],allow_draft=True)
     force=request.form.get('force_delete')=='1'
     if force and current_user()['role']!='admin':abort(403)
     if force and request.form.get('confirm_word','').strip()!='SUPPRIMER':
@@ -2969,6 +2975,8 @@ def courses_bulk():
                           (school_id(),*ids)).fetchall()
         if len(courses)!=len(ids):abort(403)
         for cid in ids:
+            cl=c.execute('SELECT class_id FROM courses WHERE id=? AND school_id=?',(cid,school_id())).fetchone()
+            writable_academic_class(cl['class_id'],allow_draft=True)
             for table in ('lessons','assessments','teacher_memos','course_documents'):
                 if c.execute(f'SELECT id FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone():
                     flash('Suppression groupée refusée : un cours possède des séances, évaluations, mémos ou documents pédagogiques. Utilisez sa suppression individuelle avec confirmation si nécessaire.','error')
@@ -3026,6 +3034,7 @@ def course_edit(cid):
     item=one('SELECT * FROM courses WHERE id=? AND school_id=?',(cid,school_id()))
     if not item:abort(404)
     if request.method=='POST':
+        writable_academic_class(item['class_id'],allow_draft=True)
         name=request.form.get('name','').strip()
         class_id=request.form.get('class_id')
         teacher=request.form.get('teacher_id') or None
