@@ -2299,8 +2299,15 @@ with db() as c:
         mime_type TEXT NOT NULL,
         bytes_size INTEGER NOT NULL,
         published INTEGER NOT NULL DEFAULT 0,
+        publish_at TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )""")
+    # Upgrade databases created during earlier preview deployments.
+    if DB_ENGINE=='postgresql':
+        c.execute('ALTER TABLE course_documents ADD COLUMN IF NOT EXISTS publish_at TEXT')
+    else:
+        columns={column['name'] for column in c.execute('PRAGMA table_info(course_documents)').fetchall()}
+        if 'publish_at' not in columns:c.execute('ALTER TABLE course_documents ADD COLUMN publish_at TEXT')
     c.execute("""CREATE INDEX IF NOT EXISTS idx_course_documents_course
         ON course_documents(school_id,course_id,published)""")
     c.execute("""CREATE TABLE IF NOT EXISTS school_document_limits (
@@ -2320,6 +2327,20 @@ DOC_EXTENSIONS = {
 }
 DOC_MAX_FILE_BYTES = 25*1024*1024
 DOC_DEFAULT_QUOTA = 1024*1024*1024
+
+def doc_utc_now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+
+
+def doc_publish_time(value):
+    if not value:return doc_utc_now()
+    try:
+        date=datetime.datetime.fromisoformat(value)
+        if date.tzinfo is not None:raise ValueError()
+        return date.replace(tzinfo=ZoneInfo('Africa/Abidjan')).astimezone(
+            datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+    except ValueError:abort(400,'Date de publication invalide')
+
 DOC_ROOT = UPLOAD_DIR / 'course_documents'
 
 
@@ -2363,7 +2384,7 @@ def document_record(did,allow_draft=False):
     if not row:abort(404)
     course_doc_access(row['course_id'])
     role=current_user()['role']
-    if not row['published'] and not (
+    if (not row['published'] or (row['publish_at'] and row['publish_at']>doc_utc_now())) and not (
         role=='admin' or (role=='enseignant' and
                           one('SELECT id FROM courses WHERE school_id=? AND id=? AND teacher_id=?',
                               (school_id(),row['course_id'],current_user()['id'])))):
@@ -2377,13 +2398,13 @@ def course_documents_index():
     u=current_user()
     sql="""SELECT c.id,c.name,c.code,cl.name class_name,f.name filiere_name,
           (SELECT COUNT(*) FROM course_documents d WHERE d.school_id=c.school_id
-           AND d.course_id=c.id AND (?=1 OR d.published=1)) documents_count
+           AND d.course_id=c.id AND (?=1 OR (d.published=1 AND d.publish_at<=?))) documents_count
           FROM courses c
           JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
           LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id
           WHERE c.school_id=?"""
     privileged=u['role'] in ('admin','enseignant')
-    args=[int(privileged),school_id()]
+    args=[int(privileged),doc_utc_now(),school_id()]
     if u['role']=='enseignant':
         sql+=' AND c.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':
@@ -2408,9 +2429,12 @@ def course_documents(cid):
     sql="""SELECT d.*,u.name uploader_name FROM course_documents d
            JOIN users u ON u.id=d.uploader_id
            WHERE d.school_id=? AND d.course_id=?"""
-    if not can_manage:sql+=' AND d.published=1'
+    args=[school_id(),cid]
+    if not can_manage:
+        sql+=' AND d.published=1 AND d.publish_at<=?'
+        args.append(doc_utc_now())
     sql+=' ORDER BY d.created_at DESC,d.id DESC'
-    docs=allrows(sql,(school_id(),cid))
+    docs=allrows(sql,args)
     quota=doc_quota(school_id())
     used=one('SELECT COALESCE(SUM(bytes_size),0) total FROM course_documents WHERE school_id=?',(school_id(),))['total']
     return render_template('course_documents.html',course=course,documents=docs,
@@ -2431,6 +2455,7 @@ def course_documents_upload(cid):
     description=request.form.get('description','').strip()
     title=request.form.get('title','').strip()
     published=int(request.form.get('published')=='1')
+    publish_at=doc_publish_time(request.form.get('publish_at','').strip()) if published else None
     if category not in DOC_CATEGORIES or len(description)>1500 or len(title)>180:
         abort(400,'Catégorie, titre ou description invalide')
     if title and len(files)>1:
@@ -2481,10 +2506,10 @@ def course_documents_upload(cid):
             for dest,random_name,filename,size,ext in stored:
                 display_title=title if title else os.path.splitext(filename)[0][:180]
                 conn.execute("""INSERT INTO course_documents
-                   (school_id,course_id,uploader_id,filename,stored_name,title,description,category,mime_type,bytes_size,published)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   (school_id,course_id,uploader_id,filename,stored_name,title,description,category,mime_type,bytes_size,published,publish_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                    (sid,cid,current_user()['id'],filename,random_name,display_title,description,
-                    category,DOC_EXTENSIONS[ext],size,published))
+                    category,DOC_EXTENSIONS[ext],size,published,publish_at))
     except ValueError as exc:
         for dest in created_paths:dest.unlink(missing_ok=True)
         flash(str(exc),'error')
@@ -2504,8 +2529,8 @@ def course_document_visibility(cid,did):
     row=one('SELECT id FROM course_documents WHERE id=? AND course_id=? AND school_id=?',(did,cid,school_id()))
     if not row:abort(404)
     visible=request.form.get('published')=='1'
-    execute('UPDATE course_documents SET published=? WHERE id=? AND school_id=? AND course_id=?',
-            (int(visible),did,school_id(),cid))
+    execute('UPDATE course_documents SET published=?,publish_at=? WHERE id=? AND school_id=? AND course_id=?',
+            (int(visible),doc_utc_now() if visible else None,did,school_id(),cid))
     audit('course.documents.published' if visible else 'course.documents.unpublished',str(did))
     flash('Visibilité mise à jour.','success')
     return redirect(url_for('course_documents',cid=cid))
