@@ -2309,6 +2309,254 @@ with db() as c:
     )""")
 
 
+# Private teaching resources. Never expose UPLOAD_DIR through Flask static routes.
+DOC_CATEGORIES = ('Support de cours','Travaux pratiques','Exercices','Corrigés','Autres documents')
+DOC_EXTENSIONS = {
+    '.pdf':'application/pdf', '.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.csv':'text/csv', '.jpg':'image/jpeg', '.jpeg':'image/jpeg',
+    '.png':'image/png', '.zip':'application/zip',
+}
+DOC_MAX_FILE_BYTES = 25*1024*1024
+DOC_DEFAULT_QUOTA = 1024*1024*1024
+DOC_ROOT = UPLOAD_DIR / 'course_documents'
+
+
+def course_doc_access(cid,write=False):
+    u=current_user()
+    if not u or not u['school_id']:abort(403)
+    course=one("""SELECT c.id,c.name,c.code,c.class_id,c.teacher_id,
+                       cl.name class_name,f.name filiere_name,y.label year_label
+                FROM courses c JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
+                JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id
+                LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id
+                WHERE c.id=? AND c.school_id=?""",(cid,school_id()))
+    if not course:abort(404)
+    role=u['role']
+    if role in ('admin','administratif'):
+        if write and role!='admin':abort(403)
+    elif role=='enseignant':
+        if course['teacher_id']!=u['id']:abort(403)
+    elif role=='etudiant' and not write:
+        if not one("""SELECT e.student_id FROM enrollments e JOIN classes cl
+                     ON cl.id=e.class_id AND cl.school_id=e.school_id AND cl.year_id=e.year_id
+                     WHERE e.school_id=? AND e.student_id=? AND e.class_id=?""",
+                   (school_id(),u['id'],course['class_id'])):abort(403)
+    else:abort(403)
+    return course
+
+
+def doc_path(sid,stored_name):
+    # Only the generated random UUID is trusted for filesystem access.
+    if not re.fullmatch(r'[0-9a-f]{32}',stored_name):abort(404)
+    return DOC_ROOT / str(sid) / stored_name
+
+
+def doc_quota(sid):
+    row=one('SELECT quota_bytes FROM school_document_limits WHERE school_id=?',(sid,))
+    return int(row['quota_bytes']) if row else DOC_DEFAULT_QUOTA
+
+
+def document_record(did,allow_draft=False):
+    row=one('SELECT * FROM course_documents WHERE id=? AND school_id=?',(did,school_id()))
+    if not row:abort(404)
+    course_doc_access(row['course_id'])
+    role=current_user()['role']
+    if not row['published'] and not (
+        role=='admin' or (role=='enseignant' and
+                          one('SELECT id FROM courses WHERE school_id=? AND id=? AND teacher_id=?',
+                              (school_id(),row['course_id'],current_user()['id'])))):
+        abort(404)
+    return row
+
+
+@app.get('/course-documents')
+@roles('admin','administratif','enseignant','etudiant')
+def course_documents_index():
+    u=current_user()
+    sql="""SELECT c.id,c.name,c.code,cl.name class_name,f.name filiere_name,
+          (SELECT COUNT(*) FROM course_documents d WHERE d.school_id=c.school_id
+           AND d.course_id=c.id AND (?=1 OR d.published=1)) documents_count
+          FROM courses c
+          JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
+          LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id
+          WHERE c.school_id=?"""
+    privileged=u['role'] in ('admin','enseignant')
+    args=[int(privileged),school_id()]
+    if u['role']=='enseignant':
+        sql+=' AND c.teacher_id=?';args.append(u['id'])
+    elif u['role']=='etudiant':
+        sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.school_id=c.school_id AND e.class_id=c.class_id AND e.student_id=? AND e.year_id=cl.year_id)'
+        args.append(u['id'])
+    sql+=' ORDER BY LOWER(f.name),LOWER(cl.name),LOWER(c.name)'
+    courses=allrows(sql,args)
+    return render_template('course_documents_index.html',courses=courses)
+
+
+@app.get('/courses/<int:cid>/documents')
+@roles('admin','administratif','enseignant','etudiant')
+def course_documents(cid):
+    course=course_doc_access(cid)
+    u=current_user()
+    can_manage=u['role']=='admin' or (u['role']=='enseignant' and course['teacher_id']==u['id'])
+    sql="""SELECT d.*,u.name uploader_name FROM course_documents d
+           JOIN users u ON u.id=d.uploader_id
+           WHERE d.school_id=? AND d.course_id=?"""
+    if not can_manage:sql+=' AND d.published=1'
+    sql+=' ORDER BY d.created_at DESC,d.id DESC'
+    docs=allrows(sql,(school_id(),cid))
+    quota=doc_quota(school_id())
+    used=one('SELECT COALESCE(SUM(bytes_size),0) total FROM course_documents WHERE school_id=?',(school_id(),))['total']
+    return render_template('course_documents.html',course=course,documents=docs,
+                           can_manage=can_manage,categories=DOC_CATEGORIES,
+                           quota_bytes=quota,used_bytes=int(used or 0),max_file_mb=25,
+                           school_admin=u['role']=='admin')
+
+
+@app.post('/courses/<int:cid>/documents/upload')
+@roles('admin','enseignant')
+def course_documents_upload(cid):
+    course_doc_access(cid,write=True)
+    files=[f for f in request.files.getlist('files') if f.filename]
+    if not files or len(files)>4:
+        flash('Choisissez entre 1 et 4 fichiers par dépôt.','error')
+        return redirect(url_for('course_documents',cid=cid))
+    category=request.form.get('category','')
+    description=request.form.get('description','').strip()
+    title=request.form.get('title','').strip()
+    published=int(request.form.get('published')=='1')
+    if category not in DOC_CATEGORIES or len(description)>1500 or len(title)>180:
+        abort(400,'Catégorie, titre ou description invalide')
+    if title and len(files)>1:
+        flash('Le titre personnalisé est réservé au dépôt d’un seul fichier.','error')
+        return redirect(url_for('course_documents',cid=cid))
+    sid=school_id()
+    stored=[]
+    try:
+        for file in files:
+            raw_filename=file.filename.replace('\\','/').split('/')[-1].strip()
+            extension=os.path.splitext(raw_filename)[1].lower()
+            if extension not in DOC_EXTENSIONS or not raw_filename or len(raw_filename)>200:
+                raise ValueError('Format non autorisé ou nom de fichier trop long.')
+            random_name=secrets.token_hex(16)
+            dest=doc_path(sid,random_name)
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            size=0
+            with dest.open('xb') as handle:
+                while True:
+                    block=file.stream.read(1024*1024)
+                    if not block:break
+                    size+=len(block)
+                    if size>DOC_MAX_FILE_BYTES:raise ValueError('Un document dépasse la limite de 25 Mo.')
+                    handle.write(block)
+            stored.append((dest,random_name,raw_filename,size,extension))
+            if size==0:raise ValueError('Un fichier est vide.')
+            # Reject obvious extension spoofing and malformed preview files.
+            with dest.open('rb') as handle:signature=handle.read(8)
+            if (extension=='.pdf' and not signature.startswith(b'%PDF-')) or (
+                extension in ('.png',) and signature!=b'\x89PNG\r\n\x1a\n') or (
+                extension in ('.jpg','.jpeg') and not signature.startswith(b'\xff\xd8\xff')) or (
+                extension in ('.zip','.docx','.pptx','.xlsx') and not signature.startswith(b'PK')):
+                raise ValueError('Le contenu du fichier ne correspond pas à son format.')
+        with db() as conn:
+            if DB_ENGINE=='sqlite':conn.execute('BEGIN IMMEDIATE')
+            else:conn.execute('SELECT id FROM schools WHERE id=? FOR UPDATE',(sid,))
+            usage=conn.execute('SELECT COALESCE(SUM(bytes_size),0) total FROM course_documents WHERE school_id=?',(sid,)).fetchone()['total']
+            setting=conn.execute('SELECT quota_bytes FROM school_document_limits WHERE school_id=?',(sid,)).fetchone()
+            limit=int(setting['quota_bytes']) if setting else DOC_DEFAULT_QUOTA
+            if int(usage or 0)+sum(item[3] for item in stored)>limit:
+                raise ValueError('Quota de stockage de cet établissement dépassé.')
+            # Confirm both authorisation and course still exist under the lock.
+            active=conn.execute('SELECT teacher_id FROM courses WHERE id=? AND school_id=?',(cid,sid)).fetchone()
+            if not active or (current_user()['role']=='enseignant' and active['teacher_id']!=current_user()['id']):
+                abort(403)
+            for dest,random_name,filename,size,ext in stored:
+                display_title=title if title else os.path.splitext(filename)[0][:180]
+                conn.execute("""INSERT INTO course_documents
+                   (school_id,course_id,uploader_id,filename,stored_name,title,description,category,mime_type,bytes_size,published)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   (sid,cid,current_user()['id'],filename,random_name,display_title,description,
+                    category,DOC_EXTENSIONS[ext],size,published))
+    except ValueError as exc:
+        for dest,*_ in stored:dest.unlink(missing_ok=True)
+        flash(str(exc),'error')
+        return redirect(url_for('course_documents',cid=cid))
+    except Exception:
+        for dest,*_ in stored:dest.unlink(missing_ok=True)
+        raise
+    audit('course.documents.uploaded',f'course={cid},count={len(stored)},published={published}')
+    flash(f'{len(stored)} document(s) ajouté(s). '+('Publié(s) pour les étudiants.' if published else 'Conservé(s) en brouillon.'),'success')
+    return redirect(url_for('course_documents',cid=cid))
+
+
+@app.post('/courses/<int:cid>/documents/<int:did>/visibility')
+@roles('admin','enseignant')
+def course_document_visibility(cid,did):
+    course_doc_access(cid,write=True)
+    row=one('SELECT id FROM course_documents WHERE id=? AND course_id=? AND school_id=?',(did,cid,school_id()))
+    if not row:abort(404)
+    visible=request.form.get('published')=='1'
+    execute('UPDATE course_documents SET published=? WHERE id=? AND school_id=? AND course_id=?',
+            (int(visible),did,school_id(),cid))
+    audit('course.documents.published' if visible else 'course.documents.unpublished',str(did))
+    flash('Visibilité mise à jour.','success')
+    return redirect(url_for('course_documents',cid=cid))
+
+
+@app.post('/courses/<int:cid>/documents/<int:did>/delete')
+@roles('admin','enseignant')
+def course_document_delete(cid,did):
+    course_doc_access(cid,write=True)
+    sid=school_id()
+    with db() as conn:
+        item=conn.execute('SELECT id,stored_name,uploader_id FROM course_documents WHERE id=? AND school_id=? AND course_id=?',
+                          (did,sid,cid)).fetchone()
+        if not item:abort(404)
+        if current_user()['role']!='admin' and item['uploader_id']!=current_user()['id']:
+            abort(403,'Vous ne pouvez supprimer que vos propres documents.')
+        conn.execute('DELETE FROM course_documents WHERE id=? AND school_id=? AND course_id=?',(did,sid,cid))
+    doc_path(sid,item['stored_name']).unlink(missing_ok=True)
+    audit('course.documents.deleted',str(did))
+    flash('Document supprimé.','success')
+    return redirect(url_for('course_documents',cid=cid))
+
+
+@app.get('/course-documents/<int:did>/file')
+@roles('admin','administratif','enseignant','etudiant')
+def course_document_file(did):
+    doc=document_record(did)
+    sid=school_id()
+    target=doc_path(sid,doc['stored_name'])
+    if not target.is_file():abort(404)
+    # Preview PDF/images only; downloads use the original harmless display name.
+    preview=request.args.get('preview')=='1' and doc['mime_type'] in (
+        'application/pdf','image/jpeg','image/png')
+    response=send_file(target,mimetype=doc['mime_type'],download_name=doc['filename'],
+                       as_attachment=not preview,conditional=False)
+    response.headers['Cache-Control']='private, no-store'
+    response.headers['X-Content-Type-Options']='nosniff'
+    response.headers['X-Frame-Options']='SAMEORIGIN'
+    return response
+
+
+@app.post('/course-documents/quota')
+@roles('admin')
+def course_document_quota():
+    try:
+        megabytes=int(request.form.get('quota_mb',''))
+        if not 100<=megabytes<=10240:raise ValueError()
+    except (ValueError,TypeError):
+        abort(400,'Quota autorisé entre 100 Mo et 10 Go')
+    execute("""INSERT INTO school_document_limits(school_id,quota_bytes)
+             VALUES (?,?) ON CONFLICT(school_id)
+             DO UPDATE SET quota_bytes=excluded.quota_bytes""",
+             (school_id(),megabytes*1024*1024))
+    audit('course.documents.quota_changed',str(megabytes))
+    flash('Quota de stockage mis à jour.','success')
+    return redirect(url_for('course_documents_index'))
+
+
 @app.route('/courses',methods=['GET','POST'])
 @roles('admin','administratif')
 def courses():
