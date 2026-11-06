@@ -22,24 +22,32 @@
 <h2>Organisation académique</h2>
 <p>Préparez la rentrée, reconduisez les structures, organisez le passage des étudiants, puis activez la nouvelle année sans perdre les archives.</p>
 </div>
-<div id="annees"></div>
+{% set view = 'history' if request.args.get('section') == 'history' else 'years' %}
 <nav aria-label="Sections de l'organisation académique" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 20px">
-<a class="btn primary sm" href="{{url_for('academic_years')}}#annees">Années scolaires</a>
+<a class="btn {{'primary' if view=='years' else 'outline'}} sm" href="{{url_for('academic_years')}}">Années scolaires</a>
 <a class="btn outline sm" href="{{url_for('periods')}}">Périodes académiques</a>
-<a class="btn outline sm" href="{{url_for('academic_years')}}#historique">Historique et archives</a>
+<a class="btn {{'primary' if view=='history' else 'outline'}} sm" href="{{url_for('academic_years',section='history')}}">Historique et archives</a>
 </nav>
-<div id="historique"></div>
+{% if view == 'history' %}
+<section class="panel" style="margin-bottom:16px">
+<h3>Historique et archives</h3>
+<p>Consultez ici les années scolaires archivées. Leurs classes et leurs données historiques sont conservées.</p>
+</section>
+{% else %}
+<h3 style="margin-bottom:14px">Années scolaires en cours et en préparation</h3>
+{% endif %}
 <div class="year-grid">
-{% for year in years %}
+{% for year in years if (year.status=='archived' if view=='history' else year.status!='archived') %}
 <div class="year-card"><div class="year-controls"><h3>{{year.label}}</h3>
 <span class="year-status {{year.status}}">{{'En cours' if year.status=='active' else 'En préparation' if year.status=='draft' else 'Archivée'}}</span></div>
 <p class="muted">{{year.start_date or 'Début non défini'}} — {{year.end_date or 'Fin non définie'}}</p>
 <p class="muted">{{classes|selectattr('year_id','equalto',year.id)|list|length}} classe(s)</p>
 {% if year.status=='draft' %}<p class="muted">Vous pouvez y reconduire les classes et enregistrer les décisions de passage avant son activation.</p>{% elif year.status=='archived' %}<p class="muted">Année conservée pour consultation des historiques.</p>{% endif %}
 </div>
+{% else %}<p class="muted">{{'Aucune année scolaire archivée.' if view=='history' else 'Aucune année scolaire en cours ou en préparation.'}}</p>
 {% endfor %}
 </div>
-{% if can_edit %}
+{% if can_edit and view=='years' %}
 <section class="panel" style="margin-top:18px">
 <h3>1. Préparer une nouvelle année</h3>
 <form action="{{url_for('academic_year_create')}}" method="post" class="modern-form">
