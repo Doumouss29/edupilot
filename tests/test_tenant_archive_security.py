@@ -26,6 +26,10 @@ class TenantAndArchiveSecurityTests(unittest.TestCase):
             conn.execute("ALTER TABLE years ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
             conn.execute("ALTER TABLE years ADD COLUMN start_date TEXT")
             conn.execute("ALTER TABLE years ADD COLUMN end_date TEXT")
+            # Baseline SCHEMA is older than the filiere/navigation migration.
+            # Recreate the minimum navigation schema in the disposable test DB.
+            conn.execute("ALTER TABLE classes ADD COLUMN filiere_id INTEGER")
+            conn.execute("CREATE TABLE IF NOT EXISTS filieres(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL, name TEXT NOT NULL)")
             conn.execute("INSERT INTO schools(id,name,slug) VALUES (1,'École A','ecole-a'),(2,'École B','ecole-b')")
             conn.execute("INSERT INTO users(id,school_id,name,email,password_hash,role) VALUES (1,1,'Admin A','a@example.test',?,'admin')",
                          (generate_password_hash("PasswordTest123"),))
