@@ -6,6 +6,7 @@ from docx import Document
 from docx.shared import Pt, Inches
 from reportlab.lib.utils import ImageReader
 from docxtpl import DocxTemplate
+from jinja2.sandbox import SandboxedEnvironment
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import simpleSplit
@@ -37,7 +38,8 @@ def context_for_memo(meta,teacher,course,clazz,hours,rate,tax):
 def build_docx(ctx,template=None,logo=None):
     if template:
         doc=DocxTemplate(io.BytesIO(template))
-        doc.render(ctx,autoescape=True)
+        # User-supplied DOCX templates must not access Python internals via Jinja.
+        doc.render(ctx,jinja_env=SandboxedEnvironment(autoescape=True),autoescape=True)
         out=io.BytesIO();doc.save(out);return out.getvalue()
     doc=Document()
     sec=doc.sections[0];sec.header.paragraphs[0].text=ctx["entete"] or ctx["etablissement"]
