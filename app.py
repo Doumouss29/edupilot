@@ -2316,6 +2316,57 @@ def writable_academic_class(class_id,allow_draft=False):
     return item
 
 
+@app.before_request
+def protect_archived_academic_records():
+    """Read-only archives even if a user POSTs directly to an old resource URL."""
+    if request.method not in ('POST','PUT','PATCH','DELETE') or not request.endpoint:
+        return
+    u=current_user()
+    if not u or not u['school_id'] or u['role']=='superadmin':return
+    endpoint=request.endpoint
+    args=request.view_args or {}
+    class_id=None
+    if endpoint in ('class_edit','memo_create','memo_generate_all'):
+        class_id=args.get('cid')
+    elif endpoint in ('course_edit','course_delete','assign_teacher',
+                      'course_documents_upload','course_document_visibility','course_document_delete'):
+        cid=args.get('cid')
+        if cid:
+            course=one('SELECT class_id FROM courses WHERE id=? AND school_id=?',(cid,school_id()))
+            class_id=course['class_id'] if course else None
+    elif endpoint in ('lesson_edit','declare','delete_lesson','hide_cancelled_lesson','cancel_lesson'):
+        lid=args.get('lid')
+        if lid:
+            lesson=one("""SELECT c.class_id FROM lessons l JOIN courses c ON c.id=l.course_id
+                         WHERE l.id=? AND l.school_id=?""",(lid,school_id()))
+            class_id=lesson['class_id'] if lesson else None
+    elif endpoint in ('assessment_edit','assessment_correction_edit','grade_entry'):
+        aid=args.get('aid')
+        if aid:
+            assessment=one("""SELECT c.class_id FROM assessments a
+                JOIN courses c ON c.id=a.course_id AND c.school_id=a.school_id
+                WHERE a.id=? AND a.school_id=?""",(aid,school_id()))
+            class_id=assessment['class_id'] if assessment else None
+    elif endpoint in ('school_bulletin_publish','periods'):
+        class_id=request.form.get('class_id')
+    elif endpoint=='grades':
+        aid=request.form.get('assessment_id')
+        if aid:
+            assessment=one("""SELECT c.class_id FROM assessments a JOIN courses c ON c.id=a.course_id
+                WHERE a.id=? AND a.school_id=?""",(aid,school_id()))
+            class_id=assessment['class_id'] if assessment else None
+    if class_id:
+        writable_academic_class(class_id,allow_draft=True)
+    if endpoint=='lessons_bulk':
+        ids=request.form.getlist('lesson_ids')
+        if ids and len(ids)<=300 and all(v.isdigit() for v in ids):
+            q=','.join('?' for _ in ids)
+            lessons=allrows(f"""SELECT DISTINCT c.class_id FROM lessons l
+                JOIN courses c ON c.id=l.course_id WHERE l.school_id=? AND l.id IN ({q})""",
+                (school_id(),*ids))
+            for cl in lessons:writable_academic_class(cl['class_id'],allow_draft=True)
+
+
 # Academic years: non-destructive lifecycle migration, scoped to each institution.
 with db() as c:
     if DB_ENGINE=='postgresql':
