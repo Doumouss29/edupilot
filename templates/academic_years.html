@@ -52,7 +52,7 @@
 <p class="muted">Les filières et les comptes existants sont conservés. Les classes et cours reçoivent de nouveaux identifiants ; les anciens plannings, notes et évaluations ne sont pas copiés.</p>
 <form class="year-form" method="post" action="{{url_for('academic_year_copy',target_id=target.id)}}" onsubmit="return confirm('Reconduire les classes et cours vers {{target.label}} sans modifier les anciennes années ?')">
 <input type="hidden" name="csrf" value="{{csrf}}">
-<label>Année source<select name="source_year_id" required>{% for year in years if year.id!=target.id %}<option value="{{year.id}}" {% if active and year.id==active.id %}selected{% endif %}>{{year.label}}</option>{% endfor %}</select></label>
+<label>Année source<select name="source_year_id" required>{% for year in years if year.id!=target.id and year.status!='draft' %}<option value="{{year.id}}" {% if active and year.id==active.id %}selected{% endif %}>{{year.label}}</option>{% endfor %}</select></label>
 <label style="display:flex;align-items:center;gap:9px"><input type="checkbox" name="include_teachers" value="1" checked style="width:auto"> Reconduire les affectations des enseignants</label>
 <button type="submit" class="btn primary">Reconduire les classes et cours</button>
 </form>
@@ -69,7 +69,7 @@
 <input type="hidden" name="csrf" value="{{csrf}}">
 <label>Classe d'origine<select class="year-source-class" name="source_class_id" required data-target="{{target.id}}">
 <option value="">Choisir une classe</option>
-{% for cl in classes if cl.year_id!=target.id %}
+{% for cl in classes if cl.year_id!=target.id and (years|selectattr('id','equalto',cl.year_id)|first).status!='draft' %}
 <option value="{{cl.id}}">{{cl.name}} — {{cl.filiere_name or 'Sans filière'}} ({{(years|selectattr('id','equalto',cl.year_id)|first).label}})</option>
 {% endfor %}</select></label>
 <div class="year-table"><div class="year-students" data-year-students="{{target.id}}">
