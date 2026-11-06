@@ -37,7 +37,7 @@
   <h2>Gérer les cours</h2>
   <p>Consultez, modifiez ou supprimez vos cours. Les cours possédant un historique pédagogique restent protégés.</p>
  </div>
- <button type="button" class="btn primary" id="open-create-course">+ Créer un cours</button>
+ <button type="button" class="btn primary" id="open-create-course" {% if year_archived %}disabled title="Année scolaire archivée : consultation uniquement"{% endif %}>+ Créer un cours</button>
 </div>
 
 <dialog class="courses-modal" id="create-course-modal" aria-labelledby="create-course-title">
@@ -90,9 +90,9 @@
      <td>{{c.planned_minutes/60}} h</td>
      <td>{{c.coefficient}}</td>
      <td><div class="course-row-actions">
-      <a class="btn outline sm" href="{{url_for('course_edit',cid=c.id)}}">Modifier</a>
+      {% if year_archived %}<span class="muted">Archive — lecture seule</span>{% else %}<a class="btn outline sm" href="{{url_for('course_edit',cid=c.id)}}">Modifier</a>{% endif %}
       <a class="btn outline sm" href="{{url_for('course_documents',cid=c.id)}}">Documents ({{c.doc_count}})</a>
-      {% if me.role=='admin' %}
+      {% if year_archived %}{% elif me.role=='admin' %}
       <button type="button" class="btn outline sm" style="color:#b42318;border-color:#d4aaa6" data-course-name="{{c.name}}" onclick="forceDeleteCourse(this, {{c.id}})">Supprimer</button>
       {% else %}
       <button type="submit" form="delete-single-course" formaction="{{url_for('course_delete',cid=c.id)}}" formmethod="post" class="btn outline sm" style="color:#b42318;border-color:#d4aaa6" onclick="return confirm('Confirmer la suppression de ce cours ? Seul l’admin école peut supprimer un cours ayant un historique.');">Supprimer</button>
