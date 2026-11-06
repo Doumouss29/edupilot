@@ -1291,6 +1291,14 @@ def school_accounts(sid):
     accounts=allrows("SELECT id,first_name,last_name,name,email,phone,role,matricule,active,must_change_password,first_login_at FROM users WHERE school_id=? AND role IN ('admin','administratif') ORDER BY id DESC",(sid,))
     return render_template('school_accounts.html',school=school,accounts=accounts,matricule_rules={r['role']:dict(r) for r in allrows('SELECT * FROM matricule_rules WHERE school_id=?',(sid,))},base_url=os.getenv('PUBLIC_BASE_URL',request.host_url.rstrip('/')).rstrip('/'))
 
+def require_remaining_school_admin(conn,sid,had_active_admin):
+    """Never leave an established school without an active administrator."""
+    if had_active_admin and not conn.execute(
+        "SELECT 1 FROM users WHERE school_id=? AND role='admin' AND active=1 LIMIT 1",
+        (sid,)).fetchone():
+        abort(400,'Au moins un administrateur actif doit rester dans cet établissement.')
+
+
 @app.route('/schools/<int:sid>/accounts/<int:uid>/edit',methods=['GET','POST'])
 @roles('superadmin')
 def school_account_edit(sid,uid):
@@ -1312,11 +1320,13 @@ def school_account_edit(sid,uid):
         try:
             with db() as c:
                 c.execute('BEGIN IMMEDIATE')
+                had_admin=bool(c.execute("SELECT 1 FROM users WHERE school_id=? AND role='admin' AND active=1 LIMIT 1",(sid,)).fetchone())
                 matricule=validate_matricule(request.form.get('matricule') or account['matricule']) if (request.form.get('matricule') or account['matricule']) else next_matricule(c,sid,role)
                 if c.execute('SELECT 1 FROM users WHERE school_id=? AND matricule=? AND id<>?',(sid,matricule,uid)).fetchone():
                     raise ValueError('Matricule déjà utilisé dans cet établissement')
                 c.execute('UPDATE users SET name=?,first_name=?,last_name=?,email=?,phone=?,role=?,matricule=? WHERE id=? AND school_id=?',
                           (first+' '+last,first,last,email,phone,role,matricule,uid,sid))
+                require_remaining_school_admin(c,sid,had_admin)
         except (ValueError,DBIntegrityError) as exc:
             flash(str(exc),'error')
             return redirect(url_for('school_account_edit',sid=sid,uid=uid))
@@ -1343,6 +1353,7 @@ def school_accounts_bulk(sid):
         placeholders=','.join('?' for _ in ids)
         accounts=c.execute(f"SELECT id FROM users WHERE school_id=? AND role IN ('admin','administratif') AND id IN ({placeholders})",(sid,*ids)).fetchall()
         if len(accounts)!=len(ids):abort(403)
+        had_admin=bool(c.execute("SELECT 1 FROM users WHERE school_id=? AND role='admin' AND active=1 LIMIT 1",(sid,)).fetchone())
         if action=='delete':
             # Historical accounts must be suspended, not deleted: protect academic data and traceability.
             dependencies=(
@@ -1368,6 +1379,7 @@ def school_accounts_bulk(sid):
         else:
             role='admin' if action=='set_admin' else 'administratif'
             c.execute(f"UPDATE users SET role=? WHERE school_id=? AND id IN ({placeholders})",(role,sid,*ids))
+        require_remaining_school_admin(c,sid,had_admin)
         c.execute('INSERT INTO audit(school_id,user_id,action,details) VALUES (?,?,?,?)',
                   (sid,current_user()['id'],'accounts.'+action,','.join(str(v) for v in ids)))
     flash(f'{len(ids)} compte(s) : modification enregistrée.','success')
