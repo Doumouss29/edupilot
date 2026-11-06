@@ -2734,7 +2734,7 @@ def course_documents(cid):
 @app.post('/courses/<int:cid>/documents/upload')
 @roles('admin','enseignant')
 def course_documents_upload(cid):
-    course_doc_access(cid,write=True)
+    course=writable_academic_class(course_doc_access(cid,write=True)['class_id'],allow_draft=True)
     files=[f for f in request.files.getlist('files') if f.filename]
     if not files or len(files)>4:
         flash('Choisissez entre 1 et 4 fichiers par dépôt.','error')
@@ -3470,7 +3470,8 @@ def correction_assessment(aid,write=False):
 @app.route('/assessments/<int:aid>/correction',methods=['GET','POST'])
 @roles('enseignant','admin')
 def assessment_correction_edit(aid):
-    correction_assessment(aid,write=True)
+    checked=correction_assessment(aid,write=True)
+    if request.method=='POST':writable_academic_class(checked['class_id'],allow_draft=True)
     existing=one('SELECT * FROM assessment_corrections WHERE assessment_id=? AND school_id=?',
                  (aid,school_id()))
     if request.method=='GET':
@@ -3580,6 +3581,7 @@ def assessment_edit(aid):
     period=one('SELECT locked FROM periods WHERE school_id=? AND class_id=? ORDER BY id DESC LIMIT 1',(school_id(),item['class_id']))
     if period and period['locked']:abort(403,'Période verrouillée : réouverture nécessaire')
     if request.method=='POST':
+        writable_academic_class(item['class_id'],allow_draft=True)
         title=request.form.get('title','').strip()
         kind=request.form.get('kind','').strip()
         description=request.form.get('description','').strip()
@@ -3624,6 +3626,7 @@ def assessments():
         if u['role'] not in ('enseignant','admin','administratif'):abort(403)
         course_id=request.form.get('course_id')
         course=one('SELECT * FROM courses WHERE id=? AND school_id=?',(course_id,school_id()))
+        if course:writable_academic_class(course['class_id'],allow_draft=True)
         if not course or (u['role']=='enseignant' and course['teacher_id']!=u['id']):abort(403)
         title=request.form.get('title','').strip()
         description=request.form.get('description','').strip()
@@ -3664,6 +3667,10 @@ def assessments():
     if u['role']=='enseignant':sql+=' AND c.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.class_id=c.class_id AND e.student_id=? AND e.school_id=a.school_id)';args.append(u['id'])
     elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
+    selected=selected_academic_year()
+    if selected:
+        sql+=' AND cl.year_id=?'
+        args.append(selected['id'])
     rows=allrows(sql,args)
     scores={}
     if u['role']=='etudiant':
@@ -3676,7 +3683,9 @@ def assessments():
     permitted={row['id'] for row in rows}
     for file in file_rows:
         if file['assessment_id'] in permitted:attachments.setdefault(file['assessment_id'],[]).append(file)
-    choices=scoped('SELECT * FROM courses WHERE school_id=?')
+    choices=allrows("""SELECT c.* FROM courses c JOIN classes cl ON cl.id=c.class_id
+                   WHERE c.school_id=? AND cl.year_id=?""",
+                   (school_id(),selected['id'] if selected else -1))
     if u['role']=='enseignant':choices=[x for x in choices if x['teacher_id']==u['id']]
     return render_template('assessments.html',assessments=rows,courses=choices,attachments=attachments,scores=scores)
 
