@@ -3218,7 +3218,8 @@ def assessment_correction_edit(aid):
         target.parent.mkdir(parents=True,exist_ok=True)
         with target.open('xb') as out:out.write(raw)
         new_file=(filename,stored_name,CORRECTION_MIMES[ext],len(raw))
-    if action=='publish' and not (body or new_file or (existing and existing['stored_name'])):
+    remaining_file=(new_file or (existing and existing['stored_name'] and action!='delete_file'))
+    if action=='publish' and not (body or remaining_file):
         if new_file:correction_target(school_id(),new_file[1]).unlink(missing_ok=True)
         abort(400,'Ajoutez du texte ou un document avant de publier la correction')
     prior_file=existing['stored_name'] if existing else None
@@ -3228,7 +3229,7 @@ def assessment_correction_edit(aid):
                 changed_file=(action=='delete_file' or bool(new_file))
                 fields=new_file if new_file else (None,None,None,0) if action=='delete_file' else (
                     existing['filename'],existing['stored_name'],existing['mime_type'],existing['bytes_size'])
-                visible=1 if action=='publish' else 0 if action=='unpublish' else existing['published']
+                visible=1 if action=='publish' else 0 if action=='unpublish' or not (body or fields[1]) else existing['published']
                 c.execute("""UPDATE assessment_corrections
                     SET body=?,filename=?,stored_name=?,mime_type=?,bytes_size=?,published=?,author_id=?,updated_at=CURRENT_TIMESTAMP
                     WHERE school_id=? AND assessment_id=?""",
