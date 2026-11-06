@@ -54,6 +54,7 @@ class GradeAndBulletinSecurityTests(unittest.TestCase):
         with self.client.session_transaction() as sess:
             sess.clear()
             sess["uid"]=uid
+            sess["auth_stamp"]=project.session_auth_stamp(project.one("SELECT * FROM users WHERE id=?",(uid,)))
             sess["csrf"]="csrf-test"
 
     def post_grade(self,assessment,student,mark="14"):
