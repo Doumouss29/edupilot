@@ -1855,13 +1855,17 @@ def filieres():
         except DBIntegrityError:
             flash('Cette filière existe déjà.','error')
         return redirect(url_for('filieres'))
-    filiere_rows=scoped("""SELECT f.id,f.name,COUNT(DISTINCT cl.id) class_count,
+    selected=selected_academic_year()
+    year_id=selected['id'] if selected else -1
+    filiere_rows=allrows("""SELECT f.id,f.name,COUNT(DISTINCT cl.id) class_count,
         COUNT(DISTINCT e.student_id) student_count
-        FROM filieres f LEFT JOIN classes cl ON cl.filiere_id=f.id
-        LEFT JOIN enrollments e ON e.class_id=cl.id AND e.school_id=f.school_id
-        WHERE f.school_id=? GROUP BY f.id,f.name ORDER BY LOWER(f.name),f.id""")
-    classes=scoped("""SELECT cl.id,cl.name,cl.filiere_id FROM classes cl
-        WHERE cl.school_id=? ORDER BY LOWER(cl.name),cl.id""")
+        FROM filieres f LEFT JOIN classes cl ON cl.filiere_id=f.id AND cl.year_id=?
+        LEFT JOIN enrollments e ON e.class_id=cl.id AND e.school_id=f.school_id AND e.year_id=cl.year_id
+        WHERE f.school_id=? GROUP BY f.id,f.name ORDER BY LOWER(f.name),f.id""",
+        (year_id,school_id()))
+    classes=allrows("""SELECT cl.id,cl.name,cl.filiere_id FROM classes cl
+        WHERE cl.school_id=? AND cl.year_id=? ORDER BY LOWER(cl.name),cl.id""",
+        (school_id(),year_id))
     return render_template('filieres.html',filieres=filiere_rows,classes=classes)
 
 
