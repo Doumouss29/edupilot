@@ -2458,8 +2458,11 @@ def academic_years():
     students=allrows("""SELECT e.student_id,u.name student_name,e.class_id,e.year_id
                     FROM enrollments e JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id
                     WHERE e.school_id=? ORDER BY LOWER(u.name),e.id""",(sid,))
+    status_by_year={year['id']:year['status'] for year in years}
+    source_classes=[cl for cl in classes if status_by_year.get(cl['year_id']) in ('active','archived')]
     return render_template('academic_years.html',years=years,active=current,classes=classes,
-                           enrollments=students,can_edit=current_user()['role']=='admin')
+                           source_classes=source_classes,enrollments=students,
+                           can_edit=current_user()['role']=='admin')
 
 
 @app.post('/academic-years/select')
