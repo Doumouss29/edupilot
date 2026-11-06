@@ -26,6 +26,8 @@ class PushAndMfaSecurityTests(unittest.TestCase):
         project.DB=str(Path(TEMP.name)/(self._testMethodName+'.db'))
         with project.db() as c:
             c.executescript(project.SCHEMA)
+            # The baseline SCHEMA predates the login audit migration.
+            c.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT")
             c.execute("ALTER TABLE years ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
             c.execute("ALTER TABLE classes ADD COLUMN filiere_id INTEGER")
             c.execute("CREATE TABLE IF NOT EXISTS filieres(id INTEGER PRIMARY KEY,school_id INTEGER,name TEXT)")
