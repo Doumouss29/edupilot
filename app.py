@@ -325,6 +325,21 @@ def safety():
     if u and u['must_change_password'] and request.endpoint not in ('change_password','logout','restricted','health','school_logo','static'):
         return redirect(url_for('change_password'))
 
+@app.after_request
+def security_response_headers(response):
+    """Harden pages without blocking EduPilot's existing inline JavaScript or videoconferencing."""
+    response.headers.setdefault('X-Content-Type-Options','nosniff')
+    response.headers.setdefault('X-Frame-Options','SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy','strict-origin-when-cross-origin')
+    response.headers.setdefault('Permissions-Policy','geolocation=(), payment=()')
+    # Compatible with existing inline scripts and the externally hosted font stylesheet.
+    response.headers.setdefault('Content-Security-Policy',
+        "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'")
+    if request.endpoint not in ('static','service_worker','webmanifest','platform_logo','school_logo'):
+        response.headers.setdefault('Cache-Control','private, no-store')
+    return response
+
+
 @app.context_processor
 def globals_template():
     user=current_user()
@@ -879,9 +894,59 @@ def mfa_verify():
     return render_template('mfa.html',mode=mode,setup_secret=secret,setup_uri=uri,setup_qr=totp_qr_data(uri) if uri else None,email_fallback=bool(session.get('mfa_email_fallback')) if mode=='totp' else False,trust_days=30 if u['role'] in ('admin','administratif') else 90)
 
 
+# Rate limiting is shared by all Gunicorn workers through the application database.
+# Keys are HMAC digests: no raw IP address or e-mail is stored.
+LOGIN_LIMIT_WINDOW=15*60
+LOGIN_LIMIT_ACCOUNT=8
+LOGIN_LIMIT_IP=60
+
+with db() as c:
+    c.execute("""CREATE TABLE IF NOT EXISTS login_rate_limits(
+        key_hash TEXT PRIMARY KEY,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        window_start BIGINT NOT NULL DEFAULT 0
+    )""")
+
+def login_limit_keys(email,school=None):
+    tenant=str(school['id']) if school else 'global'
+    ip=(request.remote_addr or 'unknown').strip()[:128]
+    secret=app.secret_key.encode('utf-8')
+    def digest(value):
+        return hmac.new(secret,value.encode('utf-8'),hashlib.sha256).hexdigest()
+    return (digest('login:account:'+tenant+':'+email),digest('login:ip:'+ip))
+
+def login_is_limited(keys):
+    now=int(time.time())
+    rows=allrows('SELECT key_hash,attempts,window_start FROM login_rate_limits WHERE key_hash IN (?,?)',keys)
+    limits={keys[0]:LOGIN_LIMIT_ACCOUNT,keys[1]:LOGIN_LIMIT_IP}
+    return any(now-int(row['window_start'])<LOGIN_LIMIT_WINDOW
+               and int(row['attempts'])>=limits[row['key_hash']] for row in rows)
+
+def record_login_failure(keys):
+    now=int(time.time())
+    with db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        for key in keys:
+            conn.execute("""INSERT INTO login_rate_limits(key_hash,attempts,window_start)
+                VALUES (?,1,?)
+                ON CONFLICT(key_hash) DO UPDATE SET
+                  attempts=CASE WHEN login_rate_limits.window_start<=?
+                    THEN 1 ELSE login_rate_limits.attempts+1 END,
+                  window_start=CASE WHEN login_rate_limits.window_start<=?
+                    THEN excluded.window_start ELSE login_rate_limits.window_start END""",
+                (key,now,now-LOGIN_LIMIT_WINDOW,now-LOGIN_LIMIT_WINDOW))
+
 def handle_login(school=None):
-    email=request.form.get('email','').strip().lower()
+    email=request.form.get('email','').strip().lower()[:254]
     password=request.form.get('password','')
+    keys=login_limit_keys(email,school)
+    if login_is_limited(keys):
+        response=make_response('Trop de tentatives de connexion. Réessayez dans 15 minutes.',429)
+        response.headers['Retry-After']=str(LOGIN_LIMIT_WINDOW)
+        return response
+    if len(password)>1024:
+        record_login_failure(keys)
+        abort(400,'Identifiants invalides')
     if school:
         candidates=allrows('SELECT * FROM users WHERE email=? AND school_id=? AND active=1',(email,school['id']))
     else:
@@ -900,6 +965,7 @@ def handle_login(school=None):
             # Only offer schools for which the supplied password was verified.
             session['pending_school_choice']={'ids':ids,'at':int(time.time())}
             return render_template('login.html',login_school=None,login_action=url_for('login'),school_choices=schools)
+    record_login_failure(keys)
     flash('Identifiants incorrects.','error')
     if school:return redirect(url_for('tenant_login',slug=school['slug']))
     return redirect(url_for('login'))
