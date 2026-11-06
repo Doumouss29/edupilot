@@ -3089,6 +3089,7 @@ def planning():
         course_id=request.form.get('course_id')
         class_id=request.form.get('class_id')
         course=one('SELECT * FROM courses WHERE id=? AND school_id=? AND class_id=?',(course_id,school_id(),class_id))
+        if course:writable_academic_class(course['class_id'],allow_draft=True)
         if not course:
             session['planning_result']={'ok':False,'text':'Sélectionnez une classe et un cours valide.'}
             flash('Sélectionnez une classe puis un cours appartenant à cette classe.','error')
@@ -3157,12 +3158,16 @@ def planning():
         return redirect(url_for('planning'))
     query='''SELECT l.*,c.name course_name,cl.name class_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id WHERE l.school_id=? AND l.hidden_from_planning=0'''
     args=[school_id()]
+    selected=selected_academic_year()
+    if selected:
+        query+=' AND cl.year_id=?'
+        args.append(selected['id'])
     if u['role']=='enseignant' or (u['role']=='admin' and request.args.get('mine')=='1'):
         query+=' AND l.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':query+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
     elif u['role']=='parent':query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
     events=allrows(query,args)
-    return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,video_classes=allrows("""SELECT cl.id,cl.name,cl.video_url,cl.filiere_id,f.name filiere_name,y.label academic_year FROM classes cl JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id WHERE cl.school_id=? AND cl.video_url IS NOT NULL AND cl.video_url<>'' ORDER BY LOWER(f.name),LOWER(cl.name)""",(school_id(),)) if u['role'] in ('admin','administratif') else [],rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],courses=scoped('SELECT * FROM courses WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [],classes=scoped('SELECT id,name FROM classes WHERE school_id=? ORDER BY name') if u['role'] in ('admin','administratif') else [])
+    return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,video_classes=allrows("""SELECT cl.id,cl.name,cl.video_url,cl.filiere_id,f.name filiere_name,y.label academic_year FROM classes cl JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id WHERE cl.school_id=? AND cl.video_url IS NOT NULL AND cl.video_url<>'' ORDER BY LOWER(f.name),LOWER(cl.name)""",(school_id(),)) if u['role'] in ('admin','administratif') else [],rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],courses=allrows('SELECT c.* FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? AND cl.year_id=? ORDER BY c.name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [],classes=allrows('SELECT id,name FROM classes WHERE school_id=? AND year_id=? ORDER BY name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [])
 
 def lesson_utc_iso(value):
     """Existing lesson timestamps are historical Africa/Abidjan local times."""
@@ -3847,8 +3852,10 @@ def grades():
             report=None  # Parents only see officially published results.
         return render_template('student_grades.html',enrollments=enrolls,selected=selected,report=report,
                                children=children,selected_student=child)
+    selected_year=selected_academic_year()
     class_rows=allrows("""SELECT cl.id,cl.name,y.label,y.id year_id FROM classes cl JOIN years y ON y.id=cl.year_id
-                     WHERE cl.school_id=? ORDER BY y.label DESC,cl.name""",(school_id(),))
+                     WHERE cl.school_id=? AND y.id=? ORDER BY y.label DESC,cl.name""",
+                     (school_id(),selected_year['id'] if selected_year else -1))
     if u['role']=='enseignant':
         class_rows=[cl for cl in class_rows if one('SELECT id FROM courses WHERE school_id=? AND class_id=? AND teacher_id=?',(school_id(),cl['id'],u['id']))]
     selected_class=next((v for v in class_rows if str(v['id'])==request.args.get('class_id','')),class_rows[0] if class_rows else None)
@@ -3869,6 +3876,7 @@ def grade_entry(aid):
     if not a:abort(404)
     u=current_user()
     if u['role']=='enseignant' and a['teacher_id']!=u['id']:abort(403)
+    if request.method=='POST':writable_academic_class(a['class_id'],allow_draft=True)
     period=one('SELECT * FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(a['class_id'],school_id()))
     if period and period['locked']:
         if not one('SELECT id FROM unlocks WHERE period_id=? AND teacher_id=? AND expires_at>?',(period['id'],u['id'],datetime.datetime.now(datetime.timezone.utc).isoformat())):abort(403,'Période verrouillée : demander une réouverture')
@@ -4194,6 +4202,10 @@ def planning_json():
     u=current_user()
     if u['role']=='superadmin':abort(403)
     sql='''SELECT l.id,l.course_id,l.starts_at,l.ends_at,l.status,l.room,l.validated,l.actual_minutes,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? AND l.hidden_from_planning=0'''; args=[school_id()]
+    selected=selected_academic_year()
+    if selected:
+        sql+=' AND cl.year_id=?'
+        args.append(selected['id'])
     if u['role']=='enseignant' or (u['role']=='admin' and request.args.get('mine')=='1'):
         sql+=' AND l.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id=? AND e.class_id=c.class_id)';args.append(u['id'])
