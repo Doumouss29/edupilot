@@ -2581,7 +2581,7 @@ def courses():
         if teacher:execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(cid,teacher,datetime.date.today().isoformat()))
         session[f'course_create_class_{school_id()}_{current_user()["id"]}']=str(cl)
         audit('course.created',name);return redirect(url_for('courses'))
-    rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
+    rows=scoped('SELECT c.*,cl.name class_name,u.name teacher_name,u.matricule teacher_matricule,(SELECT COUNT(*) FROM course_documents d WHERE d.school_id=c.school_id AND d.course_id=c.id) doc_count FROM courses c JOIN classes cl ON cl.id=c.class_id LEFT JOIN users u ON u.id=c.teacher_id WHERE c.school_id=?')
     return render_template('courses_manage.html',selected_class_id=session.get(f'course_create_class_{school_id()}_{current_user()["id"]}', ''),courses=rows,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') ORDER BY LOWER(name),id"))
 
 @app.post('/courses/<int:cid>/delete')
