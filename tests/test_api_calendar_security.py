@@ -50,6 +50,15 @@ class ApiAndCalendarSecurityTests(unittest.TestCase):
                        (3,2,3,6,'2026-11-09T09:00','2026-11-09T10:00')""")
             c.execute("""INSERT INTO notifications(id,school_id,user_id,message)
                 VALUES (1,1,1,'Private A'),(2,2,5,'Private B')""")
+            c.execute("""CREATE TABLE IF NOT EXISTS course_documents(
+                id INTEGER PRIMARY KEY,school_id INTEGER,course_id INTEGER,uploader_id INTEGER,
+                filename TEXT,stored_name TEXT,title TEXT,description TEXT,category TEXT,
+                mime_type TEXT,bytes_size INTEGER,published INTEGER,publish_at TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+            c.execute("""INSERT INTO course_documents
+                (id,school_id,course_id,uploader_id,filename,stored_name,title,description,category,mime_type,bytes_size,published)
+                VALUES (1,1,1,3,'private.pdf','0123456789abcdef0123456789abcdef','Private','', 'Cours','application/pdf',10,0),
+                       (2,2,3,6,'foreign.pdf','0123456789abcdef0123456789abcdef','Foreign','', 'Cours','application/pdf',10,1)""")
         self.client=project.app.test_client()
 
     def actor(self,uid):
@@ -102,6 +111,20 @@ class ApiAndCalendarSecurityTests(unittest.TestCase):
         self.actor(4)
         self.assertEqual(self.client.get('/attendance/3').status_code,403)
         self.assertEqual(self.client.post('/attendance/3',data={'csrf':'api-test-csrf'}).status_code,403)
+
+    def test_unenrolled_student_cannot_open_course_documents(self):
+        self.actor(7)
+        self.assertEqual(self.client.get('/courses/1/documents').status_code,403)
+        self.assertEqual(self.client.get('/course-documents/1/file').status_code,403)
+
+    def test_teacher_cannot_open_foreign_school_documents(self):
+        self.actor(3)
+        self.assertEqual(self.client.get('/courses/3/documents').status_code,404)
+        self.assertEqual(self.client.get('/course-documents/2/file').status_code,404)
+
+    def test_student_cannot_download_unpublished_document(self):
+        self.actor(1)
+        self.assertEqual(self.client.get('/course-documents/1/file').status_code,404)
 
     def test_notifications_are_user_scoped(self):
         self.actor(1)
