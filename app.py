@@ -927,6 +927,9 @@ def record_login_failure(keys):
     now=int(time.time())
     with db() as conn:
         conn.execute('BEGIN IMMEDIATE')
+        # Periodically expire hashed counters so arbitrary identities cannot grow the table forever.
+        if secrets.randbelow(64)==0:
+            conn.execute('DELETE FROM login_rate_limits WHERE window_start<=?',(now-LOGIN_LIMIT_WINDOW,))
         for key in keys:
             conn.execute("""INSERT INTO login_rate_limits(key_hash,attempts,window_start)
                 VALUES (?,1,?)
