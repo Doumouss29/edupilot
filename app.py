@@ -2281,8 +2281,9 @@ def student_maquette():
                         AND cl.year_id=e.year_id
         JOIN years y ON y.id=e.year_id AND y.school_id=e.school_id
         LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id
-        WHERE e.student_id=? AND e.school_id=?
-        ORDER BY y.label DESC,cl.name""",(u['id'],school_id()))
+        WHERE e.student_id=? AND e.school_id=? AND y.id=?
+        ORDER BY y.label DESC,cl.name""",
+        (u['id'],school_id(),(selected_academic_year() or {'id':-1})['id']))
     curricula=[]
     for enrollment in enrollment_rows:
         courses_rows=allrows("""SELECT c.id,c.name,c.code,c.coefficient,c.planned_minutes
@@ -3983,6 +3984,9 @@ def grades():
                         FROM enrollments e JOIN classes cl ON cl.id=e.class_id JOIN years y ON y.id=e.year_id
                         WHERE e.school_id=? AND e.student_id=? ORDER BY y.label DESC,cl.name""",(school_id(),student_id))
         if u['role']=='parent':enrolls=[v for v in enrolls if v['parents_enabled']]
+        selected_year=selected_academic_year()
+        if selected_year:
+            enrolls=[v for v in enrolls if v['year_id']==selected_year['id']]
         selected=next((v for v in enrolls if str(v['id'])==request.args.get('class_id','')),enrolls[0] if enrolls else None)
         report=compile_class_report(selected['id'],student_ids=[student_id]) if selected else None
         if u['role']=='parent' and report and (not report['rows'] or not report['rows'][0]['published']):
