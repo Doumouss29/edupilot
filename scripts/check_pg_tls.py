@@ -21,6 +21,8 @@ try:
     conn=pg_connection()
     row=conn.execute("""SELECT ssl, version, cipher
         FROM pg_stat_ssl WHERE pid=pg_backend_pid()""").fetchone()
+    # SELECT starts a transaction; finish it before returning the pooled connection.
+    conn.commit()
     if not row or not row['ssl']:
         sys.exit('ERROR: database connection is not encrypted')
     print('Transport encrypted: yes')
