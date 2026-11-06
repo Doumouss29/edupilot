@@ -10,7 +10,7 @@
     const selects=[...bar.querySelectorAll('[data-filter]')];
     const rows=[...table.querySelectorAll('tbody tr[data-filter-row]')];
     const allOptions=new Map(selects.filter(el=>el.tagName==='SELECT').map(el=>[el,[...el.options].map(o=>({value:o.value,label:o.textContent}))]));
-    const counter=bar.querySelector('.live-filter-count');
+    const counter=bar.querySelector('.live-filter-count') || (table.id==='users-list' ? document.querySelector('.users-management .live-filter-count') : null);
     function matchesFilter(row,key,val){
       if(!val)return true;
       if(key==='year' && table.id==='users-list' && ['admin','administratif'].includes(row.dataset.role))return true;
