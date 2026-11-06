@@ -1116,7 +1116,10 @@ def school_new():
     logo,mime=read_logo(request.files.get('logo'))
     with db() as c:
         sid=c.execute('INSERT INTO schools(name,slug,plan,subscription_end,logo,logo_mime,campus_enabled) VALUES (?,?,?,?,?,?,?)',(name,unique,plan,end,logo,mime,int(request.form.get('campus_enabled')=='1'))).lastrowid
-        c.execute('INSERT INTO years(school_id,label) VALUES (?,?)',(sid,'2026-2027'))
+        current_date=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()
+        school_year_start=current_date.year if current_date.month>=8 else current_date.year-1
+        year_label=f'{school_year_start}-{school_year_start+1}'
+        c.execute('INSERT INTO years(school_id,label) VALUES (?,?)',(sid,year_label))
         ensure_matricule_rules(c,sid)
     flash('Établissement créé. Créez maintenant ses comptes administrateurs.','success')
     return redirect(url_for('school_accounts',sid=sid))
