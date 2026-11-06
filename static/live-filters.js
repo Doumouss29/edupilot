@@ -13,6 +13,7 @@
     const counter=bar.querySelector('.live-filter-count');
     function matchesFilter(row,key,val){
       if(!val)return true;
+      if(key==='year' && table.id==='users-list' && ['admin','administratif'].includes(row.dataset.role))return true;
       if(key==='search')return norm(row.textContent).includes(norm(val));
       if(key==='last-from')return !!row.dataset.lastDate && row.dataset.lastDate>=val;
       if(key==='last-to')return !!row.dataset.lastDate && row.dataset.lastDate<=val;
