@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block heading %}Documents pédagogiques{% endblock %}
+{% block content %}
+<style>
+.doc-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,285px),1fr));gap:14px}
+.doc-card{border:1px solid #e0e8f0;border-radius:14px;padding:20px;background:#fff;display:grid;gap:9px}
+.doc-card h3{margin:0;font-size:1.08rem}.doc-card .muted{font-size:.87rem}
+.doc-card .doc-chip{display:inline-block;background:#edf4f9;padding:5px 10px;border-radius:20px;color:#36536c;font-size:.82rem}
+</style>
+<div class="section-intro"><span class="eyebrow">RESSOURCES PÉDAGOGIQUES</span><h2>Documents de mes cours</h2><p>{% if me.role=='etudiant' %}Consultez les supports de cours publiés par vos enseignants.{% elif me.role=='enseignant' %}Déposez et organisez les supports des cours qui vous sont affectés.{% else %}Retrouvez les documents pédagogiques de l'établissement, par classe et par cours.{% endif %}</p></div>
+<section class="panel">
+<div class="live-filter-bar" data-filter-target="course-docs-list">
+<label>Rechercher<input type="search" data-filter="search" placeholder="Cours, classe ou filière"></label>
+<span class="live-filter-count" aria-live="polite"></span></div>
+<div class="doc-cards" id="course-docs-list">
+{% for c in courses %}<article class="doc-card" data-filter-row>
+<small class="muted">{{c.filiere_name or 'Sans filière'}} · {{c.class_name}}</small>
+<h3>{{c.name}}</h3>
+<small class="muted">{{c.code or 'Sans code'}}</small>
+<div><span class="doc-chip">📄 {{c.documents_count}} document(s)</span></div>
+<div><a class="btn primary sm" href="{{url_for('course_documents',cid=c.id)}}">Voir les documents</a></div>
+</article>{% else %}<p class="muted">Aucun cours accessible dans cet établissement.</p>{% endfor %}
+</div></section>
+{% if me.role=='admin' %}<section class="panel"><h3>Stockage pédagogique par établissement</h3><p class="muted">Quota initial : 1 Go par établissement. La limite choisie s'applique aux nouveaux dépôts ; les documents existants restent accessibles.</p>
+<form action="{{url_for('course_document_quota')}}" method="post" class="inline-form">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<label>Quota autorisé (Mo)<input type="number" name="quota_mb" min="100" max="10240" value="1024" required></label>
+<button class="btn outline" type="submit">Modifier le quota</button></form>
+<p class="muted">Pour voir le stockage utilisé et le quota réel, ouvrez un cours.</p>
+</section>{% endif %}
+{% endblock %}
