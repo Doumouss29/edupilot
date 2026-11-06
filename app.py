@@ -2304,7 +2304,10 @@ with db() as c:
     )""")
     # Upgrade databases created during earlier preview deployments.
     if DB_ENGINE=='postgresql':
-        c.execute('ALTER TABLE course_documents ADD COLUMN IF NOT EXISTS publish_at TEXT')
+        column=c.execute("""SELECT column_name FROM information_schema.columns
+            WHERE table_schema=current_schema() AND table_name='course_documents'
+              AND column_name='publish_at'""").fetchone()
+        if not column:c.execute('ALTER TABLE course_documents ADD COLUMN publish_at TEXT')
     else:
         columns={column['name'] for column in c.execute('PRAGMA table_info(course_documents)').fetchall()}
         if 'publish_at' not in columns:c.execute('ALTER TABLE course_documents ADD COLUMN publish_at TEXT')
@@ -2318,7 +2321,11 @@ with db() as c:
         quota_bytes BIGINT NOT NULL DEFAULT 1073741824
     )""")
     if DB_ENGINE=='postgresql':
-        c.execute('ALTER TABLE school_document_limits ALTER COLUMN quota_bytes TYPE BIGINT')
+        quota_column=c.execute("""SELECT data_type FROM information_schema.columns
+            WHERE table_schema=current_schema() AND table_name='school_document_limits'
+              AND column_name='quota_bytes'""").fetchone()
+        if quota_column and quota_column['data_type']!='bigint':
+            c.execute('ALTER TABLE school_document_limits ALTER COLUMN quota_bytes TYPE BIGINT')
 
 
 # Private teaching resources. Never expose UPLOAD_DIR through Flask static routes.
