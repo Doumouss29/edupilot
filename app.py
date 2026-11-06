@@ -2391,7 +2391,12 @@ def course_documents_index():
         args.append(u['id'])
     sql+=' ORDER BY LOWER(f.name),LOWER(cl.name),LOWER(c.name)'
     courses=allrows(sql,args)
-    return render_template('course_documents_index.html',courses=courses)
+    quota=doc_quota(school_id()) if u['role']=='admin' else 0
+    used=one('SELECT COALESCE(SUM(bytes_size),0) total FROM course_documents WHERE school_id=?',
+             (school_id(),))['total'] if u['role']=='admin' else 0
+    return render_template('course_documents_index.html',courses=courses,
+                           school_quota_mb=round(quota/1048576),
+                           school_used_mb=round(int(used or 0)/1048576,1))
 
 
 @app.get('/courses/<int:cid>/documents')
@@ -2433,6 +2438,7 @@ def course_documents_upload(cid):
         return redirect(url_for('course_documents',cid=cid))
     sid=school_id()
     stored=[]
+    created_paths=[]
     try:
         for file in files:
             raw_filename=file.filename.replace('\\','/').split('/')[-1].strip()
@@ -2442,6 +2448,7 @@ def course_documents_upload(cid):
             random_name=secrets.token_hex(16)
             dest=doc_path(sid,random_name)
             dest.parent.mkdir(parents=True,exist_ok=True)
+            created_paths.append(dest)
             size=0
             with dest.open('xb') as handle:
                 while True:
@@ -2479,11 +2486,11 @@ def course_documents_upload(cid):
                    (sid,cid,current_user()['id'],filename,random_name,display_title,description,
                     category,DOC_EXTENSIONS[ext],size,published))
     except ValueError as exc:
-        for dest,*_ in stored:dest.unlink(missing_ok=True)
+        for dest in created_paths:dest.unlink(missing_ok=True)
         flash(str(exc),'error')
         return redirect(url_for('course_documents',cid=cid))
     except Exception:
-        for dest,*_ in stored:dest.unlink(missing_ok=True)
+        for dest in created_paths:dest.unlink(missing_ok=True)
         raise
     audit('course.documents.uploaded',f'course={cid},count={len(stored)},published={published}')
     flash(f'{len(stored)} document(s) ajouté(s). '+('Publié(s) pour les étudiants.' if published else 'Conservé(s) en brouillon.'),'success')
