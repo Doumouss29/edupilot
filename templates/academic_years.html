@@ -57,6 +57,12 @@
 <button type="submit" class="btn primary">Reconduire les classes et cours</button>
 </form>
 </div>
+<div class="panel"><h3>Supports pédagogiques (facultatif)</h3>
+<p class="muted">Après avoir reconduit les cours, vous pouvez reprendre leurs documents déjà publiés. Les nouveaux fichiers sont indépendants des anciennes archives et consomment votre quota de stockage.</p>
+<form class="year-form" method="post" action="{{url_for('academic_year_copy_documents',target_id=target.id)}}" onsubmit="return confirm('Copier les supports publiés dans les cours de {{target.label}} ?')">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<button class="btn outline" type="submit">Réutiliser les documents publiés</button></form>
+</div>
 <div class="panel"><h3>3. Passage et réinscription des étudiants</h3>
 <p class="muted">Sélectionnez une classe d'origine, puis les étudiants. Pour les admis et redoublants, choisissez la nouvelle classe.</p>
 <form class="year-form" method="post" action="{{url_for('academic_year_promote',target_id=target.id)}}">
