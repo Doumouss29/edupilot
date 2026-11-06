@@ -2202,6 +2202,7 @@ def students_transfer():
     class_id=request.form.get('class_id')
     dest=one('SELECT id,year_id FROM classes WHERE id=? AND school_id=?',(class_id,school_id()))
     if not dest or not ids or len(ids)>300 or any(not x.isdigit() for x in ids):abort(400)
+    writable_academic_class(dest['id'],allow_draft=True)
     ids=list(dict.fromkeys(map(int,ids)))
     now=datetime.datetime.now(datetime.timezone.utc).isoformat()
     with db() as c:
@@ -2238,7 +2239,8 @@ def students():
         sql+=" AND EXISTS (SELECT 1 FROM courses co WHERE co.class_id=e.class_id AND co.school_id=e.school_id AND co.teacher_id=?)"
         args.append(u['id'])
     requested_class=request.args.get('class_id','')
-    requested_year=request.args.get('year_id','')
+    selected=selected_academic_year()
+    requested_year=request.args.get('year_id','') or (str(selected['id']) if selected else '')
     if requested_class and requested_class.isdigit():
         sql+=' AND e.class_id=?';args.append(int(requested_class))
     if requested_year and requested_year.isdigit():
@@ -2246,10 +2248,12 @@ def students():
     sql+=' ORDER BY y.label DESC,c.name,u.name'
     entries=allrows(sql,args)
     class_choices=scoped('SELECT id,name,year_id FROM classes WHERE school_id=? ORDER BY name')
-    year_choices=scoped('SELECT id,label FROM years WHERE school_id=? ORDER BY label DESC')
+    if requested_year.isdigit():
+        class_choices=[cl for cl in class_choices if str(cl['year_id'])==requested_year]
+    year_choices=scoped('SELECT id,label,status FROM years WHERE school_id=? ORDER BY label DESC')
     if u['role']=='enseignant':
         class_choices=[c for c in class_choices if one('SELECT id FROM courses WHERE class_id=? AND school_id=? AND teacher_id=?',(c['id'],school_id(),u['id']))]
-    return render_template('students.html',enrollments=entries,classes=class_choices,years=year_choices,can_edit=u['role'] in ('admin','administratif'),chosen_class=requested_class,chosen_year=requested_year)
+    return render_template('students.html',enrollments=entries,classes=class_choices,years=year_choices,can_edit=u['role'] in ('admin','administratif') and bool(selected and selected['status']!='archived' and requested_year==str(selected['id'])),chosen_class=requested_class,chosen_year=requested_year)
 
 @app.get('/maquette')
 @roles('etudiant')
@@ -2689,6 +2693,10 @@ def course_documents_index():
     elif u['role']=='etudiant':
         sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.school_id=c.school_id AND e.class_id=c.class_id AND e.student_id=? AND e.year_id=cl.year_id)'
         args.append(u['id'])
+    selected=selected_academic_year()
+    if selected:
+        sql+=' AND cl.year_id=?'
+        args.append(selected['id'])
     sql+=' ORDER BY LOWER(f.name),LOWER(cl.name),LOWER(c.name)'
     courses=allrows(sql,args)
     quota=doc_quota(school_id()) if u['role']=='admin' else 0
@@ -4055,7 +4063,8 @@ def reports():
     years=scoped('SELECT id,label FROM years WHERE school_id=? ORDER BY label DESC')
     classes=scoped('SELECT cl.id,cl.name,cl.year_id FROM classes cl WHERE cl.school_id=? ORDER BY cl.name')
     teachers=scoped("SELECT id,name FROM users WHERE school_id=? AND role IN ('enseignant','admin') ORDER BY name")
-    filters={}
+    selected=selected_academic_year()
+    filters={'year_id':selected['id']} if selected else {}
     for key,allowed in [('year_id',years),('class_id',classes),('teacher_id',teachers)]:
         raw=request.args.get(key,'').strip()
         if raw:
