@@ -3865,12 +3865,13 @@ def assessment_correction_file(aid):
 @app.get('/assessments/<int:aid>/attachment')
 @login_required
 def assessment_attachment(aid):
-    a=one("""SELECT a.attachment_name,a.attachment_blob,a.attachment_mime,c.class_id,c.teacher_id,cl.parents_enabled
+    a=one("""SELECT a.attachment_name,a.attachment_blob,a.attachment_mime,a.published,c.class_id,c.teacher_id,cl.parents_enabled
            FROM assessments a JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id
            WHERE a.id=? AND a.school_id=?""",(aid,school_id()))
     if not a or not a['attachment_blob']:abort(404)
     u=current_user()
     if u['role']=='superadmin':abort(403)
+    if u['role'] in ('etudiant','parent') and not a['published']:abort(404)
     if u['role']=='enseignant' and a['teacher_id']!=u['id']:abort(403)
     if u['role']=='etudiant' and not one('SELECT id FROM enrollments WHERE school_id=? AND class_id=? AND student_id=?',(school_id(),a['class_id'],u['id'])):abort(403)
     if u['role']=='parent' and (not a['parents_enabled'] or not one("""SELECT p.id FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.school_id=? AND p.parent_id=? AND p.active=1 AND e.class_id=?""",(school_id(),u['id'],a['class_id']))):abort(403)
@@ -3910,13 +3911,14 @@ def assessment_edit(aid):
 @app.get('/assessments/files/<int:fid>')
 @login_required
 def assessment_file(fid):
-    file=one("""SELECT af.filename,af.mime,af.content,a.id aid,c.class_id,c.teacher_id,cl.parents_enabled
+    file=one("""SELECT af.filename,af.mime,af.content,a.id aid,a.published,c.class_id,c.teacher_id,cl.parents_enabled
                 FROM assessment_files af JOIN assessments a ON a.id=af.assessment_id
                 JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id
                 WHERE af.id=? AND a.school_id=?""",(fid,school_id()))
     if not file:abort(404)
     u=current_user()
     if u['role']=='superadmin':abort(403)
+    if u['role'] in ('etudiant','parent') and not file['published']:abort(404)
     if u['role']=='enseignant' and file['teacher_id']!=u['id']:abort(403)
     if u['role']=='etudiant' and not one('SELECT id FROM enrollments WHERE school_id=? AND class_id=? AND student_id=?',(school_id(),file['class_id'],u['id'])):abort(403)
     if u['role']=='parent' and (not file['parents_enabled'] or not one("""SELECT p.id FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id
@@ -3974,7 +3976,9 @@ def assessments():
            FROM assessments a JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id WHERE a.school_id=?''';args=[school_id()]
     if u['role']=='enseignant':sql+=' AND c.teacher_id=?';args.append(u['id'])
     elif u['role']=='etudiant':sql+=' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.class_id=c.class_id AND e.student_id=? AND e.school_id=a.school_id)';args.append(u['id'])
-    elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
+    elif u['role']=='parent':sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id WHERE p.parent_id=? AND p.school_id=a.school_id AND e.school_id=a.school_id AND p.active=1 AND e.class_id=c.class_id AND cl.parents_enabled=1)';args.append(u['id'])
+    if u['role'] in ('etudiant','parent'):
+        sql+=' AND a.published=1'
     selected=selected_academic_year()
     if selected:
         sql+=' AND cl.year_id=?'
