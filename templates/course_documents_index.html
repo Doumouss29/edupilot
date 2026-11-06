@@ -3,17 +3,35 @@
 {% block content %}
 <style>
 .doc-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,285px),1fr));gap:14px}
+ .doc-card[hidden]{display:none!important}
 .doc-card{border:1px solid #e0e8f0;border-radius:14px;padding:20px;background:#fff;display:grid;gap:9px}
 .doc-card h3{margin:0;font-size:1.08rem}.doc-card .muted{font-size:.87rem}
 .doc-card .doc-chip{display:inline-block;background:#edf4f9;padding:5px 10px;border-radius:20px;color:#36536c;font-size:.82rem}
 </style>
 <div class="section-intro"><span class="eyebrow">RESSOURCES PÉDAGOGIQUES</span><h2>Documents de mes cours</h2><p>{% if me.role=='etudiant' %}Consultez les supports de cours publiés par vos enseignants.{% elif me.role=='enseignant' %}Déposez et organisez les supports des cours qui vous sont affectés.{% else %}Retrouvez les documents pédagogiques de l'établissement, par classe et par cours.{% endif %}</p></div>
 <section class="panel">
-<div class="live-filter-bar" data-filter-target="course-docs-list">
-<label>Rechercher<input type="search" data-filter="search" placeholder="Cours, classe ou filière"></label>
-<span class="live-filter-count" aria-live="polite"></span></div>
+<div class="live-filter-bar" aria-label="Filtres dynamiques des documents pédagogiques">
+<label>Classe
+<select id="doc-class-filter">
+<option value="">Toutes les classes</option>
+{% set ns=namespace(ids=[]) %}
+{% for c in courses %}
+{% if c.class_id not in ns.ids %}
+<option value="{{c.class_id}}">{{c.class_name}}{% if c.filiere_name %} — {{c.filiere_name}}{% endif %}</option>
+{% set ns.ids=ns.ids+[c.class_id] %}
+{% endif %}
+{% endfor %}
+</select></label>
+<label>Cours
+<select id="doc-course-filter">
+<option value="">Tous les cours</option>
+{% for c in courses %}<option value="{{c.id}}" data-class-id="{{c.class_id}}">{{c.name}} — {{c.class_name}}</option>{% endfor %}
+</select></label>
+<label>Rechercher<input id="doc-search-filter" type="search" placeholder="Cours, classe ou filière"></label>
+<span class="live-filter-count" id="doc-filter-count" aria-live="polite"></span>
+</div>
 <div class="doc-cards" id="course-docs-list">
-{% for c in courses %}<article class="doc-card" data-filter-row>
+{% for c in courses %}<article class="doc-card" data-doc-class-id="{{c.class_id}}" data-doc-course-id="{{c.id}}" data-doc-search="{{(c.name ~ ' ' ~ (c.code or '') ~ ' ' ~ c.class_name ~ ' ' ~ (c.filiere_name or ''))|lower }}">
 <small class="muted">{{c.filiere_name or 'Sans filière'}} · {{c.class_name}}</small>
 <h3>{{c.name}}</h3>
 <small class="muted">{{c.code or 'Sans code'}}</small>
@@ -28,4 +46,40 @@
 <button class="btn outline" type="submit">Modifier le quota</button></form>
 <p class="muted">La limite initiale est de 1 Go, personnalisable pour chaque établissement.</p>
 </section>{% endif %}
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
+ const classSelect=document.getElementById('doc-class-filter');
+ const courseSelect=document.getElementById('doc-course-filter');
+ const search=document.getElementById('doc-search-filter');
+ const count=document.getElementById('doc-filter-count');
+ const cards=[...document.querySelectorAll('#course-docs-list [data-doc-course-id]')];
+ if(!classSelect||!courseSelect||!search||!count)return;
+ const filter=()=>{
+   const chosenClass=classSelect.value;
+   for(const option of courseSelect.options){
+     if(!option.value)continue;
+     option.hidden=Boolean(chosenClass&&option.dataset.classId!==chosenClass);
+     option.disabled=option.hidden;
+   }
+   if(courseSelect.selectedOptions[0]?.disabled)courseSelect.value='';
+   const needle=search.value.toLocaleLowerCase('fr').trim();
+   let visible=0;
+   for(const card of cards){
+     const matchClass=!chosenClass||card.dataset.docClassId===chosenClass;
+     const matchCourse=!courseSelect.value||card.dataset.docCourseId===courseSelect.value;
+     const matchSearch=!needle||card.dataset.docSearch.includes(needle);
+     card.hidden=!(matchClass&&matchCourse&&matchSearch);
+     if(!card.hidden)visible++;
+   }
+   count.textContent=visible+' cours affiché'+(visible>1?'s':'')+' sur '+cards.length;
+ };
+ classSelect.addEventListener('change',()=>{
+   courseSelect.value='';
+   filter();
+ });
+ courseSelect.addEventListener('change',filter);
+ search.addEventListener('input',filter);
+ filter();
+});
+</script>
 {% endblock %}
