@@ -2308,6 +2308,9 @@ with db() as c:
     else:
         columns={column['name'] for column in c.execute('PRAGMA table_info(course_documents)').fetchall()}
         if 'publish_at' not in columns:c.execute('ALTER TABLE course_documents ADD COLUMN publish_at TEXT')
+    # Files published by an earlier preview remain visible after this upgrade.
+    c.execute("""UPDATE course_documents SET publish_at='1970-01-01T00:00:00'
+                 WHERE published=1 AND publish_at IS NULL""")
     c.execute("""CREATE INDEX IF NOT EXISTS idx_course_documents_course
         ON course_documents(school_id,course_id,published)""")
     c.execute("""CREATE TABLE IF NOT EXISTS school_document_limits (
