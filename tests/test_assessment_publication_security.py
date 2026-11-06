@@ -52,6 +52,7 @@ class AssessmentPublicationSecurityTests(unittest.TestCase):
         with self.client.session_transaction() as sess:
             sess.clear()
             sess['uid']=uid
+            sess['auth_stamp']=project.session_auth_stamp(project.one('SELECT * FROM users WHERE id=?',(uid,)))
             sess['csrf']='test-csrf'
 
     def test_unpublished_files_hidden_from_student(self):
