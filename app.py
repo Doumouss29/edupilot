@@ -330,14 +330,17 @@ def globals_template():
     user=current_user()
     menu_filieres=[]
     menu_filiere_classes={}
+    year_context=selected_academic_year() if user and user['role']!='superadmin' else None
+    year_choices=allrows('SELECT id,label,status FROM years WHERE school_id=? ORDER BY label DESC',
+                         (user['school_id'],)) if year_context else []
     if user and user['role'] in ('admin','administratif') and user['school_id']:
         menu_filieres=allrows("""SELECT f.id,f.name FROM filieres f
             WHERE f.school_id=? ORDER BY LOWER(f.name),f.id""",(user['school_id'],))
         for clazz in allrows("""SELECT cl.id,cl.name,cl.filiere_id FROM classes cl
-                WHERE cl.school_id=? AND cl.filiere_id IS NOT NULL
-                ORDER BY LOWER(cl.name),cl.id""",(user['school_id'],)):
+                WHERE cl.school_id=? AND cl.filiere_id IS NOT NULL AND cl.year_id=?
+                ORDER BY LOWER(cl.name),cl.id""",(user['school_id'],year_context['id'] if year_context else -1)):
             menu_filiere_classes.setdefault(clazz['filiere_id'],[]).append(clazz)
-    return dict(menu_filieres=menu_filieres,menu_filiere_classes=menu_filiere_classes,me=user,csrf=session.get('csrf',''),appname='EduPilot',support_name=setting('support_name','LMurbs'),support_phone=setting('support_phone','+2250711124359'),powered_by=setting('powered_by','Propulsé par LMurbs'),school_brand=one('SELECT id,name,logo_mime,campus_enabled FROM schools WHERE id=?',(school_id(),)) if school_id() else None, platform_logo_enabled=bool(one('SELECT id FROM platform_branding WHERE id=1')))
+    return dict(menu_filieres=menu_filieres,menu_filiere_classes=menu_filiere_classes,year_context=year_context,year_choices=year_choices,me=user,csrf=session.get('csrf',''),appname='EduPilot',support_name=setting('support_name','LMurbs'),support_phone=setting('support_phone','+2250711124359'),powered_by=setting('powered_by','Propulsé par LMurbs'),school_brand=one('SELECT id,name,logo_mime,campus_enabled FROM schools WHERE id=?',(school_id(),)) if school_id() else None, platform_logo_enabled=bool(one('SELECT id FROM platform_branding WHERE id=1')))
 
 def current_user():
     uid=session.get('uid')
