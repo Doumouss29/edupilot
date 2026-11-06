@@ -2268,7 +2268,7 @@ def student_maquette():
             FROM courses c
             WHERE c.school_id=? AND c.class_id=?
             ORDER BY LOWER(c.name),c.id""",(school_id(),enrollment['class_id']))
-        courses_data=[dict(name=c['name'],code=c['code'],
+        courses_data=[dict(id=c['id'],name=c['name'],code=c['code'],
                            coefficient=c['coefficient'],
                            hours=(c['planned_minutes'] or 0)/60)
                       for c in courses_rows]
