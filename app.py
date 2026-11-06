@@ -310,10 +310,12 @@ def validate_office_archive(raw, kind):
 
 
 def csv_safe_cell(value):
-    """Keep untrusted text as text when a CSV is opened in Excel/LibreOffice."""
+    """Prevent CSV formula injection, including whitespace-prefixed payloads."""
     if not isinstance(value,str):
         return value
-    if value.lstrip(' \\t\\r\\n\\ufeff').startswith(('=','+','-','@')) or value.startswith(('\\t','\\r','\\n')):
+    leading_controls=''.join(chr(code) for code in (9,10,13,65279))
+    normalized=value.lstrip(' '+leading_controls)
+    if value.startswith(tuple(chr(code) for code in (9,10,13))) or normalized.startswith(('=','+','-','@')):
         return "'"+value
     return value
 
