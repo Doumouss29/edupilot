@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block heading %}Années scolaires{% endblock %}
+{% block heading %}Organisation académique{% endblock %}
 {% block content %}
 <style>
 .year-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr));gap:14px}
@@ -19,9 +19,16 @@
 </style>
 <div class="section-intro">
 <span class="eyebrow">SCOLARITÉ / HISTORIQUE</span>
-<h2>Gestion des années scolaires</h2>
+<h2>Organisation académique</h2>
 <p>Préparez la rentrée, reconduisez les structures, organisez le passage des étudiants, puis activez la nouvelle année sans perdre les archives.</p>
 </div>
+<div id="annees"></div>
+<nav aria-label="Sections de l'organisation académique" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 20px">
+<a class="btn primary sm" href="{{url_for('academic_years')}}#annees">Années scolaires</a>
+<a class="btn outline sm" href="{{url_for('periods')}}">Périodes académiques</a>
+<a class="btn outline sm" href="{{url_for('academic_years')}}#historique">Historique et archives</a>
+</nav>
+<div id="historique"></div>
 <div class="year-grid">
 {% for year in years %}
 <div class="year-card"><div class="year-controls"><h3>{{year.label}}</h3>
