@@ -4565,10 +4565,10 @@ def attendance(lid):
 @app.post('/attendance/<int:lid>')
 @roles('enseignant','admin','administratif')
 def attendance_save(lid):
-    lesson=one('SELECT l.*,c.class_id,cl.year_id FROM lessons l
+    lesson=one("""SELECT l.*,c.class_id,cl.year_id FROM lessons l
         JOIN courses c ON c.id=l.course_id AND c.school_id=l.school_id
         JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
-        WHERE l.id=? AND l.school_id=?',(lid,school_id()))
+        WHERE l.id=? AND l.school_id=?""",(lid,school_id()))
     if not lesson or (current_user()['role']=='enseignant' and lesson['teacher_id']!=current_user()['id']):abort(403)
     writable_academic_class(lesson['class_id'],allow_draft=True)
     students=allrows("""SELECT e.student_id FROM enrollments e
