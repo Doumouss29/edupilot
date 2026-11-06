@@ -2481,8 +2481,9 @@ def course_documents_upload(cid):
         for file in files:
             raw_filename=file.filename.replace('\\','/').split('/')[-1].strip()
             extension=os.path.splitext(raw_filename)[1].lower()
-            if extension not in DOC_EXTENSIONS or not raw_filename or len(raw_filename)>200:
-                raise ValueError('Format non autorisé ou nom de fichier trop long.')
+            if (extension not in DOC_EXTENSIONS or not raw_filename or len(raw_filename)>200
+                    or any(ord(char)<32 for char in raw_filename)):
+                raise ValueError('Format non autorisé ou nom de fichier invalide.')
             random_name=secrets.token_hex(16)
             dest=doc_path(sid,random_name)
             dest.parent.mkdir(parents=True,exist_ok=True)
