@@ -17,6 +17,7 @@ services:
       PGPASSWORD: ${PGPASSWORD:-}
       PGSCHEMA: ${PGSCHEMA:-edupilot}
       PGSSLMODE: ${PGSSLMODE:-require}
+      PGSSLROOTCERT: ${PGSSLROOTCERT:-}
       DATABASE_PATH: /data/edupilot.db
       UPLOAD_DIR: /data/uploads
       PUBLIC_BASE_URL: https://edupilot.ci
