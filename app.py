@@ -4062,9 +4062,13 @@ def school_bulletin_publish():
     class_id=request.form.get('class_id','')
     clazz=one('SELECT id FROM classes WHERE id=? AND school_id=?',(class_id,school_id()))
     if not clazz:abort(403)
+    writable_academic_class(class_id,allow_draft=True)
     period=one('SELECT id,published FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(class_id,school_id()))
     if not period:abort(400,'Période à créer avant publication')
-    all_student_ids=[r['student_id'] for r in allrows('SELECT DISTINCT student_id FROM enrollments WHERE school_id=? AND class_id=?',(school_id(),class_id))]
+    all_student_ids=[r['student_id'] for r in allrows("""SELECT DISTINCT e.student_id FROM enrollments e
+        JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id AND cl.year_id=e.year_id
+        JOIN users st ON st.id=e.student_id AND st.school_id=e.school_id AND st.role='etudiant'
+        WHERE e.school_id=? AND e.class_id=?""",(school_id(),class_id))]
     selected=request.form.getlist('student_ids')
     if selected and any(not v.isdigit() for v in selected):abort(400)
     ids=list(dict.fromkeys(map(int,selected))) if selected else all_student_ids
@@ -4105,7 +4109,11 @@ def student_bulletin(cid):
             JOIN classes cl ON cl.id=e.class_id WHERE p.parent_id=? AND p.student_id=? AND p.school_id=? AND p.active=1 AND e.class_id=? AND cl.parents_enabled=1""",(u['id'],int(candidate),school_id(),cid)):abort(403)
         student_id=int(candidate)
     elif u['role']!='etudiant':abort(403)
-    if not one('SELECT id FROM enrollments WHERE school_id=? AND student_id=? AND class_id=?',(school_id(),student_id,cid)):abort(403)
+    if not one("""SELECT e.id FROM enrollments e
+        JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id AND cl.year_id=e.year_id
+        JOIN users st ON st.id=e.student_id AND st.school_id=e.school_id AND st.role='etudiant'
+        WHERE e.school_id=? AND e.student_id=? AND e.class_id=?""",
+        (school_id(),student_id,cid)):abort(403)
     report=compile_class_report(cid,{student_id})
     if not report['rows'] or not report['rows'][0]['published']:abort(403,'Bulletin non encore publié par la scolarité')
     school=one('SELECT name,logo_mime,id FROM schools WHERE id=?',(school_id(),))
@@ -4123,7 +4131,12 @@ def grades():
         except (ValueError,TypeError):abort(400,'Note invalide')
         a=one('''SELECT a.*,c.class_id,c.teacher_id,cl.school_id FROM assessments a JOIN courses c ON c.id=a.course_id JOIN classes cl ON cl.id=c.class_id WHERE a.id=? AND a.school_id=?''',(aid,school_id()))
         if not a or (u['role']=='enseignant' and a['teacher_id']!=u['id']) or not (0<=value<=a['max_score']):abort(403)
-        if not one('SELECT id FROM enrollments WHERE student_id=? AND class_id=? AND school_id=?',(student,a['class_id'],school_id())):abort(403)
+        writable_academic_class(a['class_id'],allow_draft=True)
+        if not one("""SELECT e.id FROM enrollments e
+            JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id AND cl.year_id=e.year_id
+            JOIN users st ON st.id=e.student_id AND st.school_id=e.school_id AND st.role='etudiant'
+            WHERE e.student_id=? AND e.class_id=? AND e.school_id=?""",
+            (student,a['class_id'],school_id())):abort(403)
         period=one('SELECT * FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(a['class_id'],school_id()))
         if period and period['locked']:
             unlocked=one('SELECT * FROM unlocks WHERE period_id=? AND teacher_id=? AND expires_at>? ORDER BY id DESC LIMIT 1',(period['id'],u['id'],datetime.datetime.now(datetime.timezone.utc).isoformat()))
@@ -4190,7 +4203,9 @@ def grade_entry(aid):
     period=one('SELECT * FROM periods WHERE class_id=? AND school_id=? ORDER BY id DESC LIMIT 1',(a['class_id'],school_id()))
     if period and period['locked']:
         if not one('SELECT id FROM unlocks WHERE period_id=? AND teacher_id=? AND expires_at>?',(period['id'],u['id'],datetime.datetime.now(datetime.timezone.utc).isoformat())):abort(403,'Période verrouillée : demander une réouverture')
-    students=allrows("""SELECT DISTINCT u.id,u.name,u.matricule,g.value,g.comment FROM enrollments e JOIN users u ON u.id=e.student_id
+    students=allrows("""SELECT DISTINCT u.id,u.name,u.matricule,g.value,g.comment FROM enrollments e
+                        JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id AND cl.year_id=e.year_id
+                        JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id AND u.role='etudiant'
                         LEFT JOIN grades g ON g.student_id=u.id AND g.assessment_id=?
                         WHERE e.school_id=? AND e.class_id=? ORDER BY u.name""",(aid,school_id(),a['class_id']))
     if request.method=='POST':
