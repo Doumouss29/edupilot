@@ -2691,50 +2691,27 @@ def course_delete(cid):
 @app.post('/courses/bulk')
 @roles('admin','administratif')
 def courses_bulk():
+    """Safely delete selected courses without academic history."""
     ids=request.form.getlist('course_ids')
-    action=request.form.get('action','')
-    if action not in ('delete','coefficient','teacher') or not ids or len(ids)>100 or any(not x.isdigit() for x in ids):abort(400)
+    if request.form.get('action')!='delete' or not ids or len(ids)>100 or any(not x.isdigit() for x in ids):
+        abort(400)
     ids=list(dict.fromkeys(map(int,ids)))
     qs=','.join('?' for _ in ids)
-    teacher_id=None;coefficient=None
-    if action=='coefficient':
-        try:
-            coefficient=float(request.form.get('coefficient',''))
-            if not (0<coefficient<=100):raise ValueError()
-        except (ValueError,TypeError):abort(400,'Coefficient invalide')
-    if action=='teacher':
-        value=request.form.get('teacher_id','').strip()
-        if value:
-            if not value.isdigit() or not one("SELECT id FROM users WHERE id=? AND school_id=? AND role IN ('enseignant','admin') AND active=1",(value,school_id())):abort(403)
-            teacher_id=int(value)
-    try:
-        with db() as c:
-            c.execute('BEGIN IMMEDIATE')
-            rows=c.execute(f'SELECT id,teacher_id FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids)).fetchall()
-            if len(rows)!=len(ids):abort(403)
-            if action=='delete':
-                for cid in ids:
-                    for table in ('lessons','assessments','teacher_memos','course_documents'):
-                        if c.execute(f'SELECT id FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone():
-                            flash('Suppression groupée refusée : un cours possède des séances, évaluations, mémos ou documents pédagogiques. Utilisez sa suppression individuelle avec confirmation si nécessaire.','error')
-                            return redirect(url_for('courses'))
-                c.execute(f'DELETE FROM teacher_history WHERE course_id IN ({qs})',ids)
-                c.execute(f'DELETE FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
-            elif action=='coefficient':
-                c.execute(f'UPDATE courses SET coefficient=? WHERE school_id=? AND id IN ({qs})',(coefficient,school_id(),*ids))
-            else:
-                now=datetime.datetime.now(datetime.timezone.utc).isoformat()
-                for course in rows:
-                    if course['teacher_id']==teacher_id:continue
-                    c.execute('UPDATE teacher_history SET date_end=? WHERE course_id=? AND date_end IS NULL',(now,course['id']))
-                    if teacher_id:c.execute('INSERT INTO teacher_history(course_id,teacher_id,date_start) VALUES (?,?,?)',(course['id'],teacher_id,now))
-                    sync_course_future_teacher(c,course['id'],teacher_id)
-                    c.execute('UPDATE courses SET teacher_id=? WHERE id=? AND school_id=?',(teacher_id,course['id'],school_id()))
-    except ValueError as exc:
-        flash(str(exc),'error')
-        return redirect(url_for('courses'))
-    audit('courses.bulk.'+action,','.join(map(str,ids)))
-    flash(f'{len(ids)} cours : modifications enregistrées.','success')
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        courses=c.execute(f'SELECT id FROM courses WHERE school_id=? AND id IN ({qs})',
+                          (school_id(),*ids)).fetchall()
+        if len(courses)!=len(ids):abort(403)
+        for cid in ids:
+            for table in ('lessons','assessments','teacher_memos','course_documents'):
+                if c.execute(f'SELECT id FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone():
+                    flash('Suppression groupée refusée : un cours possède des séances, évaluations, mémos ou documents pédagogiques. Utilisez sa suppression individuelle avec confirmation si nécessaire.','error')
+                    return redirect(url_for('courses'))
+        c.execute(f'DELETE FROM memo_rates WHERE course_id IN ({qs})',ids)
+        c.execute(f'DELETE FROM teacher_history WHERE course_id IN ({qs})',ids)
+        c.execute(f'DELETE FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
+    audit('courses.bulk.delete',','.join(map(str,ids)))
+    flash(f'{len(ids)} cours sans historique supprimé(s).','success')
     return redirect(url_for('courses'))
 
 def sync_course_future_teacher(conn,course_id,teacher_id):
