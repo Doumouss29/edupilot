@@ -3347,6 +3347,9 @@ def course_edit(cid):
         class_id=request.form.get('class_id')
         teacher=request.form.get('teacher_id') or None
         if not name or len(name)>180 or not has_school('classes',class_id):abort(400)
+        # Check destination independently: a mutable course must never be moved
+        # into an archived academic year, even when it has no lessons yet.
+        writable_academic_class(class_id,allow_draft=True)
         if teacher and not one("SELECT id FROM users WHERE id=? AND school_id=? AND role IN ('enseignant','admin') AND active=1",(teacher,school_id())):abort(403)
         try:
             minutes=int(round(float(request.form.get('hours',''))*60))
