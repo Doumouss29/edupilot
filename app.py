@@ -936,8 +936,12 @@ def mfa_verify():
             digest=hmac.new(app.secret_key.encode(),f"{u['id']}:{code}".encode(),hashlib.sha256).hexdigest()
             with db() as c:
                 c.execute('UPDATE mfa_settings SET email_attempts=email_attempts+1 WHERE user_id=?',(u['id'],))
-                if hmac.compare_digest(config['email_code_hash'] or '',digest):
-                    c.execute('UPDATE mfa_settings SET email_code_hash=NULL,email_expires=NULL WHERE user_id=?',(u['id'],))
+                claim=c.execute("""UPDATE mfa_settings
+                    SET email_code_hash=NULL,email_expires=NULL
+                    WHERE user_id=? AND email_code_hash=?
+                      AND email_expires>=? AND email_attempts<=5""",
+                    (u['id'],digest,int(time.time())))
+                if claim.rowcount==1:
                     cookie=None
                     if request.form.get('trust_device')=='1':
                         cookie=secrets.token_urlsafe(32)
@@ -4470,7 +4474,13 @@ def push_subscribe():
         abort(400,'Abonnement push invalide')
     raw=json.dumps({'endpoint':endpoint,'keys':{'p256dh':keys['p256dh'],'auth':keys['auth']}},separators=(',',':'))
     with db() as c:
-        c.execute('INSERT INTO push_subscriptions(user_id,endpoint,subscription_json) VALUES (?,?,?) ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription_json=excluded.subscription_json',(current_user()['id'],endpoint,raw))
+        result=c.execute("""INSERT INTO push_subscriptions(user_id,endpoint,subscription_json)
+            VALUES (?,?,?)
+            ON CONFLICT(endpoint) DO UPDATE SET subscription_json=excluded.subscription_json
+            WHERE push_subscriptions.user_id=excluded.user_id""",
+            (current_user()['id'],endpoint,raw))
+        if result.rowcount!=1:
+            abort(403,'Cet abonnement push est déjà associé à un autre compte.')
     return jsonify(ok=True)
 
 @app.post('/api/push/unsubscribe')
