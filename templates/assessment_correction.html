@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block heading %}Correction d'évaluation{% endblock %}
+{% block content %}
+<style>
+.correction-layout{max-width:900px;margin:0 auto}
+.correction-hint{color:#65778b;font-size:.9rem;line-height:1.5}
+.correction-state{display:inline-block;border-radius:30px;padding:6px 11px;background:#fff1d6;color:#875914;font-weight:700}
+.correction-state.published{background:#e4f6ea;color:#176e3b}
+.correction-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:16px}
+.correction-file{padding:12px;border-radius:10px;background:#f5f8fb;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.correction-layout .modern-form{display:block}
+.correction-layout .modern-form label{display:grid;margin:16px 0 8px}
+.correction-layout .modern-form textarea{width:100%;box-sizing:border-box;min-height:180px}
+</style>
+<div class="correction-layout">
+<div class="section-intro"><span class="eyebrow">ÉVALUATIONS</span>
+<h2>Correction — {{item.title}}</h2>
+<p>La correction est distincte de l'énoncé et reste invisible aux étudiants jusqu'à sa publication.</p>
+</div>
+<section class="panel">
+<div class="panel-title"><h3>Correction de l'évaluation</h3>
+{% if correction and correction.published %}<span class="correction-state published">Publiée</span>
+{% else %}<span class="correction-state">Brouillon / non publiée</span>{% endif %}</div>
+<form method="post" enctype="multipart/form-data" class="modern-form" id="correction-form">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<label>Correction rédigée
+<textarea name="body" rows="10" maxlength="20000" placeholder="Ajoutez les réponses attendues, le barème ou les éléments de correction…">{{correction.body if correction else ''}}</textarea></label>
+<p class="correction-hint">Vous pouvez rédiger la correction, joindre un fichier, ou utiliser les deux. Le document est réservé à l'évaluation concernée.</p>
+<label>Document de correction (facultatif)
+<input type="file" name="correction_file" accept=".pdf,.docx,.png,.jpg,.jpeg">
+</label>
+<p class="correction-hint">Formats acceptés : PDF, Word (DOCX), PNG et JPEG ; 10 Mo maximum. Un nouveau fichier remplace l'ancien.</p>
+{% if correction and correction.filename %}
+<div class="correction-file"><strong>Document actuel :</strong> {{correction.filename}}
+<a class="btn outline sm" href="{{url_for('assessment_correction_file',aid=item.id)}}">Télécharger</a>
+<button class="btn outline sm" type="submit" name="action" value="delete_file" onclick="return confirm('Retirer le fichier de correction ? Le texte restera enregistré.')">Retirer le fichier</button>
+</div>
+{% endif %}
+<div class="correction-actions">
+<button class="btn outline" name="action" value="save" type="submit">Enregistrer sans changer la visibilité</button>
+{% if correction and correction.published %}
+<button class="btn outline" name="action" value="unpublish" type="submit">Dépublier</button>
+{% else %}
+<button class="btn primary" name="action" value="publish" type="submit">Publier aux étudiants</button>
+{% endif %}
+<a class="btn outline" href="{{url_for('assessments')}}">Retour aux évaluations</a>
+</div>
+</form>
+</section>
+</div>
+{% endblock %}
