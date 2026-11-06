@@ -2281,6 +2281,33 @@ def student_maquette():
     return render_template('student_maquette.html',curricula=curricula)
 
 
+def active_academic_year(sid=None):
+    sid=school_id() if sid is None else sid
+    return one("SELECT id,label,status FROM years WHERE school_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",(sid,)) if sid else None
+
+
+def selected_academic_year():
+    sid=school_id()
+    if not sid:return None
+    key=f'academic_selected_year_{sid}'
+    preferred=session.get(key)
+    if preferred is not None:
+        row=one('SELECT id,label,status FROM years WHERE school_id=? AND id=?',(sid,preferred))
+        if row:return row
+        session.pop(key,None)
+    return active_academic_year(sid)
+
+
+def writable_academic_class(class_id,allow_draft=False):
+    item=one("""SELECT cl.id,cl.year_id,y.status FROM classes cl
+                JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id
+                WHERE cl.school_id=? AND cl.id=?""",(school_id(),class_id))
+    if not item:abort(404)
+    if item['status']=='archived' or (item['status']=='draft' and not allow_draft):
+        abort(403,'Année scolaire non modifiable')
+    return item
+
+
 # Academic years: non-destructive lifecycle migration, scoped to each institution.
 with db() as c:
     if DB_ENGINE=='postgresql':
