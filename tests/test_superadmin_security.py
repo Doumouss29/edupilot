@@ -85,6 +85,22 @@ class SuperadminSecurityTests(unittest.TestCase):
         self.assertEqual(project.one('SELECT active FROM users WHERE id=2')['active'],0)
         self.assertEqual(project.one('SELECT active FROM users WHERE id=3')['active'],1)
 
+    def test_populated_school_cannot_be_deleted(self):
+        self.actor(1)
+        response=self.client.post('/schools/1/update',data={
+            'csrf':'csrf','action':'delete','confirm_slug':'school-a'})
+        self.assertEqual(response.status_code,403)
+        self.assertIsNotNone(project.one('SELECT id FROM schools WHERE id=1'))
+        self.assertIsNotNone(project.one('SELECT id FROM users WHERE id=2'))
+
+    def test_school_can_be_deactivated_without_deleting_accounts(self):
+        self.actor(1)
+        response=self.client.post('/schools/1/update',data={
+            'csrf':'csrf','action':'deactivate'})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(project.one('SELECT active FROM schools WHERE id=1')['active'],0)
+        self.assertIsNotNone(project.one('SELECT id FROM users WHERE id=2'))
+
     def test_school_admin_cannot_access_superadmin_account_management(self):
         self.actor(2)
         self.assertEqual(self.action(1,'set_admin',[3]).status_code,403)
