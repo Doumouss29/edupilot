@@ -2706,7 +2706,7 @@ def courses_bulk():
                 for cid in ids:
                     for table in ('lessons','assessments','teacher_memos','course_documents'):
                         if c.execute(f'SELECT id FROM {table} WHERE course_id=? LIMIT 1',(cid,)).fetchone():
-                            flash('Suppression refusée : un cours possède des séances ou évaluations. Conservez les historiques.','error')
+                            flash('Suppression groupée refusée : un cours possède des séances, évaluations, mémos ou documents pédagogiques. Utilisez sa suppression individuelle avec confirmation si nécessaire.','error')
                             return redirect(url_for('courses'))
                 c.execute(f'DELETE FROM teacher_history WHERE course_id IN ({qs})',ids)
                 c.execute(f'DELETE FROM courses WHERE school_id=? AND id IN ({qs})',(school_id(),*ids))
