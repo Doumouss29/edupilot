@@ -2381,7 +2381,12 @@ def academic_year_select():
     if not value.isdigit():abort(400,'Année invalide')
     row=one('SELECT id FROM years WHERE school_id=? AND id=?',(school_id(),int(value)))
     if not row:abort(403)
-    session[f'academic_selected_year_{school_id()}']=row['id']
+    key=f'academic_selected_year_{school_id()}'
+    active=active_academic_year()
+    if active and active['id']==row['id']:
+        session.pop(key,None)  # Follow future activations automatically.
+    else:
+        session[key]=row['id']
     destination=request.form.get('return_to','')
     parsed=urlsplit(destination)
     if destination.startswith('/') and not destination.startswith('//') and not parsed.netloc and not parsed.scheme:
