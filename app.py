@@ -359,9 +359,21 @@ def globals_template():
             menu_filiere_classes.setdefault(clazz['filiere_id'],[]).append(clazz)
     return dict(menu_filieres=menu_filieres,menu_filiere_classes=menu_filiere_classes,year_context=year_context,year_choices=year_choices,me=user,csrf=session.get('csrf',''),appname='EduPilot',support_name=setting('support_name','LMurbs'),support_phone=setting('support_phone','+2250711124359'),powered_by=setting('powered_by','Propulsé par LMurbs'),school_brand=one('SELECT id,name,logo_mime,campus_enabled FROM schools WHERE id=?',(school_id(),)) if school_id() else None, platform_logo_enabled=bool(one('SELECT id FROM platform_branding WHERE id=1')))
 
+def session_auth_stamp(user):
+    # Credential-bound Flask session: password rotation invalidates every old cookie.
+    return hmac.new(app.secret_key.encode('utf-8'),
+                    (str(user['id'])+':'+user['password_hash']).encode('utf-8'),
+                    hashlib.sha256).hexdigest()
+
 def current_user():
     uid=session.get('uid')
-    return one('SELECT * FROM users WHERE id=? AND active=1',(uid,)) if uid else None
+    if not uid:return None
+    user=one('SELECT * FROM users WHERE id=? AND active=1',(uid,))
+    stamp=session.get('auth_stamp','')
+    if not user or not isinstance(stamp,str) or not hmac.compare_digest(stamp,session_auth_stamp(user)):
+        session.clear()
+        return None
+    return user
 
 def login_required(fn):
     @functools.wraps(fn)
@@ -709,6 +721,7 @@ def complete_login(u, trusted_cookie=None, remember=False):
     execute("UPDATE users SET first_login_at=COALESCE(first_login_at,CAST(CURRENT_TIMESTAMP AS TEXT)), last_login_at=CAST(CURRENT_TIMESTAMP AS TEXT) WHERE id=?",(u['id'],))
     session.clear()
     session['uid']=u['id']
+    session['auth_stamp']=session_auth_stamp(u)
     # A normal browser-session cookie can disappear when the mobile PWA closes.
     if remember and u['role']!='superadmin':
         session.permanent=True
@@ -872,6 +885,7 @@ def mfa_verify():
                     codes=generate_recovery_codes(u['id'])
                     session.clear()
                     session['uid']=u['id']
+                    session['auth_stamp']=session_auth_stamp(u)
                     session['csrf']=secrets.token_urlsafe(24)
                     execute("UPDATE users SET first_login_at=COALESCE(first_login_at,CAST(CURRENT_TIMESTAMP AS TEXT)), last_login_at=CAST(CURRENT_TIMESTAMP AS TEXT) WHERE id=?",(u['id'],))
                     return render_template('mfa_recovery_codes.html',codes=codes)
@@ -1011,14 +1025,19 @@ def change_password():
         confirm=request.form.get('confirm_password','')
         if not check_password_hash(u['password_hash'],old):
             flash('Mot de passe temporaire incorrect.','error')
-        elif len(new)<12 or not any(x.isalpha() for x in new) or not any(x.isdigit() for x in new):
+        elif not valid_password(new):
             flash('Choisissez au moins 12 caractères, avec des lettres et des chiffres.','error')
         elif new!=confirm:
             flash('Les nouveaux mots de passe sont différents.','error')
         elif new==old:
             flash('Le nouveau mot de passe doit être différent.','error')
         else:
-            execute('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?',(generate_password_hash(new),u['id']))
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                c.execute('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?',
+                          (generate_password_hash(new),u['id']))
+                c.execute('DELETE FROM mfa_trusted_devices WHERE user_id=?',(u['id'],))
+                c.execute('UPDATE mfa_settings SET email_code_hash=NULL,email_expires=NULL WHERE user_id=?',(u['id'],))
             session.clear()
             flash('Mot de passe modifié. Connectez-vous avec votre nouveau mot de passe.','success')
             return redirect(url_for('login'))
@@ -1877,6 +1896,8 @@ def activate(token):
     invitation=one('SELECT * FROM invites WHERE token_hash=? AND used=0',(hashed,))
     now=datetime.datetime.now(datetime.timezone.utc).isoformat()
     if not invitation or invitation['expires_at']<now:abort(404,'Lien expiré ou déjà utilisé.')
+    if not one('SELECT id FROM users WHERE id=? AND active=1',(invitation['user_id'],)):
+        abort(404,'Lien expiré ou déjà utilisé.')
     if request.method=='POST':
         password=request.form.get('password','')
         confirm=request.form.get('confirm_password','')
@@ -1889,14 +1910,20 @@ def activate(token):
                 c.execute('BEGIN IMMEDIATE')
                 claim=c.execute('UPDATE invites SET used=1 WHERE id=? AND used=0 AND expires_at>=?',(invitation['id'],datetime.datetime.now(datetime.timezone.utc).isoformat()))
                 if claim.rowcount!=1:abort(404,'Lien expiré ou déjà utilisé.')
-                c.execute('UPDATE users SET password_hash=?,must_change_password=0 WHERE id=?',(generate_password_hash(password),invitation['user_id']))
+                changed=c.execute('UPDATE users SET password_hash=?,must_change_password=0 WHERE id=? AND active=1',
+                                  (generate_password_hash(password),invitation['user_id']))
+                if changed.rowcount!=1:abort(404,'Lien expiré ou déjà utilisé.')
                 c.execute('DELETE FROM invites WHERE user_id=? AND id<>?',(invitation['user_id'],invitation['id']))
+                c.execute('DELETE FROM mfa_trusted_devices WHERE user_id=?',(invitation['user_id'],))
+                c.execute('UPDATE mfa_settings SET email_code_hash=NULL,email_expires=NULL WHERE user_id=?',
+                          (invitation['user_id'],))
             flash('Mot de passe défini. Connectez-vous à EduPilot.','success')
             return redirect(url_for('login'))
     return render_template('activate.html')
 
 def valid_password(value):
-    return len(value)>=12 and any(c.isalpha() for c in value) and any(c.isdigit() for c in value)
+    return (isinstance(value,str) and 12<=len(value)<=1024
+            and any(c.isalpha() for c in value) and any(c.isdigit() for c in value))
 
 @app.route('/forgot-password',methods=['GET','POST'])
 def forgot_password():
