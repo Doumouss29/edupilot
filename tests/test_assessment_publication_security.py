@@ -23,6 +23,10 @@ class AssessmentPublicationSecurityTests(unittest.TestCase):
         project.DB=str(Path(TEMP.name)/(self._testMethodName+".db"))
         with project.db() as conn:
             conn.executescript(project.SCHEMA)
+            # SCHEMA is the historical SQLite baseline; academic-year columns
+            # are added later by app startup migrations, which do not run again
+            # when each test switches to its own disposable database.
+            conn.execute("ALTER TABLE years ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
             conn.execute("INSERT INTO schools(id,name,slug) VALUES (1,'School A','school-a'),(2,'School B','school-b')")
             for uid,sid,role in [(1,1,'etudiant'),(2,1,'parent'),(3,1,'enseignant'),(4,2,'etudiant'),(5,1,'admin'),(6,1,'etudiant')]:
                 conn.execute("INSERT INTO users(id,school_id,name,email,password_hash,role) VALUES (?,?,?,?,?,?)",
