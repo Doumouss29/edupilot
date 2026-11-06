@@ -2444,6 +2444,67 @@ with db() as c:
     )""")
 
 
+@app.get('/academic-years/<int:year_id>/archive')
+@roles('admin','administratif')
+def academic_year_archive(year_id):
+    """Consultation isolée des données pédagogiques d'une année archivée."""
+    sid=school_id()
+    year=one('SELECT id,label,status,start_date,end_date FROM years WHERE id=? AND school_id=?',(year_id,sid))
+    if not year:abort(404)
+    if year['status']!='archived':abort(404,'Cette année n’est pas archivée')
+    classes=allrows("""
+        SELECT cl.id,cl.name,cl.cycle,cl.filiere_id,f.name filiere_name,
+            (SELECT COUNT(*) FROM enrollments e WHERE e.school_id=cl.school_id
+             AND e.class_id=cl.id AND e.year_id=cl.year_id) students_count,
+            (SELECT COUNT(*) FROM courses co WHERE co.school_id=cl.school_id
+             AND co.class_id=cl.id) courses_count
+        FROM classes cl LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id
+        WHERE cl.school_id=? AND cl.year_id=? ORDER BY f.name,cl.name
+    """,(sid,year_id))
+    courses=allrows("""
+        SELECT co.id,co.name,co.code,cl.name class_name,cl.id class_id,
+               u.name teacher_name,co.planned_minutes,co.coefficient
+        FROM courses co JOIN classes cl ON cl.id=co.class_id AND cl.school_id=co.school_id
+        LEFT JOIN users u ON u.id=co.teacher_id AND u.school_id=co.school_id
+        WHERE co.school_id=? AND cl.year_id=? ORDER BY cl.name,co.name
+    """,(sid,year_id))
+    students=allrows("""
+        SELECT DISTINCT u.id,u.name,u.matricule,cl.name class_name,cl.id class_id,
+               e.status enrollment_status
+        FROM enrollments e JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id
+        JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id AND cl.year_id=e.year_id
+        WHERE e.school_id=? AND e.year_id=? ORDER BY cl.name,u.name
+    """,(sid,year_id))
+    teachers=allrows("""
+        SELECT DISTINCT u.id,u.name
+        FROM courses co JOIN classes cl ON cl.id=co.class_id AND cl.school_id=co.school_id
+        JOIN users u ON u.id=co.teacher_id AND u.school_id=co.school_id
+        WHERE co.school_id=? AND cl.year_id=?
+        ORDER BY u.name
+    """,(sid,year_id))
+    assessments=allrows("""
+        SELECT a.id,a.title,a.kind,a.due_date,co.name course_name,cl.name class_name
+        FROM assessments a JOIN courses co ON co.id=a.course_id AND co.school_id=a.school_id
+        JOIN classes cl ON cl.id=co.class_id AND cl.school_id=co.school_id
+        WHERE a.school_id=? AND cl.year_id=? ORDER BY cl.name,co.name,a.id
+    """,(sid,year_id))
+    grades=allrows("""
+        SELECT g.id,g.value,g.comment,u.name student_name,a.title assessment_title,
+               co.name course_name,cl.name class_name
+        FROM grades g JOIN assessments a ON a.id=g.assessment_id
+        JOIN courses co ON co.id=a.course_id AND co.school_id=a.school_id
+        JOIN classes cl ON cl.id=co.class_id AND cl.school_id=co.school_id
+        JOIN users u ON u.id=g.student_id AND u.school_id=co.school_id
+        JOIN enrollments e ON e.student_id=g.student_id AND e.school_id=co.school_id
+                          AND e.class_id=cl.id AND e.year_id=cl.year_id
+        WHERE co.school_id=? AND cl.year_id=?
+        ORDER BY cl.name,u.name,a.id
+    """,(sid,year_id))
+    return render_template('academic_year_archive.html',year=year,classes=classes,
+                           courses=courses,students=students,teachers=teachers,
+                           assessments=assessments,grades=grades)
+
+
 @app.get('/academic-years')
 @roles('admin','administratif')
 def academic_years():
