@@ -1,15 +1,181 @@
-{% extends 'base.html' %}{% block heading %}Gestion des cours{% endblock %}{% block content %}<div class="section-intro"><span class="eyebrow">SCOLARITÉ</span><h2>Gérer les cours</h2><p>Créez, modifiez ou sélectionnez plusieurs cours à supprimer. Les cours possédant des séances ou évaluations restent protégés.</p></div>
-<section class="panel"><h3>Créer un cours</h3><form method="post" action="{{url_for('courses')}}" class="modern-form"><input type="hidden" name="csrf" value="{{csrf}}"><label>Intitulé<input name="name" required></label><label>Code<input name="code" placeholder="SIG-101"></label><label>Classe<select name="class_id" required>{% for x in classes %}<option value="{{x.id}}" {% if selected_class_id|string == x.id|string %}selected{% endif %}>{{x.name}}</option>{% endfor %}</select></label><label>Enseignant (tapez le début du nom pour le sélectionner)<select name="teacher_id"><option value="">Non affecté</option>{% for x in teachers %}<option value="{{x.id}}">{{x.name}} — {{x.matricule or 'Sans matricule'}}</option>{% endfor %}</select></label><label>Heures prévues<input name="hours" type="number" min="0.5" step="0.5" value="20" required></label><label>Coefficient matière<input name="coefficient" type="number" min="0.1" step="0.1" value="1" required></label><div class="form-actions"><button class="btn primary">Créer le cours</button></div></form></section>
-<section class="panel"><div class="panel-title"><h3>Cours existants</h3><span class="muted">{{courses|length}} cours</span></div>
-<div class="live-filter-bar" data-filter-target="courses-list" aria-label="Filtres des cours"><label>Classe<select data-filter="class"><option value="">Toutes les classes</option>{% for cl in classes %}<option value="{{cl.id}}">{{cl.name}}</option>{% endfor %}</select></label><label>Enseignant<select data-filter="teacher"><option value="">Tous les enseignants</option><option value="unassigned">Non affecté</option>{% for teacher in teachers %}<option value="{{teacher.id}}">{{teacher.name}}</option>{% endfor %}</select></label><label>Rechercher<input type="search" data-filter="search" placeholder="Nom, code ou matière"></label><span class="live-filter-count" aria-live="polite"></span></div>
-<form id="courses-bulk" method="post" action="{{url_for('courses_bulk')}}"><input type="hidden" name="csrf" value="{{csrf}}"><input name="action" type="hidden" value="delete"><div class="page-actions"><label>Action groupée <select name="action" id="courses-action"><option value="delete">Supprimer les cours sans historique</option><option value="coefficient">Modifier le coefficient matière</option><option value="teacher">Changer l'enseignant</option></select></label><label>Coefficient <input name="coefficient" type="number" step="0.1" min="0.1" value="1"></label><label>Enseignant (tapez le nom) <select name="teacher_id"><option value="">Aucun enseignant</option>{% for t in teachers %}<option value="{{t.id}}">{{t.name}} — {{t.matricule or 'Sans matricule'}}</option>{% endfor %}</select></label><button type="submit" class="btn primary">Appliquer aux cours sélectionnés</button></div><div class="table-scroll"><table id="courses-list"><thead><tr><th><input type="checkbox" id="all-courses"></th><th>Cours</th><th>Classe</th><th>Enseignant</th><th>Volume</th><th>Coefficient</th><th>Actions</th></tr></thead><tbody>{% for c in courses %}<tr data-filter-row data-class="{{c.class_id}}" data-teacher="{{c.teacher_id or 'unassigned'}}"><td><input type="checkbox" name="course_ids" value="{{c.id}}"></td><td><b>{{c.name}}</b><br><small>{{c.code}}</small></td><td>{{c.class_name}}</td><td>{% if c.teacher_name %}{{c.teacher_matricule or '—'}} — {{c.teacher_name}}{% else %}Non affecté{% endif %}</td><td>{{c.planned_minutes/60}} h</td><td>{{c.coefficient}}</td><td><div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px"><a class="btn outline sm" href="{{url_for('course_edit',cid=c.id)}}">Modifier</a><a class="btn outline sm" href="{{url_for('course_documents',cid=c.id)}}">Documents ({{c.doc_count}})</a>{% if me.role=='admin' %}<button type="button" class="btn outline sm" style="color:#b42318;border-color:#d4aaa6" data-course-name="{{c.name}}" onclick="forceDeleteCourse(this, {{c.id}})">Supprimer</button>{% else %}<button type="submit" form="delete-single-course" formaction="{{url_for('course_delete',cid=c.id)}}" formmethod="post" class="btn outline sm" style="color:#b42318;border-color:#d4aaa6" onclick="return confirm('Confirmer la suppression de ce cours ? Seul l’admin école peut supprimer un cours ayant un historique.');">Supprimer</button>{% endif %}</div></td></tr>{% else %}<tr><td colspan="7">Aucun cours.</td></tr>{% endfor %}</tbody></table></div></form><form id="delete-single-course" method="post"><input type="hidden" name="csrf" value="{{csrf}}"></form><form id="force-delete-course" method="post"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="force_delete" value="1"><input type="hidden" name="confirm_word" value="SUPPRIMER"></form></section>
+{% extends 'base.html' %}
+{% block heading %}Gestion des cours{% endblock %}
+{% block content %}
+<style>
+.courses-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:0 0 20px}
+.courses-toolbar .section-intro{margin:0;flex:1;min-width:240px}
+.courses-modal{border:0;border-radius:18px;padding:0;width:min(740px,calc(100% - 28px));max-height:min(90vh,900px);box-shadow:0 22px 80px rgba(13,29,46,.25);background:#fff;color:#26394a}
+.courses-modal::backdrop{background:rgba(17,37,57,.58)}
+.courses-modal-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:24px 26px 14px;border-bottom:1px solid #e5ebf1}
+.courses-modal-header h2{font-size:1.35rem;margin:0 0 5px}
+.courses-modal-header p{margin:0;color:#748396;font-size:.91rem}
+.courses-modal-close{border:0;border-radius:9px;cursor:pointer;background:#f1f5f9;color:#32475a;font-size:24px;min-width:38px;height:38px}
+.courses-modal-body{padding:23px 26px 27px;overflow-y:auto;max-height:calc(90vh - 105px)}
+.courses-modal .modern-form{grid-template-columns:repeat(2,minmax(0,1fr))}
+.courses-modal .form-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:8px}
+.courses-bulk-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin:12px 0 14px}
+.courses-bulk-actions .muted{margin-right:auto}
+.courses-top-scroll{overflow-x:auto;overflow-y:hidden;height:17px;margin:0 0 2px;scrollbar-gutter:stable}
+.courses-top-scroll-track{height:1px}
+.courses-table-scroll{overflow-x:auto}
+.courses-table-scroll table{min-width:1120px}
+.courses-table-scroll td:last-child{min-width:285px}
+.courses-table-scroll .course-row-actions{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.courses-table-scroll tbody tr[hidden]{display:none}
+@media(max-width:650px){
+ .courses-toolbar .btn{width:100%}
+ .courses-modal-header{padding:20px 18px 13px}
+ .courses-modal-body{padding:20px 18px}
+ .courses-modal .modern-form{grid-template-columns:1fr}
+ .courses-modal .form-actions{grid-column:1}
+ .courses-bulk-actions{justify-content:flex-start}
+}
+</style>
+<div class="courses-toolbar">
+ <div class="section-intro">
+  <span class="eyebrow">SCOLARITÉ</span>
+  <h2>Gérer les cours</h2>
+  <p>Consultez, modifiez ou supprimez vos cours. Les cours possédant un historique pédagogique restent protégés.</p>
+ </div>
+ <button type="button" class="btn primary" id="open-create-course">+ Créer un cours</button>
+</div>
+
+<dialog class="courses-modal" id="create-course-modal" aria-labelledby="create-course-title">
+ <div class="courses-modal-header">
+  <div><h2 id="create-course-title">Créer un cours</h2><p>Renseignez les informations du cours et son enseignant.</p></div>
+  <button type="button" class="courses-modal-close" id="close-create-course" aria-label="Fermer la fenêtre">×</button>
+ </div>
+ <div class="courses-modal-body">
+  <form method="post" action="{{url_for('courses')}}" class="modern-form" id="create-course-form">
+   <input type="hidden" name="csrf" value="{{csrf}}">
+   <label>Intitulé<input name="name" maxlength="200" required></label>
+   <label>Code<input name="code" placeholder="SIG-101"></label>
+   <label>Classe<select name="class_id" required>{% for x in classes %}<option value="{{x.id}}" {% if selected_class_id|string == x.id|string %}selected{% endif %}>{{x.name}}</option>{% endfor %}</select></label>
+   <label>Enseignant (tapez le début du nom pour le sélectionner)<select name="teacher_id"><option value="">Non affecté</option>{% for x in teachers %}<option value="{{x.id}}">{{x.name}} — {{x.matricule or 'Sans matricule'}}</option>{% endfor %}</select></label>
+   <label>Heures prévues<input name="hours" type="number" min="0.5" step="0.5" value="20" required></label>
+   <label>Coefficient matière<input name="coefficient" type="number" min="0.1" step="0.1" value="1" required></label>
+   <div class="form-actions">
+    <button type="button" class="btn outline" id="cancel-create-course">Annuler</button>
+    <button type="submit" class="btn primary" id="submit-create-course">Créer le cours</button>
+   </div>
+  </form>
+ </div>
+</dialog>
+
+<section class="panel">
+ <div class="panel-title"><h3>Cours existants</h3><span class="muted">{{courses|length}} cours</span></div>
+ <div class="live-filter-bar" data-filter-target="courses-list" aria-label="Filtres dynamiques des cours">
+  <label>Rechercher<input type="search" data-filter="search" placeholder="Nom, code ou matière"></label>
+  <label>Classe<select data-filter="class"><option value="">Toutes les classes</option>{% for cl in classes %}<option value="{{cl.id}}">{{cl.name}}</option>{% endfor %}</select></label>
+  <label>Enseignant<select data-filter="teacher"><option value="">Tous les enseignants</option><option value="unassigned">Non affecté</option>{% for teacher in teachers %}<option value="{{teacher.id}}">{{teacher.name}}</option>{% endfor %}</select></label>
+  <span class="live-filter-count" aria-live="polite"></span>
+ </div>
+ <form id="courses-bulk" method="post" action="{{url_for('courses_bulk')}}">
+  <input type="hidden" name="csrf" value="{{csrf}}">
+  <input type="hidden" name="action" value="delete">
+  <div class="courses-bulk-actions">
+   <span class="muted" id="courses-selected-count">0 cours sélectionné</span>
+   <button type="submit" class="btn outline" id="courses-bulk-delete" style="color:#b42318;border-color:#d4aaa6" disabled>Supprimer les cours sélectionnés</button>
+  </div>
+  <div class="courses-top-scroll" id="courses-top-scroll" aria-label="Défilement horizontal du tableau"><div class="courses-top-scroll-track" id="courses-top-scroll-track"></div></div>
+  <div class="table-scroll courses-table-scroll" id="courses-bottom-scroll">
+   <table id="courses-list">
+    <thead><tr><th><input type="checkbox" id="all-courses" aria-label="Sélectionner tous les cours affichés"></th><th>Cours</th><th>Classe</th><th>Enseignant</th><th>Volume</th><th>Coefficient</th><th>Actions</th></tr></thead>
+    <tbody>{% for c in courses %}
+    <tr data-filter-row data-class="{{c.class_id}}" data-teacher="{{c.teacher_id or 'unassigned'}}">
+     <td><input type="checkbox" name="course_ids" value="{{c.id}}" aria-label="Sélectionner {{c.name}}"></td>
+     <td><b>{{c.name}}</b><br><small>{{c.code}}</small></td>
+     <td>{{c.class_name}}</td>
+     <td>{% if c.teacher_name %}{{c.teacher_matricule or '—'}} — {{c.teacher_name}}{% else %}Non affecté{% endif %}</td>
+     <td>{{c.planned_minutes/60}} h</td>
+     <td>{{c.coefficient}}</td>
+     <td><div class="course-row-actions">
+      <a class="btn outline sm" href="{{url_for('course_edit',cid=c.id)}}">Modifier</a>
+      <a class="btn outline sm" href="{{url_for('course_documents',cid=c.id)}}">Documents ({{c.doc_count}})</a>
+      {% if me.role=='admin' %}
+      <button type="button" class="btn outline sm" style="color:#b42318;border-color:#d4aaa6" data-course-name="{{c.name}}" onclick="forceDeleteCourse(this, {{c.id}})">Supprimer</button>
+      {% else %}
+      <button type="submit" form="delete-single-course" formaction="{{url_for('course_delete',cid=c.id)}}" formmethod="post" class="btn outline sm" style="color:#b42318;border-color:#d4aaa6" onclick="return confirm('Confirmer la suppression de ce cours ? Seul l’admin école peut supprimer un cours ayant un historique.');">Supprimer</button>
+      {% endif %}
+     </div></td>
+    </tr>
+    {% else %}<tr><td colspan="7">Aucun cours.</td></tr>{% endfor %}</tbody>
+   </table>
+  </div>
+ </form>
+ <form id="delete-single-course" method="post"><input type="hidden" name="csrf" value="{{csrf}}"></form>
+ <form id="force-delete-course" method="post"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="force_delete" value="1"><input type="hidden" name="confirm_word" value="SUPPRIMER"></form>
+</section>
 <script>
 function forceDeleteCourse(button,cid){
  const name=button.dataset.courseName||'ce cours';
- const answer=prompt('SUPPRESSION DÉFINITIVE DU COURS : '+name+'\\n\\nCette opération effacera aussi ses séances, présences, évaluations, notes, travaux remis et mémos enseignants. Les bulletins publiés de la classe devront être republiés.\\n\\nPour confirmer, saisissez exactement SUPPRIMER :');
+ const answer=prompt('SUPPRESSION DÉFINITIVE DU COURS : '+name+'\n\nCette opération effacera aussi ses séances, présences, évaluations, notes, travaux remis, documents pédagogiques et mémos enseignants. Les bulletins publiés de la classe devront être republiés.\n\nPour confirmer, saisissez exactement SUPPRIMER :');
  if(answer!=='SUPPRIMER')return;
  const form=document.getElementById('force-delete-course');
  form.action='/courses/'+encodeURIComponent(cid)+'/delete';
  form.requestSubmit();
 }
-document.getElementById('all-courses').onchange=e=>document.querySelectorAll('[name=course_ids]').forEach(x=>x.checked=e.target.checked);document.getElementById('courses-bulk').onsubmit=e=>{if(!document.querySelector('[name=course_ids]:checked')){e.preventDefault();alert('Sélectionnez au moins un cours.');return}if(document.getElementById('courses-action').value==='delete'&&!confirm('Supprimer définitivement les cours sélectionnés sans historique ?'))e.preventDefault()}</script>{% endblock %}
+document.addEventListener('DOMContentLoaded',()=>{
+ const modal=document.getElementById('create-course-modal');
+ const open=document.getElementById('open-create-course');
+ const close=()=>modal.close();
+ open.addEventListener('click',()=>{if(!modal.open)modal.showModal();});
+ document.getElementById('close-create-course').addEventListener('click',close);
+ document.getElementById('cancel-create-course').addEventListener('click',close);
+ modal.addEventListener('click',event=>{if(event.target===modal)close();});
+ const form=document.getElementById('create-course-form');
+ form.addEventListener('submit',()=>{
+   if(!form.checkValidity())return;
+   const submit=document.getElementById('submit-create-course');
+   submit.disabled=true;submit.textContent='Enregistrement…';
+ });
+ // Preserve the entered form values when the modal closes and reopens.
+ const top=document.getElementById('courses-top-scroll');
+ const bottom=document.getElementById('courses-bottom-scroll');
+ const track=document.getElementById('courses-top-scroll-track');
+ const table=document.getElementById('courses-list');
+ const resize=()=>{
+   track.style.width=Math.max(table.scrollWidth,bottom.clientWidth)+'px';
+   top.scrollLeft=bottom.scrollLeft;
+ };
+ let synchronising=false;
+ top.addEventListener('scroll',()=>{
+   if(synchronising)return;
+   synchronising=true;bottom.scrollLeft=top.scrollLeft;synchronising=false;
+ },{passive:true});
+ bottom.addEventListener('scroll',()=>{
+   if(synchronising)return;
+   synchronising=true;top.scrollLeft=bottom.scrollLeft;synchronising=false;
+ },{passive:true});
+ if('ResizeObserver' in window)new ResizeObserver(resize).observe(table);
+ window.addEventListener('resize',resize);
+ resize();
+ const bulk=document.getElementById('courses-bulk');
+ const checks=[...bulk.querySelectorAll('input[name="course_ids"]')];
+ const master=document.getElementById('all-courses');
+ const count=document.getElementById('courses-selected-count');
+ const deleteButton=document.getElementById('courses-bulk-delete');
+ const refresh=()=>{
+   const selected=checks.filter(box=>box.checked).length;
+   count.textContent=selected+' cours sélectionné'+(selected>1?'s':'');
+   deleteButton.disabled=selected===0;
+   const visible=checks.filter(box=>!box.closest('tr').hidden);
+   master.checked=visible.length>0&&visible.every(box=>box.checked);
+   master.indeterminate=visible.some(box=>box.checked)&&!master.checked;
+ };
+ master.addEventListener('change',()=>{
+   for(const box of checks){if(!box.closest('tr').hidden)box.checked=master.checked;}
+   refresh();
+ });
+ checks.forEach(box=>box.addEventListener('change',refresh));
+ const filterBar=document.querySelector('[data-filter-target="courses-list"]');
+ filterBar?.addEventListener('input',()=>queueMicrotask(refresh));
+ filterBar?.addEventListener('change',()=>queueMicrotask(refresh));
+ bulk.addEventListener('submit',event=>{
+   const selected=checks.filter(box=>box.checked).length;
+   if(!selected){event.preventDefault();alert('Sélectionnez au moins un cours.');return;}
+   if(!confirm('Supprimer définitivement les '+selected+' cours sélectionnés sans historique ?'))event.preventDefault();
+ });
+});
+</script>
+{% endblock %}
