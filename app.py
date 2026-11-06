@@ -2059,7 +2059,7 @@ def periods():
         action=request.form.get('action','')
         if action=='create_year':
             label=request.form.get('label','').strip()
-            if not re.fullmatch(r'\\d{4}-\\d{4}',label) or int(label[5:])!=int(label[:4])+1:
+            if not re.fullmatch(r'\d{4}-\d{4}',label) or int(label[5:])!=int(label[:4])+1:
                 flash('Utilisez le format AAAA-AAAA (deux années consécutives).','error')
                 return redirect(url_for('periods'))
             with db() as c:
