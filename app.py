@@ -2666,8 +2666,8 @@ with db() as c:
     c.execute(f"""CREATE TABLE IF NOT EXISTS academic_year_document_copies(
         id {doc_copy_pk},
         school_id INTEGER NOT NULL REFERENCES schools(id),
-        source_document_id INTEGER NOT NULL REFERENCES course_documents(id),
-        target_document_id INTEGER NOT NULL REFERENCES course_documents(id),
+        source_document_id INTEGER NOT NULL REFERENCES course_documents(id) ON DELETE CASCADE,
+        target_document_id INTEGER NOT NULL REFERENCES course_documents(id) ON DELETE CASCADE,
         target_year_id INTEGER NOT NULL REFERENCES years(id),
         UNIQUE(school_id,source_document_id,target_year_id)
     )""")
