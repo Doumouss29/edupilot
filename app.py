@@ -1533,6 +1533,7 @@ def people():
             if not class_id or not has_school('classes',class_id):
                 flash('Sélectionnez une classe de votre établissement.','error')
                 return redirect(url_for('people'))
+            writable_academic_class(class_id,allow_draft=True)
         elif class_id:abort(400,'Seuls les étudiants peuvent être inscrits dans une classe depuis ce formulaire')
         course_ids=request.form.getlist('course_ids') if role=='enseignant' else []
         if course_ids:
@@ -1717,7 +1718,9 @@ def people_import():
     if None in (fi,la,em) or (cl is None and not selected_class_id):
         flash('Colonnes requises : prenom, nom, email. Indiquez une classe dans le formulaire ou dans le fichier.','error')
         return redirect(url_for('people'))
-    classes=allrows('SELECT id,name,year_id FROM classes WHERE school_id=?',(school_id(),))
+    selected_year=selected_academic_year()
+    classes=allrows('SELECT id,name,year_id FROM classes WHERE school_id=? AND year_id=?',
+                    (school_id(),selected_year['id'] if selected_year else -1))
     selected_class=None
     if selected_class_id:
         selected_class=next((c for c in classes if str(c['id'])==selected_class_id),None)
@@ -1753,6 +1756,8 @@ def people_import():
     if errors:
         flash('Import annulé. '+ ' ; '.join(errors),'error')
         return redirect(url_for('people'))
+    for _,_,class_id,_ in prepared:
+        writable_academic_class(class_id,allow_draft=True)
     hashes=[]
     try:
         with db() as c:
