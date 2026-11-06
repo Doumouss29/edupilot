@@ -35,6 +35,7 @@ class TenantAndArchiveSecurityTests(unittest.TestCase):
         self.client=project.app.test_client()
         with self.client.session_transaction() as sess:
             sess["uid"]=1
+            sess["auth_stamp"]=project.session_auth_stamp(project.one("SELECT * FROM users WHERE id=1"))
             sess["csrf"]="test-csrf-token"
 
     def test_archive_from_another_school_is_not_accessible(self):
