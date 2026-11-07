@@ -15,4 +15,32 @@
 {% if a.correction_body %}<p class="assessment-description" style="white-space:pre-wrap">{{a.correction_body}}</p>{% endif %}
 {% if a.correction_filename %}<div class="page-actions"><a class="btn outline sm" href="{{url_for('assessment_correction_file',aid=a.id)}}">↧ Télécharger la correction — {{a.correction_filename}}</a></div>{% endif %}
 </div>
-{% endif %}</div>{% else %}<div class="panel">Aucune évaluation publiée.</div>{% endfor %}</div>{% endblock %}
+{% endif %}
+{% if me.role=='etudiant' %}
+<div style="margin-top:16px;padding:16px;border:1px solid #dce8f1;border-radius:12px">
+<strong>Remettre mon travail</strong>
+{% set mine=submissions.get(a.id,[]) %}
+{% if mine %}<p class="muted">Travail remis le {{mine[0].created_at}} : <a href="{{url_for('assessment_submission_download',aid=a.id,student_id=me.id)}}">{{mine[0].filename}}</a></p>{% endif %}
+{% if a.due_date and a.due_date < today_ci %}
+<p class="muted">Date limite dépassée : la remise est clôturée.</p>
+{% else %}
+<form action="{{url_for('assessment_submit',aid=a.id)}}" method="post" enctype="multipart/form-data" class="modern-form">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<label>Fichier de réponse (15 Mo maximum)<input type="file" name="submission_file" required accept=".pdf,.docx,.doc,.odt,.txt,.html,.htm,.css,.py,.js,.json,.csv,.sql,.zip,.png,.jpg,.jpeg,.xlsx"></label>
+<div class="form-actions"><button class="btn primary sm" type="submit">{{'Remplacer mon travail' if mine else 'Déposer mon travail'}}</button></div>
+</form>
+<p class="muted">Formats acceptés : Word, PDF, HTML, CSS, Python, ZIP et autres formats affichés. Un dépôt remplace le précédent avant l’échéance.</p>
+{% endif %}
+</div>
+{% elif me.role in ('enseignant','admin','administratif') %}
+{% set rendus=submissions.get(a.id,[]) %}
+<div style="margin-top:16px;padding:16px;border:1px solid #dce8f1;border-radius:12px">
+<strong>Travaux rendus : {{rendus|length}}</strong>
+{% if rendus %}
+<div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Étudiant</th><th>Remis le</th><th>Document</th></tr></thead><tbody>
+{% for rendu in rendus %}<tr><td>{{rendu.student_name}}</td><td>{{rendu.created_at}}</td><td><a href="{{url_for('assessment_submission_download',aid=a.id,student_id=rendu.student_id)}}">Télécharger — {{rendu.filename}}</a></td></tr>{% endfor %}
+</tbody></table></div>
+{% else %}<p class="muted">Aucun travail déposé pour cette évaluation.</p>{% endif %}
+</div>
+{% endif %}
+</div>{% else %}<div class="panel">Aucune évaluation publiée.</div>{% endfor %}</div>{% endblock %}
