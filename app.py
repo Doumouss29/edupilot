@@ -4261,7 +4261,7 @@ def assessments():
             if u['role']=='etudiant' and entry['student_id']!=u['id']:continue
             if u['role']=='parent':continue
             submissions.setdefault(entry['assessment_id'],[]).append(entry)
-    return render_template('assessments.html',assessments=rows,courses=choices,attachments=attachments,scores=scores,submissions=submissions)
+    return render_template('assessments.html',assessments=rows,courses=choices,attachments=attachments,scores=scores,submissions=submissions,today_ci=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date().isoformat())
 
 def compile_class_report(class_id, student_ids=None):
     """School-scoped report: evaluation weights are internal to subjects;
