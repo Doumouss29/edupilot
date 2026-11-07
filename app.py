@@ -4043,6 +4043,141 @@ def assessment_file(fid):
     response.headers['X-Content-Type-Options']='nosniff'
     return response
 
+# Private student assessment submissions. One replaceable file per student and evaluation.
+SUBMISSION_ROOT=UPLOAD_DIR/'assessment_submissions'
+SUBMISSION_MAX_BYTES=15*1024*1024
+SUBMISSION_MIMES={
+    '.pdf':'application/pdf','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.doc':'application/msword','.odt':'application/vnd.oasis.opendocument.text',
+    '.txt':'text/plain','.html':'text/plain','.htm':'text/plain',
+    '.css':'text/plain','.py':'text/plain','.js':'text/plain',
+    '.json':'application/json','.csv':'text/plain','.sql':'text/plain',
+    '.zip':'application/zip','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg',
+    '.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+}
+
+
+def submission_assessment(aid):
+    row=one("""SELECT a.id,a.title,a.due_date,a.published,a.school_id,
+           c.class_id,c.teacher_id,cl.year_id,y.status AS year_status
+           FROM assessments a JOIN courses c ON c.id=a.course_id AND c.school_id=a.school_id
+           JOIN classes cl ON cl.id=c.class_id AND cl.school_id=a.school_id
+           JOIN years y ON y.id=cl.year_id AND y.school_id=a.school_id
+           WHERE a.id=? AND a.school_id=?""",(aid,school_id()))
+    if not row:abort(404)
+    return row
+
+
+def submission_authorized(item,student_id):
+    return bool(one("""SELECT 1 FROM enrollments e JOIN users u
+                  ON u.id=e.student_id AND u.school_id=e.school_id
+                  WHERE e.school_id=? AND e.class_id=? AND e.year_id=?
+                  AND e.student_id=? AND u.role='etudiant' AND u.active=1""",
+                  (school_id(),item['class_id'],item['year_id'],student_id)))
+
+
+def submission_path(sid,stored):
+    if not isinstance(stored,str) or not re.fullmatch(r'[0-9a-f]{32}',stored):
+        abort(404)
+    return SUBMISSION_ROOT/str(sid)/stored
+
+
+def validate_submission_file(upload):
+    if not upload or not upload.filename:abort(400,'Sélectionnez un fichier à remettre')
+    filename=upload.filename.replace('\\','/').split('/')[-1].strip()
+    extension=Path(filename).suffix.lower()
+    if (not filename or len(filename)>180 or extension not in SUBMISSION_MIMES
+        or any(ord(ch)<32 or ord(ch)==127 for ch in filename)):
+        abort(400,'Nom ou format du fichier non autorisé')
+    raw=upload.stream.read(SUBMISSION_MAX_BYTES+1)
+    if not raw or len(raw)>SUBMISSION_MAX_BYTES:
+        abort(400,'Le fichier doit être non vide et ne pas dépasser 15 Mo')
+    if extension=='.pdf' and not raw.startswith(b'%PDF-'):abort(400,'PDF invalide')
+    if extension=='.png' and not raw.startswith(bytes((137,80,78,71,13,10,26,10))):
+        abort(400,'PNG invalide')
+    if extension in ('.jpg','.jpeg') and not raw.startswith(bytes((255,216,255))):
+        abort(400,'Image JPEG invalide')
+    if extension in ('.docx','.xlsx'):
+        try:validate_office_archive(raw,extension[1:])
+        except ValueError:abort(400,'Document Office invalide')
+    if extension=='.zip':
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                members=archive.infolist()
+                if len(members)>1000 or sum(i.file_size for i in members)>50*1024*1024:
+                    abort(400,'Archive ZIP trop volumineuse')
+                if any(i.flag_bits&1 or i.filename.startswith('/') or
+                       '..' in i.filename.replace('\\','/').split('/') for i in members):
+                    abort(400,'Archive ZIP non sécurisée')
+                if archive.testzip() is not None:abort(400,'Archive ZIP endommagée')
+        except (zipfile.BadZipFile,RuntimeError,OSError):
+            abort(400,'Archive ZIP invalide')
+    return filename,raw,SUBMISSION_MIMES[extension]
+
+
+@app.post('/assessments/<int:aid>/submit')
+@roles('etudiant')
+def assessment_submit(aid):
+    item=submission_assessment(aid)
+    u=current_user()
+    if not item['published'] or not submission_authorized(item,u['id']):abort(403)
+    if item['year_status']!='active':abort(403,'Année scolaire non ouverte aux remises')
+    if item['due_date']:
+        try:
+            deadline=datetime.date.fromisoformat(item['due_date'])
+        except ValueError:abort(400,'Échéance de l’évaluation invalide')
+        if datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()>deadline:
+            abort(403,'La date limite de remise est dépassée')
+    filename,raw,mime=validate_submission_file(request.files.get('submission_file'))
+    stored=secrets.token_hex(16)
+    target=submission_path(school_id(),stored)
+    target.parent.mkdir(parents=True,exist_ok=True)
+    with target.open('xb') as stream:stream.write(raw)
+    prior=one('SELECT filepath FROM submissions WHERE assessment_id=? AND student_id=?',
+              (aid,u['id']))
+    try:
+        with db() as c:
+            c.execute("""INSERT INTO submissions(assessment_id,student_id,filename,filepath,created_at)
+                VALUES (?,?,?,?,CURRENT_TIMESTAMP)
+                ON CONFLICT(assessment_id,student_id) DO UPDATE SET
+                filename=excluded.filename,filepath=excluded.filepath,created_at=CURRENT_TIMESTAMP""",
+                (aid,u['id'],filename,stored))
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    if prior and re.fullmatch(r'[0-9a-f]{32}',prior['filepath'] or ''):
+        submission_path(school_id(),prior['filepath']).unlink(missing_ok=True)
+    audit('assessment.submission',f'{aid}:{u["id"]}')
+    flash('Votre travail a été déposé avec succès.','success')
+    return redirect(url_for('assessments'))
+
+
+@app.get('/assessments/<int:aid>/submissions/<int:student_id>/download')
+@roles('etudiant','enseignant','admin','administratif')
+def assessment_submission_download(aid,student_id):
+    item=submission_assessment(aid)
+    u=current_user()
+    if u['role']=='etudiant':
+        if student_id!=u['id'] or not submission_authorized(item,u['id']):abort(403)
+    elif u['role']=='enseignant' and item['teacher_id']!=u['id']:
+        abort(403)
+    if u['role'] not in ('etudiant','enseignant','admin','administratif'):abort(403)
+    submission=one("""SELECT s.filename,s.filepath FROM submissions s
+        JOIN users student ON student.id=s.student_id AND student.school_id=?
+        WHERE s.assessment_id=? AND s.student_id=?""",(school_id(),aid,student_id))
+    if not submission:abort(404)
+    path=submission_path(school_id(),submission['filepath'])
+    if not path.is_file():abort(404)
+    ext=Path(submission['filename']).suffix.lower()
+    response=send_file(path,download_name=submission['filename'],
+                       mimetype=SUBMISSION_MIMES.get(ext,'application/octet-stream'),
+                       as_attachment=True,conditional=False)
+    response.headers['Cache-Control']='private,no-store'
+    response.headers['X-Content-Type-Options']='nosniff'
+    response.headers['Content-Security-Policy']="default-src 'none'; sandbox"
+    return response
+
+
 @app.route('/assessments',methods=['GET','POST'])
 @login_required
 def assessments():
@@ -4115,7 +4250,18 @@ def assessments():
                    WHERE c.school_id=? AND cl.year_id=?""",
                    (school_id(),selected['id'] if selected else -1))
     if u['role']=='enseignant':choices=[x for x in choices if x['teacher_id']==u['id']]
-    return render_template('assessments.html',assessments=rows,courses=choices,attachments=attachments,scores=scores)
+    submission_rows=allrows("""SELECT s.assessment_id,s.student_id,s.filename,s.created_at,
+        st.name student_name FROM submissions s
+        JOIN assessments a ON a.id=s.assessment_id AND a.school_id=?
+        JOIN users st ON st.id=s.student_id AND st.school_id=a.school_id
+        WHERE a.school_id=? ORDER BY s.created_at DESC,s.id DESC""",(school_id(),school_id()))
+    submissions={}
+    for entry in submission_rows:
+        if entry['assessment_id'] in permitted:
+            if u['role']=='etudiant' and entry['student_id']!=u['id']:continue
+            if u['role']=='parent':continue
+            submissions.setdefault(entry['assessment_id'],[]).append(entry)
+    return render_template('assessments.html',assessments=rows,courses=choices,attachments=attachments,scores=scores,submissions=submissions)
 
 def compile_class_report(class_id, student_ids=None):
     """School-scoped report: evaluation weights are internal to subjects;
