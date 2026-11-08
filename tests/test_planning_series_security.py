@@ -64,6 +64,28 @@ class PlanningSeriesSecurityTests(unittest.TestCase):
         self.assertIsNone(project.one('SELECT id FROM lessons WHERE id=1'))
         self.assertIsNotNone(project.one('SELECT id FROM lessons WHERE id=2'))
 
+    def test_ajax_deletion_returns_json_without_redirect(self):
+        self.actor(1)
+        response=self.client.post('/lessons/1/delete',
+            data={'csrf':'series-csrf','scope':'occurrence'},
+            headers={'Accept':'application/json'})
+        self.assertEqual(response.status_code,200)
+        self.assertTrue(response.is_json)
+        self.assertEqual(response.get_json()['ok'],True)
+        self.assertEqual(response.get_json()['deleted'],1)
+        self.assertIsNone(project.one('SELECT id FROM lessons WHERE id=1'))
+
+    def test_ajax_series_deletion_keeps_historical_records(self):
+        self.actor(1)
+        response=self.client.post('/lessons/1/delete',
+            data={'csrf':'series-csrf','scope':'series'},
+            headers={'Accept':'application/json'})
+        self.assertEqual(response.status_code,200)
+        self.assertTrue(response.get_json()['ok'])
+        self.assertEqual(response.get_json()['deleted'],2)
+        self.assertEqual(response.get_json()['hidden'],1)
+        self.assertEqual(project.one('SELECT hidden_from_planning FROM lessons WHERE id=3')['hidden_from_planning'],1)
+
     def test_deleting_series_removes_pending_and_hides_historical(self):
         self.actor(1)
         self.assertEqual(self.delete(1,'series').status_code,302)
