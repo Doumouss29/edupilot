@@ -267,7 +267,9 @@ eventDidMount:function(info){const status=info.event.extendedProps.status;const 
  showEdit.hidden=!editable;
  del.action='/lessons/'+lid+'/delete';
  const recurring=Boolean(p.seriesId);
- deleteScope.querySelector('option[value="series"]').disabled=!recurring;
+ const seriesOption=deleteScope.querySelector('option[value="series"]');
+ seriesOption.disabled=!recurring;
+ seriesOption.hidden=!recurring;
  deleteScope.value='occurrence';
  showDelete.hidden=false;
  showDelete.onclick=()=>showOnly(del);
