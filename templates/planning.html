@@ -315,6 +315,40 @@ editLessonForm?.addEventListener('submit',e=>{
 {% endif %}
 const actionDialog=document.getElementById('lesson-action-panel');
 {% if me.role in ('admin','administratif') %}
+// Delete in place: keep the current calendar date, view, filters and scroll.
+const modalDeleteForm=document.getElementById('lesson-delete-calendar-form');
+modalDeleteForm?.addEventListener('submit',async event=>{
+ event.preventDefault();
+ const submit=modalDeleteForm.querySelector('button[type="submit"]');
+ const hint=document.getElementById('lesson-action-hint');
+ if(submit){submit.disabled=true;submit.textContent='Suppression en cours…';}
+ try{
+  const response=await fetch(modalDeleteForm.action,{
+   method:'POST',
+   headers:{'Accept':'application/json'},
+   body:new FormData(modalDeleteForm),
+   credentials:'same-origin'
+  });
+  const type=response.headers.get('Content-Type')||'';
+  const result=type.includes('application/json')?await response.json():null;
+  if(!response.ok||!result?.ok){
+   throw new Error(result?.error||'Suppression impossible. Vérifiez vos droits et réessayez.');
+  }
+  if(actionDialog?.close)actionDialog.close();
+  else actionDialog?.removeAttribute('open');
+  calendarItems=null;
+  c.refetchEvents();
+  const notice=document.createElement('div');
+  notice.className='flash success';
+  notice.setAttribute('role','status');
+  notice.textContent=result.message||'Séance retirée du planning.';
+  document.querySelector('.calendar-panel')?.prepend(notice);
+ }catch(error){
+  if(hint)hint.textContent=error.message||'Erreur lors de la suppression.';
+ }finally{
+  if(submit){submit.disabled=false;submit.textContent='Confirmer la suppression';}
+ }
+});
 const modalEditForm=document.getElementById('lesson-edit-calendar-form');
 modalEditForm?.addEventListener('submit',async event=>{
  event.preventDefault();
