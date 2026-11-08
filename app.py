@@ -3547,6 +3547,7 @@ def planning():
             flash('Date, heure, durée ou récurrence invalide. Une séance doit finir le même jour et durer de 0,5 à 12 h.','error')
             return redirect(url_for('planning'))
         room=request.form.get('room','').strip()[:80]
+        series_id=secrets.token_hex(16) if mode=='hebdomadaire' and len(dates)>1 else None
         created=[]
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
@@ -3564,7 +3565,7 @@ def planning():
                     session['planning_result']={'ok':False,'text':f'Conflit le {dt.strftime("%d/%m/%Y")} : classe, enseignant ou salle déjà occupé(e). Aucune séance créée.'}
                     flash(f'Conflit le {dt.strftime("%d/%m/%Y")} : classe, enseignant ou salle déjà occupé(e). Aucune séance ajoutée.','error')
                     return redirect(url_for('planning'))
-                cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room) VALUES (?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room))
+                cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room,series_id) VALUES (?,?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room,series_id))
                 created.append(cur.lastrowid)
         notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']],include_management=False,skip_teacher_email=True,email_roles=())
         audit('lesson.created',','.join(str(x) for x in created))
@@ -3587,6 +3588,18 @@ def planning():
         args.append(u['id'])
     events=allrows(query,args)
     return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,video_classes=allrows("""SELECT cl.id,cl.name,cl.video_url,cl.filiere_id,f.name filiere_name,y.label academic_year FROM classes cl JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id WHERE cl.school_id=? AND cl.video_url IS NOT NULL AND cl.video_url<>'' ORDER BY LOWER(f.name),LOWER(cl.name)""",(school_id(),)) if u['role'] in ('admin','administratif') else [],rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],courses=allrows('SELECT c.* FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? AND cl.year_id=? ORDER BY c.name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [],classes=allrows('SELECT id,name FROM classes WHERE school_id=? AND year_id=? ORDER BY name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [])
+
+# Keep recurring sessions linked without inferring series from matching dates or courses.
+with db() as c:
+    if DB_ENGINE=='postgresql':
+        columns={row['column_name'] for row in c.execute("""SELECT column_name
+            FROM information_schema.columns WHERE table_schema=current_schema()
+            AND table_name='lessons'""").fetchall()}
+    else:
+        columns={row['name'] for row in c.execute('PRAGMA table_info(lessons)').fetchall()}
+    if 'series_id' not in columns:
+        c.execute('ALTER TABLE lessons ADD COLUMN series_id TEXT')
+
 
 def lesson_utc_iso(value):
     """Existing lesson timestamps are historical Africa/Abidjan local times."""
@@ -3797,21 +3810,50 @@ def declare(lid):
 @app.post('/lessons/<int:lid>/delete')
 @roles('admin','administratif')
 def delete_lesson(lid):
-    """Correct a planning mistake: remove an unstarted, unhistorized lesson."""
+    """Delete an occurrence or a tracked recurring series within one school.
+
+    Historical/declared lessons are hidden instead of destroyed so that grades,
+    attendance, taught hours and audit evidence remain accessible.
+    """
+    scope=request.form.get('scope','occurrence')
+    if scope not in ('occurrence','series'):abort(400,'Portée de suppression invalide')
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
         lesson=editable_lesson_row(c,lid)
         if not lesson:abort(404)
-        # Never erase a lesson already started or carrying pedagogic records.
-        lesson_start=datetime.datetime.fromisoformat(lesson['starts_at'])
-        now_abidjan=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).replace(tzinfo=None)
-        if lesson_start<=now_abidjan or not lesson_editable(c,lesson):
-            flash('Suppression impossible : séance commencée ou avec historique. Utilisez Annuler si elle ne doit pas avoir lieu.','error')
-            return redirect(url_for('planning'))
-        c.execute('DELETE FROM lessons WHERE id=? AND school_id=?',(lid,school_id()))
-    audit('lesson.deleted_planning_error',str(lid))
-    flash('Séance supprimée du planning. Elle ne figurera pas comme annulée.','success')
+        writable_academic_class(lesson['class_id'],allow_draft=True)
+        if scope=='series':
+            if not lesson['series_id']:abort(400,'Cette séance ne fait pas partie d’une série identifiée')
+            rows=c.execute("""SELECT l.*,co.class_id FROM lessons l
+                JOIN courses co ON co.id=l.course_id AND co.school_id=l.school_id
+                WHERE l.school_id=? AND l.series_id=? AND l.hidden_from_planning=0""",
+                (school_id(),lesson['series_id'])).fetchall()
+        else:
+            rows=[lesson]
+        # A recurring series must not silently cross an academic-year boundary
+        # where archived records are immutable.
+        for row in rows:writable_academic_class(row['class_id'],allow_draft=True)
+        hard_deleted=0
+        hidden=0
+        for row in rows:
+            has_attendance=bool(c.execute(
+                'SELECT 1 FROM attendance WHERE lesson_id=? LIMIT 1',(row['id'],)).fetchone())
+            has_history=(row['status']!='programmee' or row['validated']
+                         or row['actual_minutes'] or has_attendance
+                         or datetime.datetime.fromisoformat(row['starts_at'])<=
+                         datetime.datetime.now(ZoneInfo('Africa/Abidjan')).replace(tzinfo=None))
+            if has_history:
+                c.execute('UPDATE lessons SET hidden_from_planning=1 WHERE id=? AND school_id=?',
+                          (row['id'],school_id()))
+                hidden+=1
+            else:
+                c.execute('DELETE FROM lessons WHERE id=? AND school_id=?',(row['id'],school_id()))
+                hard_deleted+=1
+    audit('lesson.deleted_from_planning',f'{lid}:{scope}:removed={hard_deleted}:hidden={hidden}')
+    flash(f'{hard_deleted+hidden} séance(s) retirée(s) du planning.'+
+          (' Les historiques pédagogiques ont été conservés.' if hidden else ''),'success')
     return redirect(url_for('planning'))
+
 
 @app.post('/lessons/<int:lid>/hide-cancelled')
 @roles('admin','administratif')
@@ -4813,7 +4855,7 @@ def attendance_save(lid):
 def planning_json():
     u=current_user()
     if u['role']=='superadmin':abort(403)
-    sql='''SELECT l.id,l.course_id,l.starts_at,l.ends_at,l.status,l.room,l.validated,l.actual_minutes,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? AND l.hidden_from_planning=0'''; args=[school_id()]
+    sql='''SELECT l.id,l.course_id,l.starts_at,l.ends_at,l.status,l.room,l.validated,l.actual_minutes,l.series_id,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? AND l.hidden_from_planning=0'''; args=[school_id()]
     selected=selected_academic_year()
     if selected:
         sql+=' AND cl.year_id=?'
@@ -4826,7 +4868,7 @@ def planning_json():
     elif u['role']=='parent':
         sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id AND e.school_id=p.school_id WHERE p.school_id=l.school_id AND p.parent_id=? AND e.class_id=cl.id AND e.year_id=cl.year_id AND p.active=1 AND cl.parents_enabled=1)'
         args.append(u['id'])
-    response=jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':lesson_utc_iso(x['starts_at']),'end':lesson_utc_iso(x['ends_at']),'extendedProps':{'status':x['status'],'courseId':x['course_id'],'startsAt':x['starts_at'],'endsAt':x['ends_at'],'editable':x['status']=='programmee' and not x['validated'] and not x['actual_minutes'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
+    response=jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':lesson_utc_iso(x['starts_at']),'end':lesson_utc_iso(x['ends_at']),'extendedProps':{'status':x['status'],'seriesId':x['series_id'],'courseId':x['course_id'],'startsAt':x['starts_at'],'endsAt':x['ends_at'],'editable':x['status']=='programmee' and not x['validated'] and not x['actual_minutes'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
     response.headers['Cache-Control']='private, max-age=10'
     response.headers['Vary']='Cookie'
     return response
