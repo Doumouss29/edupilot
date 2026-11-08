@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 <p id="lesson-action-details"></p>
 <div class="planning-action-switch">
 <button type="button" class="btn outline sm" id="show-lesson-validate">Valider</button>
-{% if me.role in ('admin','administratif') %}<button type="button" class="btn outline sm" id="show-lesson-edit">Modifier</button><button type="button" class="btn danger sm" id="show-lesson-delete">Supprimer</button>{% endif %}
+{% if me.role in ('admin','administratif') %}<button type="button" class="btn outline sm" id="show-lesson-edit">Modifier</button>{% endif %}
 <button type="button" class="btn outline sm" id="show-lesson-cancel">Annuler</button>
 </div>
 <p id="lesson-action-hint" class="muted"></p>
@@ -244,7 +244,6 @@ eventDidMount:function(info){const status=info.event.extendedProps.status;const 
  {% if me.role in ('admin','administratif') %}
  const edit=document.getElementById('lesson-edit-calendar-form');
  const showEdit=document.getElementById('show-lesson-edit');
- const showDelete=document.getElementById('show-lesson-delete');
  const del=document.getElementById('lesson-delete-calendar-form');
  const deleteScope=document.getElementById('lesson-delete-scope');
  forms.push(edit,del);
@@ -271,8 +270,6 @@ eventDidMount:function(info){const status=info.event.extendedProps.status;const 
  seriesOption.disabled=!recurring;
  seriesOption.hidden=!recurring;
  deleteScope.value='occurrence';
- showDelete.hidden=false;
- showDelete.onclick=()=>showOnly(del);
  edit.action='/lessons/'+lid+'/edit';
  edit.elements.namedItem('course_id').value=String(p.courseId||'');
  const dateTime=String(p.startsAt||'');
@@ -292,6 +289,10 @@ eventDidMount:function(info){const status=info.event.extendedProps.status;const 
  showEdit.onclick=()=>showOnly(edit);
  {% endif %}
  forms.forEach(f=>{if(f)f.hidden=true;});
+ {% if me.role in ('admin','administratif') %}
+ // Directly show the only deletion control; no redundant "Supprimer" action button.
+ del.hidden=false;
+ {% endif %}
  if(!canValidate && !completed)hint.textContent='Validation disponible à partir de 15 minutes avant la fin.';
  if(completed)hint.textContent='Cette séance est déjà déclarée ou annulée.';
  if(!dialog.open){if(typeof dialog.showModal==='function')dialog.showModal();else dialog.setAttribute('open','');}
