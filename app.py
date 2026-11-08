@@ -3850,8 +3850,11 @@ def delete_lesson(lid):
                 c.execute('DELETE FROM lessons WHERE id=? AND school_id=?',(row['id'],school_id()))
                 hard_deleted+=1
     audit('lesson.deleted_from_planning',f'{lid}:{scope}:removed={hard_deleted}:hidden={hidden}')
-    flash(f'{hard_deleted+hidden} séance(s) retirée(s) du planning.'+
-          (' Les historiques pédagogiques ont été conservés.' if hidden else ''),'success')
+    message=(f'{hard_deleted+hidden} séance(s) retirée(s) du planning.'+
+             (' Les historiques pédagogiques ont été conservés.' if hidden else ''))
+    if request.accept_mimetypes.best=='application/json':
+        return jsonify(ok=True,message=message,deleted=hard_deleted,hidden=hidden)
+    flash(message,'success')
     return redirect(url_for('planning'))
 
 
