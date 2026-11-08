@@ -29,8 +29,9 @@ class PlanningSeriesSecurityTests(unittest.TestCase):
             for uid,sid,role in [(1,1,'admin'),(2,1,'administratif'),(3,1,'enseignant'),(4,1,'etudiant'),(5,2,'admin')]:
                 c.execute("INSERT INTO users(id,school_id,name,email,password_hash,role) VALUES (?,?,?,?,?,?)",
                     (uid,sid,'Tester',f'test{uid}@invalid.test',generate_password_hash('TestPassword123'),role))
-            c.execute("""INSERT INTO years(id,school_id,label,status) VALUES
-                (1,1,'2026-2027','active'),(2,2,'2026-2027','active'),(3,1,'2025-2026','archived')""")
+            c.execute("""INSERT INTO years(id,school_id,label,is_active,status) VALUES
+                (1,1,'2026-2027',1,'active'),(2,2,'2026-2027',1,'active'),
+                (3,1,'2025-2026',0,'archived')""")
             c.execute("""INSERT INTO classes(id,school_id,year_id,name) VALUES
                 (1,1,1,'A1'),(2,2,2,'B1'),(3,1,3,'Archive')""")
             c.execute("""INSERT INTO courses(id,school_id,class_id,name,code,teacher_id) VALUES
