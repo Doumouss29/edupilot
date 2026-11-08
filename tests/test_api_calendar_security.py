@@ -26,6 +26,7 @@ class ApiAndCalendarSecurityTests(unittest.TestCase):
             c.execute("ALTER TABLE years ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
             c.execute("ALTER TABLE classes ADD COLUMN filiere_id INTEGER")
             c.execute("ALTER TABLE lessons ADD COLUMN hidden_from_planning INTEGER NOT NULL DEFAULT 0")
+            c.execute("ALTER TABLE lessons ADD COLUMN series_id TEXT")
             c.execute("CREATE TABLE IF NOT EXISTS filieres(id INTEGER PRIMARY KEY, school_id INTEGER, name TEXT)")
             c.execute("INSERT INTO schools(id,name,slug) VALUES (1,'School A','a'),(2,'School B','b')")
             for uid,sid,role in [(1,1,'etudiant'),(2,1,'parent'),(3,1,'enseignant'),
