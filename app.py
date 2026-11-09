@@ -1507,7 +1507,14 @@ def school_update(sid):
                       (name,slug,plan,end,campus_enabled,planning_mode,sid))
             # A switch to private mode retracts existing publication until share.
             if school['planning_mode']!='private' and planning_mode=='private':
-                c.execute('UPDATE lessons SET planning_shared=0 WHERE school_id=?',(sid,))
+                # Existing archived academic-year records remain readable;
+                # only current/draft teaching schedules return to private draft.
+                c.execute("""UPDATE lessons SET planning_shared=0
+                    WHERE school_id=? AND course_id IN (
+                       SELECT co.id FROM courses co
+                       JOIN classes cl ON cl.id=co.class_id AND cl.school_id=co.school_id
+                       JOIN years y ON y.id=cl.year_id AND y.school_id=co.school_id
+                       WHERE co.school_id=? AND y.status<>'archived')""",(sid,sid))
             if logo:
                 c.execute('UPDATE schools SET logo=?,logo_mime=? WHERE id=?',(logo,mime,sid))
             elif request.form.get('remove_logo')=='1':
