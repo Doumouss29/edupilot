@@ -666,96 +666,13 @@ def teacher_week_bounds(day):
 
 
 def send_all_teacher_weekly_schedules():
-    """One consolidated email per address/week, including all school affiliations."""
-    today=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()
-    target=today+datetime.timedelta(days=1) if today.weekday()==6 else today
-    monday,end=teacher_week_bounds(target)
-    scheduled=allrows("""SELECT l.school_id,l.teacher_id,l.starts_at,l.ends_at,
-            c.name course,cl.name class_name,l.room,
-            u.name teacher_name,u.email,s.name school_name
-        FROM lessons l JOIN courses c ON c.id=l.course_id
-        JOIN classes cl ON cl.id=c.class_id
-        JOIN users u ON u.id=l.teacher_id AND u.school_id=l.school_id
-        JOIN schools s ON s.id=l.school_id
-        WHERE l.status='programmee' AND l.starts_at>=? AND l.starts_at<?
-          AND u.active=1 AND u.role IN ('enseignant','admin')
-        ORDER BY l.starts_at,l.id""",(monday.isoformat(),end.isoformat()))
-    grouped={}
-    for item in scheduled:
-        address=(item['email'] or '').strip().lower()
-        if not address or is_pending_teacher_email(address):continue
-        grouped.setdefault(address,[]).append(item)
-    sent=0
-    for address,items in grouped.items():
-        first=items[0]
-        with db() as c:
-            claimed=c.execute("""INSERT INTO teacher_weekly_email_by_address(email,week_start,sent_at)
-                VALUES (?,?,?) ON CONFLICT(email,week_start) DO NOTHING""",
-                (address,monday.isoformat(),datetime.datetime.now(datetime.timezone.utc).isoformat()))
-            if claimed.rowcount!=1:continue
-        entries=[]
-        for item in items:
-            start=datetime.datetime.fromisoformat(item['starts_at'])
-            finish=datetime.datetime.fromisoformat(item['ends_at'])
-            entries.append(f"- {start.strftime('%d/%m/%Y %H:%M')}–{finish.strftime('%H:%M')} : "
-                           f"{item['course']} — {item['class_name']} — {item['school_name']}"
-                           +(f" — {item['room']}" if item['room'] else ''))
-        body=(f"Bonjour {first['teacher_name']},\n\n"
-              f"Voici votre planning du {monday.strftime('%d/%m/%Y')} au "
-              f"{(end-datetime.timedelta(days=1)).strftime('%d/%m/%Y')} (heures d'Abidjan) :\n\n"
-              +"\n".join(entries)
-              +"\n\nRetrouvez votre planning actualisé sur https://edupilot.ci/planning."
-              +"\nLes changements importants restent notifiés dans EduPilot.\n")
-        if send_brevo_email(address,'EduPilot — Votre planning hebdomadaire',body,first['school_id'],first['teacher_id']):
-            sent+=1
-        else:
-            execute('DELETE FROM teacher_weekly_email_by_address WHERE email=? AND week_start=?',
-                    (address,monday.isoformat()))
-    return sent
+    """Deprecated: automatic planning emails are disabled by subscription policy."""
+    return 0
 
 
 def send_all_student_weekly_schedules():
-    """Weekly student schedules across schools, one message per email and week."""
-    today=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()
-    monday,end=teacher_week_bounds(today+datetime.timedelta(days=1))
-    rows=allrows("""SELECT DISTINCT l.id,l.starts_at,l.ends_at,l.room,
-        c.name course_name,cl.name class_name,s.name school_name,
-        u.name student_name,u.email,u.id student_id,u.school_id
-        FROM lessons l JOIN courses c ON c.id=l.course_id AND c.school_id=l.school_id
-        JOIN classes cl ON cl.id=c.class_id AND cl.school_id=l.school_id
-        JOIN enrollments e ON e.class_id=cl.id AND e.school_id=l.school_id AND e.year_id=cl.year_id
-        JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id
-        JOIN schools s ON s.id=u.school_id
-        WHERE l.status='programmee' AND l.starts_at>=? AND l.starts_at<?
-        AND u.role='etudiant' AND u.active=1
-        ORDER BY u.email,l.starts_at,l.id""",(monday.isoformat(),end.isoformat()))
-    grouped={}
-    for row in rows:
-        address=(row['email'] or '').strip().lower()
-        if address:grouped.setdefault(address,[]).append(row)
-    sent=0
-    for address,items in grouped.items():
-        with db() as c:
-            claimed=c.execute("""INSERT INTO teacher_weekly_email_by_address(email,week_start,sent_at)
-                VALUES (?,?,?) ON CONFLICT(email,week_start) DO NOTHING""",
-                ('student:'+address,monday.isoformat(),datetime.datetime.now(datetime.timezone.utc).isoformat()))
-            if claimed.rowcount!=1:continue
-        first=items[0]
-        entries=[]
-        for item in items:
-            a=datetime.datetime.fromisoformat(item['starts_at'])
-            b=datetime.datetime.fromisoformat(item['ends_at'])
-            entries.append(f"- {a:%d/%m/%Y %H:%M}–{b:%H:%M} : {item['course_name']} — {item['class_name']} — {item['school_name']}"
-                           +(f" — salle {item['room']}" if item['room'] else ''))
-        message=(f"Bonjour {first['student_name']},\\n\\nVoici votre planning de la semaine du {monday:%d/%m/%Y} au "
-                 f"{(end-datetime.timedelta(days=1)):%d/%m/%Y} (GMT) :\\n\\n"
-                 +"\\n".join(entries)+"\\n\\nConsultez votre calendrier actualisé : https://edupilot.ci/planning")
-        if send_brevo_email(address,'EduPilot — Votre planning hebdomadaire',message,first['school_id'],first['student_id']):
-            sent+=1
-        else:
-            execute('DELETE FROM teacher_weekly_email_by_address WHERE email=? AND week_start=?',
-                    ('student:'+address,monday.isoformat()))
-    return sent
+    """Deprecated: planning emails are now dispatched only via /planning/share."""
+    return 0
 
 
 def notify_event(course_ids,message,href,teacher_ids=(),include_parents=True,include_management=True,skip_teacher_email=False,email_roles=None,defer_external=False):
