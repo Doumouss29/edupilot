@@ -3588,17 +3588,17 @@ def planning_email_content(recipient,lessons,monday,end,school_name):
     return plain,markup
 
 
-def planning_mail_recipients(sid,monday,end):
+def planning_mail_recipients(sid,monday,end,year_id):
     """Build one lesson list per user, strictly within their own school and classes."""
     lessons=allrows("""SELECT l.id,l.school_id,l.teacher_id,l.starts_at,l.ends_at,l.room,
         c.name course_name,cl.id class_id,cl.name class_name
         FROM lessons l JOIN courses c ON c.id=l.course_id AND c.school_id=l.school_id
         JOIN classes cl ON cl.id=c.class_id AND cl.school_id=l.school_id
-        WHERE l.school_id=? AND l.hidden_from_planning=0
+        WHERE l.school_id=? AND cl.year_id=? AND l.hidden_from_planning=0
         AND l.starts_at>=? AND l.starts_at<?
         AND l.status NOT IN ('annulee','reportee')
         AND (l.planning_shared=1 OR (SELECT planning_mode FROM schools WHERE id=l.school_id)='dynamic')
-        ORDER BY l.starts_at,l.id""",(sid,monday.isoformat(),end.isoformat()))
+        ORDER BY l.starts_at,l.id""",(sid,year_id,monday.isoformat(),end.isoformat()))
     if not lessons:return {}
     class_ids={item['class_id'] for item in lessons}
     users=allrows("""SELECT id,name,email,role FROM users
@@ -3644,7 +3644,7 @@ def planning_share():
                    WHERE c.school_id=? AND cl.year_id=?)""",
                 (sid,sid,year['id']))
     school=one('SELECT name FROM schools WHERE id=?',(sid,))
-    recipients=planning_mail_recipients(sid,monday,end)
+    recipients=planning_mail_recipients(sid,monday,end,year['id'])
     queued=0
     with db() as c:
         for uid,(user,lessons) in recipients.items():
