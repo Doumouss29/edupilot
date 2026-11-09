@@ -109,6 +109,16 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
         self.actor(5)
         self.assertEqual([row['id'] for row in self.client.get('/api/planning').get_json()],[1])
 
+    def test_ajax_share_keeps_calendar_without_redirect(self):
+        self.actor(1)
+        response=self.client.post('/planning/share',data={
+            'csrf':'publication-csrf','week':'2026-11-09'},
+            headers={'Accept':'application/json'})
+        self.assertEqual(response.status_code,200)
+        self.assertTrue(response.is_json)
+        self.assertTrue(response.get_json()['ok'])
+        self.assertEqual(response.get_json()['queued'],3)
+
     def test_share_queues_one_email_per_teacher_and_student(self):
         self.actor(1)
         self.share()
