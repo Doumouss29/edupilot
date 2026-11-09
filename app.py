@@ -539,6 +539,13 @@ with db() as c:
         status TEXT NOT NULL DEFAULT 'pending',
         attempts INTEGER NOT NULL DEFAULT 0, claimed_at INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+    if DB_ENGINE=='postgresql':
+        fields={row['column_name'] for row in c.execute("""SELECT column_name FROM information_schema.columns
+            WHERE table_schema=current_schema() AND table_name='notification_delivery_queue'""").fetchall()}
+    else:
+        fields={row['name'] for row in c.execute('PRAGMA table_info(notification_delivery_queue)').fetchall()}
+    if 'html_content' not in fields:
+        c.execute('ALTER TABLE notification_delivery_queue ADD COLUMN html_content TEXT')
 
 
 def enqueue_external_notification(sid,recipients,message,href,skip_email_ids=(),email_roles=None):
@@ -3629,17 +3636,22 @@ def planning_share():
                 (sid,sid,year['id']))
     school=one('SELECT name FROM schools WHERE id=?',(sid,))
     recipients=planning_mail_recipients(sid,monday,end)
-    accepted=0
-    for uid,(user,lessons) in recipients.items():
-        plain,markup=planning_email_content(user,lessons,monday,end,school['name'])
-        if send_brevo_email(user['email'],'EduPilot — '+
-                            f'Planning du {monday:%d/%m/%Y} au {(end-datetime.timedelta(days=1)):%d/%m/%Y}',
-                            plain,sid,uid,html_content=markup):
-            accepted+=1
-    audit('planning.shared',f'{mode}:{monday.isoformat()}:emails_accepted={accepted}')
+    queued=0
+    with db() as c:
+        for uid,(user,lessons) in recipients.items():
+            plain,markup=planning_email_content(user,lessons,monday,end,school['name'])
+            address=(user['email'] or '').strip().lower()
+            if not address:continue
+            subject='EduPilot — '+f'Planning du {monday:%d/%m/%Y} au {(end-datetime.timedelta(days=1)):%d/%m/%Y}'
+            c.execute("""INSERT INTO notification_delivery_queue
+                (school_id,user_id,channel,address,subject,message,href,html_content)
+                VALUES (?,?,'email',?,?,?,'/planning',?)""",
+                (sid,uid,address,subject,plain,markup))
+            queued+=1
+    audit('planning.shared',f'{mode}:{monday.isoformat()}:emails_queued={queued}')
     flash(f'Planning '+('partagé' if mode=='private' else 'envoyé')+
-          f'. {accepted} e-mail(s) accepté(s) par le service de messagerie'+
-          (f' sur {len(recipients)} destinataire(s).' if recipients else '. Aucun cours prévu pour cette semaine.'),'success')
+          f'. {queued} e-mail(s) mis en file pour les destinataires concernés.'+
+          (' Aucun cours prévu pour cette semaine.' if not recipients else ''),'success')
     return redirect(url_for('planning'))
 
 
@@ -3741,7 +3753,7 @@ def planning():
     if u['role'] not in ('admin','administratif') and school_planning_mode()=='private':
         query+=' AND l.planning_shared=1'
     events=allrows(query,args)
-    return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,video_classes=allrows("""SELECT cl.id,cl.name,cl.video_url,cl.filiere_id,f.name filiere_name,y.label academic_year FROM classes cl JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id WHERE cl.school_id=? AND cl.video_url IS NOT NULL AND cl.video_url<>'' ORDER BY LOWER(f.name),LOWER(cl.name)""",(school_id(),)) if u['role'] in ('admin','administratif') else [],rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],courses=allrows('SELECT c.* FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? AND cl.year_id=? ORDER BY c.name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [],classes=allrows('SELECT id,name FROM classes WHERE school_id=? AND year_id=? ORDER BY name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [])
+    return render_template('planning.html',planning_mode=school_planning_mode(),planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,video_classes=allrows("""SELECT cl.id,cl.name,cl.video_url,cl.filiere_id,f.name filiere_name,y.label academic_year FROM classes cl JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id WHERE cl.school_id=? AND cl.video_url IS NOT NULL AND cl.video_url<>'' ORDER BY LOWER(f.name),LOWER(cl.name)""",(school_id(),)) if u['role'] in ('admin','administratif') else [],rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],courses=allrows('SELECT c.* FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? AND cl.year_id=? ORDER BY c.name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [],classes=allrows('SELECT id,name FROM classes WHERE school_id=? AND year_id=? ORDER BY name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [])
 
 # Keep recurring sessions linked without inferring series from matching dates or courses.
 with db() as c:
