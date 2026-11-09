@@ -1505,6 +1505,9 @@ def school_update(sid):
             c.execute('BEGIN IMMEDIATE')
             c.execute('UPDATE schools SET name=?,slug=?,plan=?,subscription_end=?,campus_enabled=?,planning_mode=? WHERE id=?',
                       (name,slug,plan,end,campus_enabled,planning_mode,sid))
+            # A switch to private mode retracts existing publication until share.
+            if school['planning_mode']!='private' and planning_mode=='private':
+                c.execute('UPDATE lessons SET planning_shared=0 WHERE school_id=?',(sid,))
             if logo:
                 c.execute('UPDATE schools SET logo=?,logo_mime=? WHERE id=?',(logo,mime,sid))
             elif request.form.get('remove_logo')=='1':
@@ -3933,23 +3936,9 @@ def lessons_bulk():
         item['id']==row['id'] and (row['starts_at']!=item['start'] or row['ends_at']!=item['end'])
         for item in changed_items)]
     # Room-only edits do not trigger email. Student emails are limited to rescheduled lessons.
-    notify_event([row['course_id'] for row in affected],str(len(affected))+' séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+' dans le planning.','/planning',teacher_ids=[row['teacher_id'] for row in affected],email_roles=())
-    if schedule_affected:
-        # The in-app alert was already created above; send only the email here.
-        school=one('SELECT name FROM schools WHERE id=?',(school_id(),))
-        recipients=event_recipients([row['course_id'] for row in schedule_affected],
-                                   include_management=False,include_parents=False)
-        seen_emails=set()
-        for uid in recipients:
-            user=one("SELECT email FROM users WHERE id=? AND school_id=? AND role='etudiant' AND active=1",
-                     (uid,school_id()))
-            address=(user['email'] or '').strip().lower() if user else ''
-            if not address or address in seen_emails:continue
-            seen_emails.add(address)
-            send_brevo_email(address,'EduPilot — Créneau de cours modifié',
-                (school['name'] if school else 'Votre établissement')+' : '+
-                str(len(schedule_affected))+' créneau(x) de cours ont changé de date ou d’heure. '
-                'Consultez votre planning dans EduPilot.',school_id(),uid)
+    visible_affected=[row for row in affected if planning_lesson_visible(row)]
+    if visible_affected:
+        notify_event([row['course_id'] for row in visible_affected],str(len(visible_affected))+' séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+' dans le planning.','/planning',teacher_ids=[row['teacher_id'] for row in visible_affected],email_roles=())
     audit('lessons.bulk.'+action,','.join(map(str,ids)))
     flash(f'{len(ids)} séance(s) '+('supprimée(s)' if action=='delete' else 'modifiée(s)')+'.','success')
     return redirect(url_for('planning'))
