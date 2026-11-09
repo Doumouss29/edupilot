@@ -1189,14 +1189,16 @@ def dashboard():
     if u['role']=='enseignant': courses=[x for x in courses if x['teacher_id']==u['id']]
     lesson_minutes_expr = ("CAST(ROUND(EXTRACT(EPOCH FROM (l.ends_at::timestamp - l.starts_at::timestamp))/60) AS INTEGER)" if DB_ENGINE == 'postgresql' else "CAST(ROUND((julianday(l.ends_at)-julianday(l.starts_at))*1440) AS INTEGER)")
     lessonlist=scoped(f'SELECT l.*,{lesson_minutes_expr} scheduled_minutes,c.name course_name,cl.name class_name,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? AND cl.year_id=? ORDER BY l.starts_at DESC LIMIT 80',(year_id,))
-    if u['role']=='enseignant': lessonlist=[x for x in lessonlist if any(y['id']==x['course_id'] for y in courses)]
+    if u['role']=='enseignant':
+        lessonlist=[x for x in lessonlist if any(y['id']==x['course_id'] for y in courses)
+                    and planning_lesson_visible(x)]
     upcoming=scoped("""SELECT l.*,c.name course_name,cl.name class_name
         FROM lessons l JOIN courses c ON c.id=l.course_id
         JOIN classes cl ON cl.id=c.class_id
         WHERE l.school_id=? AND cl.year_id=? AND l.starts_at>=? AND l.status='programmee'
         ORDER BY l.starts_at ASC LIMIT 80""",(year_id,datetime.datetime.now().strftime('%Y-%m-%dT%H:%M')))
     if u['role']=='enseignant':
-        upcoming=[x for x in upcoming if x['teacher_id']==u['id']]
+        upcoming=[x for x in upcoming if x['teacher_id']==u['id'] and planning_lesson_visible(x)]
     upcoming=upcoming[:8]
     total=sum(x['planned_minutes'] for x in courses)
     actual=sum(x['actual_minutes'] for x in lessonlist if x['status'] in ('realisee','partielle'))
@@ -3525,7 +3527,9 @@ def course_edit(cid):
         except ValueError as exc:
             flash(str(exc),'error')
             return redirect(url_for('course_edit',cid=cid))
-        if changed_teacher:
+        if changed_teacher and (school_planning_mode()=='dynamic' or one(
+            'SELECT id FROM lessons WHERE school_id=? AND course_id=? AND planning_shared=1 LIMIT 1',
+            (school_id(),cid))):
             notify_event([cid],'Changement d’enseignant pour le cours '+name+'. '+str(moved)+' séance(s) future(s) réattribuée(s).','/planning',teacher_ids=[item['teacher_id'],int(teacher) if teacher else None])
         audit('course.updated',str(cid));flash(f'Cours mis à jour. {moved} séance(s) future(s) synchronisée(s) ; historique conservé.','success')
         return redirect(url_for('courses'))
@@ -3731,7 +3735,8 @@ def planning():
                     return redirect(url_for('planning'))
                 cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room,series_id,planning_shared) VALUES (?,?,?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room,series_id,int(school_planning_mode()=='dynamic')))
                 created.append(cur.lastrowid)
-        notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']],include_management=False,skip_teacher_email=True,email_roles=())
+        if school_planning_mode()=='dynamic':
+            notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']],include_management=False,skip_teacher_email=True,email_roles=())
         audit('lesson.created',','.join(str(x) for x in created))
         session['planning_result']={'ok':True,'text':f'{len(created)} séance(s) ajoutée(s) au planning. Vous pouvez choisir une nouvelle date sans ressaisir le cours.'}
         flash(f'{len(created)} séance(s) ajoutée(s) au planning.','success')
@@ -3845,7 +3850,7 @@ def lesson_edit(lid):
     schedule_changed=(current['starts_at']!=item['start'] or current['ends_at']!=item['end'])
     changed=(schedule_changed or current['course_id']!=course_id or (current['room'] or '')!=room)
     notification_queued=True
-    if changed:
+    if changed and planning_lesson_visible(lesson):
         old_course=one('SELECT name FROM courses WHERE id=? AND school_id=?',(lesson['course_id'],school_id()))
         message=('Planning modifié — Cours : '+course['name']+' ; classe : '+course['class_name']
                  +'. Ancien créneau : '+format_lesson_period(current['starts_at'],current['ends_at'])
@@ -3966,9 +3971,9 @@ def declare(lid):
     if (status!='non_effectuee' and mins<=0) or mins>24*60:abort(400)
     if status=='non_effectuee' and not request.form.get('comment','').strip():abort(400,'Motif obligatoire')
     execute('UPDATE lessons SET status=?,actual_minutes=?,comment=? WHERE id=?',(status,mins,request.form.get('comment',''),lid))
-    if status=='non_effectuee':
+    if status=='non_effectuee' and planning_lesson_visible(les):
         notify_event([les['course_id']],'Séance non effectuée : '+les['starts_at']+' — '+request.form.get('comment','').strip()[:350],'/planning',teacher_ids=[les['teacher_id']])
-    elif status=='partielle':
+    elif status=='partielle' and planning_lesson_visible(les):
         notify_event([les['course_id']],'Séance partiellement réalisée : '+les['starts_at']+'.','/planning',teacher_ids=[les['teacher_id']])
     audit('lesson.declared',str(lid)+':'+status)
     flash('Séance déclarée.','success');return redirect(url_for('planning'))
@@ -4046,7 +4051,8 @@ def cancel_lesson(lid):
     if lesson['status'] in ('realisee','partielle'):abort(400,'Impossible d’annuler une séance déjà déclarée')
     if lesson['status']=='annulee':flash('Séance déjà annulée : aucune nouvelle notification.','error');return redirect(url_for('planning'))
     execute("UPDATE lessons SET status='annulee',actual_minutes=0,comment=? WHERE id=? AND school_id=?",(reason,lid,school_id()))
-    notify_event([lesson['course_id']],'Séance annulée : '+lesson['starts_at']+((' — '+reason[:350]) if reason else ''),'/planning',teacher_ids=[lesson['teacher_id']],email_roles=('etudiant',))
+    if planning_lesson_visible(lesson):
+        notify_event([lesson['course_id']],'Séance annulée : '+lesson['starts_at']+((' — '+reason[:350]) if reason else ''),'/planning',teacher_ids=[lesson['teacher_id']],email_roles=('etudiant',))
     audit('lesson.cancelled',f'{lid}:{reason}')
     flash('Séance annulée. Les étudiants ont été notifiés.','success')
     return redirect(url_for('planning'))
