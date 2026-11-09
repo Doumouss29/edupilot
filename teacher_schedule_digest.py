@@ -1,16 +1,10 @@
-"""Weekly EduPilot planning digest for teachers and students.
+"""Legacy weekly scheduler disabled.
 
-Schedule once every Sunday at 20:00 UTC (GMT), for example:
-0 20 * * 0 docker exec edupilot python /app/teacher_schedule_digest.py
+EduPilot planning email is now sent only on explicit administrator action
+from /planning. Retaining this no-op entry point prevents an old VPS cron
+from continuing to send unwanted Sunday 20:00 planning email.
+Remove the obsolete cron entry when deploying.
 """
-from app import app, send_all_teacher_weekly_schedules, send_all_student_weekly_schedules
 
-if __name__ == '__main__':
-    from datetime import datetime, timezone
-    now=datetime.now(timezone.utc)
-    if now.weekday()!=6 or now.hour!=20:
-        raise SystemExit('Weekly digest only runs on Sunday at 20:00 UTC.')
-    with app.app_context():
-        teachers=send_all_teacher_weekly_schedules()
-        students=send_all_student_weekly_schedules()
-        print(f'Weekly planning sent: teachers={teachers}, students={students}')
+if __name__=='__main__':
+    print('Weekly schedule email disabled. Use the manual share action in EduPilot.')
