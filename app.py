@@ -42,7 +42,7 @@ UPLOAD_DIR.mkdir(parents=True,exist_ok=True)
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS platform_branding(id INTEGER PRIMARY KEY CHECK(id=1),logo BLOB NOT NULL,logo_mime TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1, subscription_end TEXT, logo BLOB, logo_mime TEXT, campus_enabled INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, plan TEXT NOT NULL DEFAULT 'standard', active INTEGER NOT NULL DEFAULT 1, subscription_end TEXT, logo BLOB, logo_mime TEXT, campus_enabled INTEGER NOT NULL DEFAULT 0, planning_mode TEXT NOT NULL DEFAULT 'dynamic');
 CREATE TABLE IF NOT EXISTS campuses(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, school_id INTEGER REFERENCES schools(id), name TEXT NOT NULL, email TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL, matricule TEXT, active INTEGER NOT NULL DEFAULT 1, first_name TEXT, last_name TEXT, phone TEXT, must_change_password INTEGER NOT NULL DEFAULT 0, first_login_at TEXT);
 CREATE TABLE IF NOT EXISTS years(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), label TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1);
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS enrollments(id INTEGER PRIMARY KEY, school_id INTEGER
 CREATE TABLE IF NOT EXISTS parent_links(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), student_id INTEGER NOT NULL REFERENCES users(id), parent_id INTEGER NOT NULL REFERENCES users(id), relation TEXT DEFAULT 'parent', active INTEGER NOT NULL DEFAULT 1, UNIQUE(student_id,parent_id));
 CREATE TABLE IF NOT EXISTS courses(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), class_id INTEGER NOT NULL REFERENCES classes(id), name TEXT NOT NULL, code TEXT NOT NULL, planned_minutes INTEGER NOT NULL DEFAULT 1200, teacher_id INTEGER REFERENCES users(id), coefficient REAL NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS teacher_history(id INTEGER PRIMARY KEY, course_id INTEGER NOT NULL REFERENCES courses(id), teacher_id INTEGER NOT NULL REFERENCES users(id), date_start TEXT NOT NULL, date_end TEXT);
-CREATE TABLE IF NOT EXISTS lessons(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), course_id INTEGER NOT NULL REFERENCES courses(id), teacher_id INTEGER NOT NULL REFERENCES users(id), starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, room TEXT, status TEXT NOT NULL DEFAULT 'programmee', actual_minutes INTEGER NOT NULL DEFAULT 0, comment TEXT, validated INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS lessons(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), course_id INTEGER NOT NULL REFERENCES courses(id), teacher_id INTEGER NOT NULL REFERENCES users(id), starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, room TEXT, status TEXT NOT NULL DEFAULT 'programmee', actual_minutes INTEGER NOT NULL DEFAULT 0, comment TEXT, validated INTEGER NOT NULL DEFAULT 0, planning_shared INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS attendance(id INTEGER PRIMARY KEY, lesson_id INTEGER NOT NULL REFERENCES lessons(id), student_id INTEGER NOT NULL REFERENCES users(id), status TEXT NOT NULL, UNIQUE(lesson_id,student_id));
 CREATE TABLE IF NOT EXISTS assessments(id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL REFERENCES schools(id), course_id INTEGER NOT NULL REFERENCES courses(id), title TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'Devoir', due_date TEXT, coefficient REAL NOT NULL DEFAULT 1, max_score REAL NOT NULL DEFAULT 20, description TEXT, published INTEGER NOT NULL DEFAULT 1, attachment_name TEXT, attachment_blob BLOB, attachment_mime TEXT);
 CREATE TABLE IF NOT EXISTS grades(id INTEGER PRIMARY KEY, assessment_id INTEGER NOT NULL REFERENCES assessments(id), student_id INTEGER NOT NULL REFERENCES users(id), value REAL NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, comment TEXT DEFAULT '', UNIQUE(assessment_id,student_id));
@@ -1159,7 +1159,8 @@ def dashboard():
         lessons=allrows("""SELECT l.id,l.starts_at,l.ends_at,l.room,l.status,c.name course_name,cl.name class_name,t.name teacher_name
                          FROM lessons l JOIN courses c ON c.id=l.course_id
                          JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id
-                         WHERE l.school_id=? AND l.ends_at>? AND l.starts_at<? AND cl.year_id=?
+                         WHERE l.school_id=? AND l.ends_at>? AND l.starts_at<? AND cl.year_id=? AND
+                         ((SELECT planning_mode FROM schools WHERE id=l.school_id)='dynamic' OR l.planning_shared=1)
                          AND EXISTS (SELECT 1 FROM enrollments e
                            WHERE e.school_id=l.school_id AND e.student_id=? AND e.class_id=c.class_id)
                          ORDER BY l.starts_at,c.name""",(u['school_id'],max(datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),week_start),week_end,(selected_academic_year() or {'id':-1})['id'],u['id']))
