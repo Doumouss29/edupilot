@@ -151,6 +151,28 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
         events=self.client.get('/api/planning').get_json()
         self.assertEqual([item['id'] for item in events],[3])
 
+    def test_planning_mode_update_preserves_legacy_slug(self):
+        # Some historic accounts have slugs that no longer match new URL rules.
+        with project.db() as c:
+            c.execute("UPDATE schools SET slug='b' WHERE id=2")
+        self.actor(8)
+        response=self.client.post('/schools/2/update',data={
+            'csrf':'publication-csrf',
+            'action':'planning_mode','planning_mode':'private'})
+        self.assertEqual(response.status_code,302)
+        row=project.one('SELECT slug,planning_mode FROM schools WHERE id=2')
+        self.assertEqual(row['slug'],'b')
+        self.assertEqual(row['planning_mode'],'private')
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=3')['planning_shared'],0)
+
+    def test_planning_mode_update_rejects_invalid_mode_without_changes(self):
+        self.actor(8)
+        response=self.client.post('/schools/2/update',data={
+            'csrf':'publication-csrf',
+            'action':'planning_mode','planning_mode':'unknown'})
+        self.assertEqual(response.status_code,400)
+        self.assertEqual(project.one('SELECT planning_mode FROM schools WHERE id=2')['planning_mode'],'dynamic')
+
     def test_switch_from_dynamic_to_private_retracts_older_sessions(self):
         self.actor(8)
         response=self.client.post('/schools/2/update',data={
