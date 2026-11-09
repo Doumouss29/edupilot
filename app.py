@@ -3658,9 +3658,12 @@ def planning_share():
                 (sid,uid,address,subject,plain,markup))
             queued+=1
     audit('planning.shared',f'{mode}:{monday.isoformat()}:emails_queued={queued}')
-    flash(f'Planning '+('partagé' if mode=='private' else 'envoyé')+
-          f'. {queued} e-mail(s) mis en file pour les destinataires concernés.'+
-          (' Aucun cours prévu pour cette semaine.' if not recipients else ''),'success')
+    message=(f'Planning '+('partagé' if mode=='private' else 'envoyé')+
+             f'. {queued} e-mail(s) mis en file pour les destinataires concernés.'+
+             (' Aucun cours prévu pour cette semaine.' if not recipients else ''))
+    if request.accept_mimetypes.best=='application/json':
+        return jsonify(ok=True,message=message,queued=queued)
+    flash(message,'success')
     return redirect(url_for('planning'))
 
 
@@ -5046,7 +5049,7 @@ def planning_json():
     if u['role'] not in ('admin','administratif') and school_planning_mode()=='private':
         sql+=' AND l.planning_shared=1'
     response=jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':lesson_utc_iso(x['starts_at']),'end':lesson_utc_iso(x['ends_at']),'extendedProps':{'status':x['status'],'seriesId':x['series_id'],'planningShared':bool(x['planning_shared']),'courseId':x['course_id'],'startsAt':x['starts_at'],'endsAt':x['ends_at'],'editable':x['status']=='programmee' and not x['validated'] and not x['actual_minutes'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
-    response.headers['Cache-Control']='private, max-age=10'
+    response.headers['Cache-Control']='private, no-store'
     response.headers['Vary']='Cookie'
     return response
 
