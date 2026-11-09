@@ -217,9 +217,10 @@ async function loadPlanning(){
 }
 const shareWeek=document.getElementById('planning-share-week');
 if(shareWeek){
- const today=new Date();
- const local=new Date(today.getTime()-today.getTimezoneOffset()*60000);
- shareWeek.value=local.toISOString().slice(0,10);
+ const fields=Object.fromEntries(new Intl.DateTimeFormat('fr-FR',{
+  timeZone:'Africa/Abidjan',year:'numeric',month:'2-digit',day:'2-digit'
+ }).formatToParts(new Date()).filter(part=>part.type!=='literal').map(part=>[part.type,part.value]));
+ shareWeek.value=fields.year+'-'+fields.month+'-'+fields.day;
 }
 const c=new FullCalendar.Calendar(el,{initialView:window.innerWidth<720?'timeGridDay':'timeGridWeek',locale:'fr',firstDay:1,nowIndicator:true,slotMinTime:'07:00:00',slotMaxTime:'21:00:00',height:'auto',headerToolbar:{left:'prev,next today',center:'title',right:'timeGridDay,timeGridWeek,dayGridMonth'},buttonText:{today:"Aujourd'hui",day:'Jour',week:'Semaine',month:'Mois'},events:function(info,success,failure){loadPlanning().then(records=>success(records.filter(item=>{
 const props=item.extendedProps||{};
@@ -313,14 +314,38 @@ eventDidMount:function(info){const status=info.event.extendedProps.status;const 
 }});for(const select of [filterClass,filterTeacher])select.addEventListener('change',()=>c.refetchEvents());c.render();
 {% if me.role in ('admin','administratif') %}
 const shareForm=document.getElementById('planning-share-form');
-shareForm?.addEventListener('submit',event=>{
+shareForm?.addEventListener('submit',async event=>{
+ event.preventDefault();
  const mode={{planning_mode|tojson}};
  const message=mode==='private'
     ?'Partager le planning et le rendre visible aux enseignants, étudiants et parents ? Les e-mails porteront sur la semaine choisie.'
     :'Envoyer le planning de la semaine choisie aux enseignants et aux étudiants concernés ?';
- if(!confirm(message)){event.preventDefault();return;}
+ if(!confirm(message))return;
  const submit=shareForm.querySelector('button[type="submit"]');
- if(submit){submit.disabled=true;submit.textContent='Envoi en cours…';}
+ if(submit){submit.disabled=true;submit.textContent='Préparation des e-mails…';}
+ try{
+  const response=await fetch(shareForm.action,{
+   method:'POST',headers:{'Accept':'application/json'},
+   credentials:'same-origin',body:new FormData(shareForm)
+  });
+  const body=await response.json();
+  if(!response.ok||!body.ok)throw new Error(body.error||'Le planning n’a pas pu être partagé.');
+  calendarItems=null;c.refetchEvents();
+  const notice=document.createElement('div');
+  notice.className='flash success';notice.setAttribute('role','status');
+  notice.textContent=body.message;
+  document.querySelector('.calendar-panel')?.prepend(notice);
+ }catch(error){
+  const notice=document.createElement('div');
+  notice.className='flash error';notice.setAttribute('role','alert');
+  notice.textContent=error.message||'Erreur pendant le partage.';
+  document.querySelector('.calendar-panel')?.prepend(notice);
+ }finally{
+  if(submit){
+   submit.disabled=false;
+   submit.textContent=mode==='private'?'Partager le planning':'Envoyer le planning';
+  }
+ }
 });
 {% endif %}
 {% if me.role in ('admin','administratif') %}
