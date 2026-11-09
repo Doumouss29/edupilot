@@ -568,6 +568,9 @@ def enqueue_external_notification(sid,recipients,message,href,skip_email_ids=(),
 
 
 def notify(ids,message,href='',skip_email_ids=(),email_roles=None,defer_external=False):
+    # Planning email is exclusively a manual send/share operation.
+    if href=='/planning':
+        email_roles=()
     # Persist first: an external push or email error cannot erase an internal alert.
     sid=school_id()
     candidate=set(ids)
