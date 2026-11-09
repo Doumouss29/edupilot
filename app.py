@@ -3781,8 +3781,9 @@ def lesson_edit(lid):
                   (course_id,course['teacher_id'],item['start'],item['end'],room,lid,school_id()))
     schedule_changed=(current['starts_at']!=item['start'] or current['ends_at']!=item['end'])
     changed=(schedule_changed or current['course_id']!=course_id or (current['room'] or '')!=room)
+    notification_required=changed and planning_lesson_visible(lesson)
     notification_queued=True
-    if changed and planning_lesson_visible(lesson):
+    if notification_required:
         old_course=one('SELECT name FROM courses WHERE id=? AND school_id=?',(lesson['course_id'],school_id()))
         message=('Planning modifié — Cours : '+course['name']+' ; classe : '+course['class_name']
                  +'. Ancien créneau : '+format_lesson_period(current['starts_at'],current['ends_at'])
@@ -3802,10 +3803,12 @@ def lesson_edit(lid):
         audit('lesson.updated',str(lid)+(':changed' if changed else ':unchanged'))
     except Exception:
         app.logger.exception('Séance %s enregistrée mais audit non journalisé',lid)
-    result_message=('Séance modifiée. Notifications en attente de traitement.'
-                    if changed and notification_queued else
+    result_message=('Séance modifiée en brouillon ; aucune notification envoyée.'
+                    if changed and not notification_required else
+                    'Séance modifiée. Notifications en attente de traitement.'
+                    if notification_required and notification_queued else
                     'Séance modifiée, mais la notification n’a pas pu être mise en file. Contactez le support.'
-                    if changed else 'Aucun changement détecté : aucune notification envoyée.')
+                    if notification_required else 'Aucun changement détecté : aucune notification envoyée.')
     if request.headers.get('Accept','').startswith('application/json'):
         return jsonify({'ok':True,'message':result_message,'changed':changed})
     flash(result_message,'success')
@@ -3979,7 +3982,8 @@ def cancel_lesson(lid):
     if planning_lesson_visible(lesson):
         notify_event([lesson['course_id']],'Séance annulée : '+lesson['starts_at']+((' — '+reason[:350]) if reason else ''),'/planning',teacher_ids=[lesson['teacher_id']],email_roles=('etudiant',))
     audit('lesson.cancelled',f'{lid}:{reason}')
-    flash('Séance annulée. Les étudiants ont été notifiés.','success')
+    flash('Séance annulée. '+('Les utilisateurs concernés ont été notifiés.' if planning_lesson_visible(lesson)
+          else 'Elle reste invisible dans le brouillon, sans notification.'),'success')
     return redirect(url_for('planning'))
 
 # Evaluation corrections are separated from subjects and unpublished by default.
