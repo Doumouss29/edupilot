@@ -13,6 +13,7 @@
 <label>Nom de l’établissement<input name="name" value="{{s.name}}" required maxlength="180"></label>
 <label>Identifiant URL de l’établissement<input name="slug" value="{{s.slug}}" required maxlength="80" minlength="2" pattern="[a-z0-9][a-z0-9_-]{1,79}"></label>
 <p class="muted">Modifier l’identifiant URL change le lien de connexion de l’établissement. Prévenez ses utilisateurs avant de le modifier.</p>
+<label>Visibilité du planning<select name="planning_mode"><option value="dynamic" {% if s.planning_mode!='private' %}selected{% endif %}>Planning dynamique — visible immédiatement</option><option value="private" {% if s.planning_mode=='private' %}selected{% endif %}>Planning sur partage — brouillon privé jusqu'à publication</option></select></label><p class="muted">Les e-mails de planning sont envoyés uniquement sur demande depuis le planning. En mode privé, les nouvelles séances restent invisibles jusqu'au partage.</p>
 <label>Formule<select name="plan">{% for plan in ['essentiel','standard','premium'] %}<option value="{{plan}}" {% if plan==s.plan %}selected{% endif %}>{{plan|capitalize}}</option>{% endfor %}</select></label>
 <label class="checkline"><input type="checkbox" name="campus_enabled" value="1" {% if s.campus_enabled %}checked{% endif %}> Module Campus activé</label><label>Fin d'abonnement<input type="date" name="subscription_end" value="{{s.subscription_end or ''}}"></label>
 <label>Remplacer le logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp"></label>
