@@ -24,6 +24,17 @@ class PlanningSeriesSecurityTests(unittest.TestCase):
             c.execute("ALTER TABLE classes ADD COLUMN filiere_id INTEGER")
             c.execute("ALTER TABLE lessons ADD COLUMN hidden_from_planning INTEGER NOT NULL DEFAULT 0")
             c.execute("ALTER TABLE lessons ADD COLUMN series_id TEXT")
+            # Recreate the post-publication migrations used by delete_lesson().
+            c.execute("ALTER TABLE lessons ADD COLUMN planning_shared INTEGER NOT NULL DEFAULT 1")
+            c.execute("ALTER TABLE schools ADD COLUMN planning_mode TEXT NOT NULL DEFAULT 'dynamic'")
+            c.execute("""CREATE TABLE IF NOT EXISTS notification_delivery_queue(
+                id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL, channel TEXT NOT NULL,
+                address TEXT, subject TEXT, message TEXT NOT NULL,
+                href TEXT NOT NULL DEFAULT '', status TEXT DEFAULT 'pending',
+                attempts INTEGER DEFAULT 0, claimed_at INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                html_content TEXT)""")
             c.execute("CREATE TABLE IF NOT EXISTS filieres(id INTEGER PRIMARY KEY,school_id INTEGER,name TEXT)")
             c.execute("INSERT INTO schools(id,name,slug) VALUES (1,'A','a'),(2,'B','b')")
             for uid,sid,role in [(1,1,'admin'),(2,1,'administratif'),(3,1,'enseignant'),(4,1,'etudiant'),(5,2,'admin')]:
