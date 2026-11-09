@@ -59,8 +59,13 @@ def deliver(limit=50):
             if not account or not account['active'] or account['school_id']!=job['school_id']:
                 ok=True  # Deleted/inactive account: do not contact.
             elif job['channel']=='email':
-                ok=bool(send_brevo_email(job['address'],job['subject'],job['message'],
-                                         job['school_id'],job['user_id']))
+                # Retire stale planning emails queued before the manual-sharing rollout.
+                if job['href']=='/planning' and job['subject']=='EduPilot — Nouvelle notification':
+                    ok=True
+                else:
+                    ok=bool(send_brevo_email(job['address'],job['subject'],job['message'],
+                                             job['school_id'],job['user_id'],
+                                             html_content=job['html_content']))
             elif job['channel']=='push':
                 ok=send_push(job['user_id'],job['message'],job['href'])
             else:
