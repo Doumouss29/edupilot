@@ -3949,7 +3949,8 @@ def lessons_bulk():
 @roles('enseignant','admin','administratif')
 def declare(lid):
     u=current_user();les=one('SELECT * FROM lessons WHERE id=? AND school_id=?',(lid,school_id()))
-    if not les or (u['role']=='enseignant' and les['teacher_id']!=u['id']):abort(403)
+    if not les or (u['role']=='enseignant' and
+       (les['teacher_id']!=u['id'] or not planning_lesson_visible(les))):abort(403)
     # Validation allowed only from 15 minutes before the scheduled end, in school time.
     window_start=datetime.datetime.fromisoformat(les['ends_at'])-datetime.timedelta(minutes=15)
     now_abidjan=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).replace(tzinfo=None)
@@ -4993,7 +4994,8 @@ def parents():
 @roles('enseignant','admin','administratif')
 def attendance(lid):
     lesson=one('SELECT l.*,c.class_id,c.name course_name FROM lessons l JOIN courses c ON c.id=l.course_id WHERE l.id=? AND l.school_id=?',(lid,school_id()))
-    if not lesson or (current_user()['role']=='enseignant' and lesson['teacher_id']!=current_user()['id']):abort(403)
+    if not lesson or (current_user()['role']=='enseignant' and
+        (lesson['teacher_id']!=current_user()['id'] or not planning_lesson_visible(lesson))):abort(403)
     students=allrows("""SELECT u.id,u.name,u.matricule,a.status FROM enrollments e
         JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id AND cl.year_id=e.year_id
         JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id AND u.role='etudiant'
@@ -5008,7 +5010,8 @@ def attendance_save(lid):
         JOIN courses c ON c.id=l.course_id AND c.school_id=l.school_id
         JOIN classes cl ON cl.id=c.class_id AND cl.school_id=c.school_id
         WHERE l.id=? AND l.school_id=?""",(lid,school_id()))
-    if not lesson or (current_user()['role']=='enseignant' and lesson['teacher_id']!=current_user()['id']):abort(403)
+    if not lesson or (current_user()['role']=='enseignant' and
+        (lesson['teacher_id']!=current_user()['id'] or not planning_lesson_visible(lesson))):abort(403)
     writable_academic_class(lesson['class_id'],allow_draft=True)
     students=allrows("""SELECT e.student_id FROM enrollments e
         JOIN users u ON u.id=e.student_id AND u.school_id=e.school_id AND u.role='etudiant'
