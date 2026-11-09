@@ -25,8 +25,6 @@ class PlanningSeriesSecurityTests(unittest.TestCase):
             c.execute("ALTER TABLE lessons ADD COLUMN hidden_from_planning INTEGER NOT NULL DEFAULT 0")
             c.execute("ALTER TABLE lessons ADD COLUMN series_id TEXT")
             # Recreate the post-publication migrations used by delete_lesson().
-            c.execute("ALTER TABLE lessons ADD COLUMN planning_shared INTEGER NOT NULL DEFAULT 1")
-            c.execute("ALTER TABLE schools ADD COLUMN planning_mode TEXT NOT NULL DEFAULT 'dynamic'")
             c.execute("""CREATE TABLE IF NOT EXISTS notification_delivery_queue(
                 id INTEGER PRIMARY KEY, school_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL, channel TEXT NOT NULL,
