@@ -144,7 +144,15 @@ document.addEventListener('DOMContentLoaded',()=>{
   open();
  });
 });
-</script>{% endif %}<section class="panel calendar-panel">{% if me.role=='admin' %}<div class="page-actions" style="margin-bottom:14px"><a class="btn {{'primary' if request.args.get('mine')=='1' else 'outline'}}" href="{{url_for('planning',mine=1)}}">Mes séances d’enseignement</a><a class="btn {{'outline' if request.args.get('mine')=='1' else 'primary'}}" href="{{url_for('planning')}}">Planning de l’établissement</a></div>{% endif %}<div class="live-filter-bar" id="planning-live-filters"><label>Classe<select id="calendar-filter-class"><option value="">Toutes les classes</option></select></label><label>Enseignant<select id="calendar-filter-teacher"><option value="">Tous les enseignants</option></select></label></div><div class="planning-print-tools"><button class="btn outline" type="button" id="print-planning">🖨 Imprimer le planning</button></div><div id="planning-print-heading" aria-hidden="true"></div><p class="muted" id="planning-timezone-label"></p><div id="calendar"></div></section><div class="legend"><span><i style="background:#2b9769"></i> Réalisée</span><span><i style="background:#4383d5"></i> Programmée</span><span><i style="background:#d59a36"></i> À confirmer</span><span><i style="background:#d15b65"></i> Non effectuée</span></div>{% if me.role in ('admin','administratif') %}<section class="panel"><div class="panel-title"><h3>Gérer plusieurs séances</h3><span class="muted">Sélectionnez des séances sans historique pour les supprimer en masse. La modification se fait directement sur chaque séance du calendrier.</span></div>
+</script>{% endif %}<section class="panel calendar-panel">{% if me.role=='admin' %}<div class="page-actions" style="margin-bottom:14px"><a class="btn {{'primary' if request.args.get('mine')=='1' else 'outline'}}" href="{{url_for('planning',mine=1)}}">Mes séances d’enseignement</a><a class="btn {{'outline' if request.args.get('mine')=='1' else 'primary'}}" href="{{url_for('planning')}}">Planning de l’établissement</a></div>{% endif %}<div class="live-filter-bar" id="planning-live-filters"><label>Classe<select id="calendar-filter-class"><option value="">Toutes les classes</option></select></label><label>Enseignant<select id="calendar-filter-teacher"><option value="">Tous les enseignants</option></select></label></div><div class="planning-print-tools"><button class="btn outline" type="button" id="print-planning">🖨 Imprimer le planning</button>
+{% if me.role in ('admin','administratif') %}
+<form method="post" action="{{url_for('planning_share')}}" id="planning-share-form" style="display:flex;flex-wrap:wrap;gap:10px;align-items:end">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<label>Semaine à envoyer (heure d'Abidjan)<input type="date" name="week" id="planning-share-week" required></label>
+<button class="btn primary" type="submit">{{'Partager le planning' if planning_mode=='private' else 'Envoyer le planning'}}</button>
+</form>
+{% endif %}</div>
+{% if me.role in ('admin','administratif') and planning_mode=='private' %}<p class="muted">Mode sur partage : les nouveaux cours restent invisibles aux étudiants, parents et enseignants avant le partage. Le partage rend visibles les séances de l'année scolaire et envoie par e-mail les cours de la semaine choisie.</p>{% endif %}<div id="planning-print-heading" aria-hidden="true"></div><p class="muted" id="planning-timezone-label"></p><div id="calendar"></div></section><div class="legend"><span><i style="background:#2b9769"></i> Réalisée</span><span><i style="background:#4383d5"></i> Programmée</span><span><i style="background:#d59a36"></i> À confirmer</span><span><i style="background:#d15b65"></i> Non effectuée</span></div>{% if me.role in ('admin','administratif') %}<section class="panel"><div class="panel-title"><h3>Gérer plusieurs séances</h3><span class="muted">Sélectionnez des séances sans historique pour les supprimer en masse. La modification se fait directement sur chaque séance du calendrier.</span></div>
 <form method="post" action="{{url_for('lessons_bulk')}}" id="bulk-lessons"><input type="hidden" name="csrf" value="{{csrf}}">
 <div class="page-actions"><input type="hidden" name="action" value="delete"><button class="btn danger" type="submit">Supprimer les séances sélectionnées sans historique</button></div>
 <div class="table-scroll"><table><thead><tr><th><input type="checkbox" id="all-lessons" aria-label="Sélectionner les séances"></th><th>Cours / classe</th><th>Début</th><th>Fin</th><th>Enseignant</th><th>Salle</th><th>Statut</th></tr></thead><tbody>{% for e in events %}<tr><td><input type="checkbox" name="lesson_ids" value="{{e.id}}" {% if e.status!='programmee' or e.actual_minutes or e.validated %}disabled{% endif %}></td><td>{{e.course_name}} — {{e.class_name}}</td><td><time data-abidjan-time="{{e.starts_at}}">{{e.starts_at|replace('T',' ')}}</time></td><td><time data-abidjan-time="{{e.ends_at}}">{{e.ends_at|replace('T',' ')}}</time></td><td>{{e.teacher_name or '—'}}</td><td>{{e.room or '—'}}</td><td><span class="tag">{{e.status}}</span></td></tr>{% else %}<tr><td colspan="7">Aucune séance à gérer.</td></tr>{% endfor %}</tbody></table></div></form></section>
@@ -206,6 +214,12 @@ async function loadPlanning(){
   calendarItems=await response.json();
   refreshChoices(calendarItems);
   return calendarItems;
+}
+const shareWeek=document.getElementById('planning-share-week');
+if(shareWeek){
+ const today=new Date();
+ const local=new Date(today.getTime()-today.getTimezoneOffset()*60000);
+ shareWeek.value=local.toISOString().slice(0,10);
 }
 const c=new FullCalendar.Calendar(el,{initialView:window.innerWidth<720?'timeGridDay':'timeGridWeek',locale:'fr',firstDay:1,nowIndicator:true,slotMinTime:'07:00:00',slotMaxTime:'21:00:00',height:'auto',headerToolbar:{left:'prev,next today',center:'title',right:'timeGridDay,timeGridWeek,dayGridMonth'},buttonText:{today:"Aujourd'hui",day:'Jour',week:'Semaine',month:'Mois'},events:function(info,success,failure){loadPlanning().then(records=>success(records.filter(item=>{
 const props=item.extendedProps||{};
@@ -297,6 +311,18 @@ eventDidMount:function(info){const status=info.event.extendedProps.status;const 
  if(completed)hint.textContent='Cette séance est déjà déclarée ou annulée.';
  if(!dialog.open){if(typeof dialog.showModal==='function')dialog.showModal();else dialog.setAttribute('open','');}
 }});for(const select of [filterClass,filterTeacher])select.addEventListener('change',()=>c.refetchEvents());c.render();
+{% if me.role in ('admin','administratif') %}
+const shareForm=document.getElementById('planning-share-form');
+shareForm?.addEventListener('submit',event=>{
+ const mode={{planning_mode|tojson}};
+ const message=mode==='private'
+    ?'Partager le planning et le rendre visible aux enseignants, étudiants et parents ? Les e-mails porteront sur la semaine choisie.'
+    :'Envoyer le planning de la semaine choisie aux enseignants et aux étudiants concernés ?';
+ if(!confirm(message)){event.preventDefault();return;}
+ const submit=shareForm.querySelector('button[type="submit"]');
+ if(submit){submit.disabled=true;submit.textContent='Envoi en cours…';}
+});
+{% endif %}
 {% if me.role in ('admin','administratif') %}
 const editRoomChoice=document.getElementById('lesson-edit-room-choice');
 const editRoomInput=document.getElementById('lesson-edit-room-value');
