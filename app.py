@@ -3523,6 +3523,125 @@ def course_edit(cid):
         return redirect(url_for('courses'))
     return render_template('edit_academic.html',kind='course',item=item,classes=scoped('SELECT * FROM classes WHERE school_id=?'),teachers=scoped("SELECT * FROM users WHERE school_id=? AND role IN ('enseignant','admin') AND active=1 ORDER BY LOWER(name),id"))
 
+def planning_digest_bounds(reference):
+    """A Monday-Sunday window in the school's Africa/Abidjan timezone."""
+    day=datetime.date.fromisoformat(reference)
+    monday=day-datetime.timedelta(days=day.weekday())
+    return monday,monday+datetime.timedelta(days=7)
+
+
+def planning_email_content(recipient,lessons,monday,end,school_name):
+    """Both MIME alternatives use actual line breaks, never literal \\n."""
+    def text_clean(value):
+        return ' '.join(str(value or '').split())
+    heading=f"Planning du {monday:%d/%m/%Y} au {(end-datetime.timedelta(days=1)):%d/%m/%Y}"
+    intro=f"Bonjour {text_clean(recipient['name'])},"
+    lines=[intro,'',heading,school_name,'', "Horaires : heure d’Abidjan (GMT / UTC+0)",'']
+    for lesson in lessons:
+        start=datetime.datetime.fromisoformat(lesson['starts_at'])
+        finish=datetime.datetime.fromisoformat(lesson['ends_at'])
+        lines.append(f"{start:%A %d/%m/%Y} | {start:%H:%M} – {finish:%H:%M} | "
+                     +text_clean(lesson['course_name'])+' | '+text_clean(lesson['class_name'])
+                     +(f" | Salle : {text_clean(lesson['room'])}" if lesson['room'] else ''))
+    lines+=['','Retrouvez les éventuels changements dans votre espace EduPilot.',
+            os.getenv('PUBLIC_BASE_URL','https://edupilot.ci').rstrip('/')+'/planning','',
+            'L’équipe EduPilot']
+    plain='\n'.join(lines)
+    items=[]
+    for lesson in lessons:
+        start=datetime.datetime.fromisoformat(lesson['starts_at'])
+        finish=datetime.datetime.fromisoformat(lesson['ends_at'])
+        items.append('<tr><td>'+html.escape(start.strftime('%d/%m/%Y'))+
+            '</td><td>'+html.escape(start.strftime('%H:%M')+' – '+finish.strftime('%H:%M'))+
+            '</td><td>'+html.escape(text_clean(lesson['course_name']))+
+            '</td><td>'+html.escape(text_clean(lesson['class_name']))+
+            '</td><td>'+html.escape(text_clean(lesson['room']) or '—')+'</td></tr>')
+    base=os.getenv('PUBLIC_BASE_URL','https://edupilot.ci').rstrip('/')
+    markup=('<!doctype html><html lang="fr"><head><meta charset="utf-8"></head>'
+       '<body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#223a50">'
+       '<div style="max-width:680px;margin:20px auto;padding:26px;background:white;border-radius:12px">'
+       '<h1 style="color:#d97720;font-size:24px">EduPilot</h1><p>'+html.escape(intro)+'</p>'
+       '<h2 style="font-size:19px">'+html.escape(heading)+'</h2>'
+       '<p><strong>'+html.escape(school_name)+'</strong><br>Horaires en heure d’Abidjan (GMT / UTC+0)</p>'
+       '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+       '<thead><tr style="background:#edf3f8"><th>Date</th><th>Heure</th><th>Cours</th><th>Classe</th><th>Salle</th></tr></thead><tbody>'
+       +''.join(items)+'</tbody></table><p style="margin-top:24px">'
+       'Les changements ultérieurs sont signalés dans EduPilot, sans nouvel e-mail.</p>'
+       '<p><a href="'+html.escape(base+'/planning',quote=True)+'">Consulter mon planning</a></p>'
+       '<p style="color:#60758a">L’équipe EduPilot</p></div></body></html>')
+    return plain,markup
+
+
+def planning_mail_recipients(sid,monday,end):
+    """Build one lesson list per user, strictly within their own school and classes."""
+    lessons=allrows("""SELECT l.id,l.school_id,l.teacher_id,l.starts_at,l.ends_at,l.room,
+        c.name course_name,cl.id class_id,cl.name class_name
+        FROM lessons l JOIN courses c ON c.id=l.course_id AND c.school_id=l.school_id
+        JOIN classes cl ON cl.id=c.class_id AND cl.school_id=l.school_id
+        WHERE l.school_id=? AND l.hidden_from_planning=0
+        AND l.starts_at>=? AND l.starts_at<?
+        AND l.status NOT IN ('annulee','reportee')
+        AND (l.planning_shared=1 OR (SELECT planning_mode FROM schools WHERE id=l.school_id)='dynamic')
+        ORDER BY l.starts_at,l.id""",(sid,monday.isoformat(),end.isoformat()))
+    if not lessons:return {}
+    class_ids={item['class_id'] for item in lessons}
+    users=allrows("""SELECT id,name,email,role FROM users
+        WHERE school_id=? AND active=1 AND role IN ('etudiant','enseignant','admin')""",(sid,))
+    enrollments=allrows("""SELECT e.student_id,e.class_id FROM enrollments e
+        JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id
+        WHERE e.school_id=? AND e.year_id=cl.year_id""",(sid,))
+    class_students={}
+    for row in enrollments:
+        if row['class_id'] in class_ids:
+            class_students.setdefault(row['student_id'],set()).add(row['class_id'])
+    outputs={}
+    for user in users:
+        if not user['email'] or is_pending_teacher_email(user['email']):continue
+        if user['role']=='etudiant':
+            mine=[lesson for lesson in lessons if lesson['class_id'] in class_students.get(user['id'],set())]
+        else:
+            mine=[lesson for lesson in lessons if lesson['teacher_id']==user['id']]
+        if mine:outputs[user['id']]=(user,mine)
+    return outputs
+
+
+@app.post('/planning/share')
+@roles('admin','administratif')
+def planning_share():
+    """Explicit publication (private mode) and one-week email dispatch (both modes)."""
+    sid=school_id()
+    mode=school_planning_mode(sid)
+    try:
+        raw=request.form.get('week','').strip()
+        reference=datetime.date.fromisoformat(raw) if raw else datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()
+        monday,end=planning_digest_bounds(reference.isoformat())
+    except (ValueError,TypeError):abort(400,'Date de planning invalide')
+    year=selected_academic_year()
+    if not year or year['status']=='archived':abort(403,'Année scolaire archivée')
+    if mode=='private':
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            c.execute("""UPDATE lessons SET planning_shared=1 WHERE school_id=?
+                AND hidden_from_planning=0 AND course_id IN (
+                   SELECT c.id FROM courses c JOIN classes cl ON cl.id=c.class_id
+                   WHERE c.school_id=? AND cl.year_id=?)""",
+                (sid,sid,year['id']))
+    school=one('SELECT name FROM schools WHERE id=?',(sid,))
+    recipients=planning_mail_recipients(sid,monday,end)
+    accepted=0
+    for uid,(user,lessons) in recipients.items():
+        plain,markup=planning_email_content(user,lessons,monday,end,school['name'])
+        if send_brevo_email(user['email'],'EduPilot — '+
+                            f'Planning du {monday:%d/%m/%Y} au {(end-datetime.timedelta(days=1)):%d/%m/%Y}',
+                            plain,sid,uid,html_content=markup):
+            accepted+=1
+    audit('planning.shared',f'{mode}:{monday.isoformat()}:emails_accepted={accepted}')
+    flash(f'Planning '+('partagé' if mode=='private' else 'envoyé')+
+          f'. {accepted} e-mail(s) accepté(s) par le service de messagerie'+
+          (f' sur {len(recipients)} destinataire(s).' if recipients else '. Aucun cours prévu pour cette semaine.'),'success')
+    return redirect(url_for('planning'))
+
+
 @app.route('/planning',methods=['GET','POST'])
 @login_required
 def planning():
