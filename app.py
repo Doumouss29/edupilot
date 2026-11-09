@@ -3552,10 +3552,11 @@ def planning_email_content(recipient,lessons,monday,end,school_name):
     heading=f"Planning du {monday:%d/%m/%Y} au {(end-datetime.timedelta(days=1)):%d/%m/%Y}"
     intro=f"Bonjour {text_clean(recipient['name'])},"
     lines=[intro,'',heading,school_name,'', "Horaires : heure d’Abidjan (GMT / UTC+0)",'']
+    french_weekdays=('Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche')
     for lesson in lessons:
         start=datetime.datetime.fromisoformat(lesson['starts_at'])
         finish=datetime.datetime.fromisoformat(lesson['ends_at'])
-        lines.append(f"{start:%A %d/%m/%Y} | {start:%H:%M} – {finish:%H:%M} | "
+        lines.append(f"{french_weekdays[start.weekday()]} {start:%d/%m/%Y} | {start:%H:%M} – {finish:%H:%M} | "
                      +text_clean(lesson['course_name'])+' | '+text_clean(lesson['class_name'])
                      +(f" | Salle : {text_clean(lesson['room'])}" if lesson['room'] else ''))
     lines+=['','Retrouvez les éventuels changements dans votre espace EduPilot.',
@@ -4009,6 +4010,12 @@ def delete_lesson(lid):
             else:
                 c.execute('DELETE FROM lessons WHERE id=? AND school_id=?',(row['id'],school_id()))
                 hard_deleted+=1
+    visible_rows=[row for row in rows if planning_lesson_visible(row)]
+    if visible_rows:
+        notify_event([row['course_id'] for row in visible_rows],
+                     f'{len(visible_rows)} séance(s) retirée(s) du planning.',
+                     '/planning',teacher_ids=[row['teacher_id'] for row in visible_rows],
+                     email_roles=(),defer_external=True)
     audit('lesson.deleted_from_planning',f'{lid}:{scope}:removed={hard_deleted}:hidden={hidden}')
     message=(f'{hard_deleted+hidden} séance(s) retirée(s) du planning.'+
              (' Les historiques pédagogiques ont été conservés.' if hidden else ''))
