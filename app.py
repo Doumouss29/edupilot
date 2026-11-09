@@ -3631,14 +3631,15 @@ def planning_share():
         raw=request.form.get('week','').strip()
         reference=datetime.date.fromisoformat(raw) if raw else datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()
         monday,end=planning_digest_bounds(reference.isoformat())
-    except (ValueError,TypeError):abort(400,'Date de planning invalide')
+    except (ValueError,TypeError,OverflowError):abort(400,'Date de planning invalide')
     year=selected_academic_year()
     if not year or year['status']=='archived':abort(403,'Année scolaire archivée')
     if mode=='private':
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
             c.execute("""UPDATE lessons SET planning_shared=1 WHERE school_id=?
-                AND hidden_from_planning=0 AND course_id IN (
+                AND hidden_from_planning=0 AND status NOT IN ('annulee','reportee')
+                AND course_id IN (
                    SELECT c.id FROM courses c JOIN classes cl ON cl.id=c.class_id
                    WHERE c.school_id=? AND cl.year_id=?)""",
                 (sid,sid,year['id']))
