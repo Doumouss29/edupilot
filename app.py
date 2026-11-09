@@ -273,6 +273,30 @@ def setting(key,default=''):
     row=one('SELECT value FROM settings WHERE key=?',(key,))
     return row['value'] if row else default
 
+# Settings for visibility: migrated establishments remain dynamic.
+with db() as c:
+    if DB_ENGINE=='postgresql':
+        sch={r['column_name'] for r in c.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='schools'").fetchall()}
+        les={r['column_name'] for r in c.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='lessons'").fetchall()}
+    else:
+        sch={r['name'] for r in c.execute('PRAGMA table_info(schools)').fetchall()}
+        les={r['name'] for r in c.execute('PRAGMA table_info(lessons)').fetchall()}
+    if 'planning_mode' not in sch:
+        c.execute("ALTER TABLE schools ADD COLUMN planning_mode TEXT NOT NULL DEFAULT 'dynamic'")
+    if 'planning_shared' not in les:
+        c.execute('ALTER TABLE lessons ADD COLUMN planning_shared INTEGER NOT NULL DEFAULT 1')
+
+
+def school_planning_mode(sid=None):
+    sid=school_id() if sid is None else sid
+    row=one('SELECT planning_mode FROM schools WHERE id=?',(sid,)) if sid else None
+    return 'private' if row and row['planning_mode']=='private' else 'dynamic'
+
+
+def planning_lesson_visible(lesson):
+    return school_planning_mode(lesson['school_id'])=='dynamic' or bool(lesson['planning_shared'])
+
+
 def subscription_blocked(user=None):
     user=user or current_user()
     if not user or user['role']=='superadmin' or not user['school_id']:return False
@@ -1185,7 +1209,7 @@ def school_filiere_overview():
 @app.get('/schools')
 @roles('superadmin')
 def schools():
-    records=allrows('SELECT id,name,slug,plan,active,subscription_end,logo_mime,campus_enabled FROM schools ORDER BY id DESC')
+    records=allrows('SELECT id,name,slug,plan,active,subscription_end,logo_mime,campus_enabled,planning_mode FROM schools ORDER BY id DESC')
     counts=allrows("SELECT school_id,COUNT(*) n FROM users WHERE role IN ('admin','administratif') GROUP BY school_id")
     account_counts={r['school_id']:r['n'] for r in counts}
     admins=allrows("SELECT school_id,first_name,last_name,name,email,phone,role,active,must_change_password FROM users WHERE role IN ('admin','administratif') ORDER BY id DESC")
@@ -1243,6 +1267,8 @@ def school_new():
         except ValueError:abort(400)
     plan=request.form.get('plan','standard')
     if plan not in ('essentiel','standard','premium'):abort(400)
+    planning_mode=request.form.get('planning_mode','dynamic')
+    if planning_mode not in ('dynamic','private'):abort(400)
     slug=slugify(name)
     if not slug:abort(400)
     n=2;unique=slug
@@ -1250,7 +1276,7 @@ def school_new():
         unique=slug+'_'+str(n);n+=1
     logo,mime=read_logo(request.files.get('logo'))
     with db() as c:
-        sid=c.execute('INSERT INTO schools(name,slug,plan,subscription_end,logo,logo_mime,campus_enabled) VALUES (?,?,?,?,?,?,?)',(name,unique,plan,end,logo,mime,int(request.form.get('campus_enabled')=='1'))).lastrowid
+        sid=c.execute('INSERT INTO schools(name,slug,plan,subscription_end,logo,logo_mime,campus_enabled,planning_mode) VALUES (?,?,?,?,?,?,?,?)',(name,unique,plan,end,logo,mime,int(request.form.get('campus_enabled')=='1'),planning_mode)).lastrowid
         current_date=datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()
         school_year_start=current_date.year if current_date.month>=8 else current_date.year-1
         year_label=f'{school_year_start}-{school_year_start+1}'
@@ -1459,10 +1485,12 @@ def school_update(sid):
             flash('Choisissez soit le remplacement, soit la suppression du logo.','error')
             return redirect(url_for('schools'))
         campus_enabled=int(request.form.get('campus_enabled')=='1')
+        planning_mode=request.form.get('planning_mode',school['planning_mode'])
+        if planning_mode not in ('dynamic','private'):abort(400)
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
-            c.execute('UPDATE schools SET name=?,slug=?,plan=?,subscription_end=?,campus_enabled=? WHERE id=?',
-                      (name,slug,plan,end,campus_enabled,sid))
+            c.execute('UPDATE schools SET name=?,slug=?,plan=?,subscription_end=?,campus_enabled=?,planning_mode=? WHERE id=?',
+                      (name,slug,plan,end,campus_enabled,planning_mode,sid))
             if logo:
                 c.execute('UPDATE schools SET logo=?,logo_mime=? WHERE id=?',(logo,mime,sid))
             elif request.form.get('remove_logo')=='1':
@@ -3565,7 +3593,7 @@ def planning():
                     session['planning_result']={'ok':False,'text':f'Conflit le {dt.strftime("%d/%m/%Y")} : classe, enseignant ou salle déjà occupé(e). Aucune séance créée.'}
                     flash(f'Conflit le {dt.strftime("%d/%m/%Y")} : classe, enseignant ou salle déjà occupé(e). Aucune séance ajoutée.','error')
                     return redirect(url_for('planning'))
-                cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room,series_id) VALUES (?,?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room,series_id))
+                cur=c.execute('INSERT INTO lessons(school_id,course_id,teacher_id,starts_at,ends_at,room,series_id,planning_shared) VALUES (?,?,?,?,?,?,?,?)',(school_id(),course_id,course['teacher_id'],start_txt,end_txt,room,series_id,int(school_planning_mode()=='dynamic')))
                 created.append(cur.lastrowid)
         notify_event([course_id],f'{len(created)} séance(s) programmée(s) : '+course['name']+' — début '+dates[0].strftime('%d/%m/%Y à %H:%M'),'/planning',teacher_ids=[course['teacher_id']],include_management=False,skip_teacher_email=True,email_roles=())
         audit('lesson.created',','.join(str(x) for x in created))
@@ -3586,6 +3614,8 @@ def planning():
     elif u['role']=='parent':
         query+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id AND e.school_id=p.school_id WHERE p.school_id=l.school_id AND p.parent_id=? AND p.active=1 AND e.class_id=cl.id AND e.year_id=cl.year_id AND cl.parents_enabled=1)'
         args.append(u['id'])
+    if u['role'] not in ('admin','administratif') and school_planning_mode()=='private':
+        query+=' AND l.planning_shared=1'
     events=allrows(query,args)
     return render_template('planning.html',planning_draft=session.get(draft_key,{}) if u['role'] in ('admin','administratif') else {},planning_result=session.pop('planning_result',None),now_iso=datetime.datetime.now().strftime('%Y-%m-%dT%H:%M'),events=events,video_classes=allrows("""SELECT cl.id,cl.name,cl.video_url,cl.filiere_id,f.name filiere_name,y.label academic_year FROM classes cl JOIN years y ON y.id=cl.year_id AND y.school_id=cl.school_id LEFT JOIN filieres f ON f.id=cl.filiere_id AND f.school_id=cl.school_id WHERE cl.school_id=? AND cl.video_url IS NOT NULL AND cl.video_url<>'' ORDER BY LOWER(f.name),LOWER(cl.name)""",(school_id(),)) if u['role'] in ('admin','administratif') else [],rooms=[row['room'] for row in scoped("SELECT DISTINCT TRIM(room) AS room FROM lessons WHERE school_id=? AND room IS NOT NULL AND TRIM(room)<>'' ORDER BY room")],courses=allrows('SELECT c.* FROM courses c JOIN classes cl ON cl.id=c.class_id WHERE c.school_id=? AND cl.year_id=? ORDER BY c.name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [],classes=allrows('SELECT id,name FROM classes WHERE school_id=? AND year_id=? ORDER BY name',(school_id(),selected['id'] if selected else -1)) if u['role'] in ('admin','administratif') else [])
 
@@ -4858,7 +4888,7 @@ def attendance_save(lid):
 def planning_json():
     u=current_user()
     if u['role']=='superadmin':abort(403)
-    sql='''SELECT l.id,l.course_id,l.starts_at,l.ends_at,l.status,l.room,l.validated,l.actual_minutes,l.series_id,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? AND l.hidden_from_planning=0'''; args=[school_id()]
+    sql='''SELECT l.id,l.course_id,l.starts_at,l.ends_at,l.status,l.room,l.validated,l.actual_minutes,l.series_id,l.planning_shared,c.name course,c.class_id,cl.name class_name,l.teacher_id,t.name teacher_name FROM lessons l JOIN courses c ON c.id=l.course_id JOIN classes cl ON cl.id=c.class_id LEFT JOIN users t ON t.id=l.teacher_id WHERE l.school_id=? AND l.hidden_from_planning=0'''; args=[school_id()]
     selected=selected_academic_year()
     if selected:
         sql+=' AND cl.year_id=?'
@@ -4871,7 +4901,9 @@ def planning_json():
     elif u['role']=='parent':
         sql+=' AND EXISTS (SELECT 1 FROM parent_links p JOIN enrollments e ON e.student_id=p.student_id AND e.school_id=p.school_id WHERE p.school_id=l.school_id AND p.parent_id=? AND e.class_id=cl.id AND e.year_id=cl.year_id AND p.active=1 AND cl.parents_enabled=1)'
         args.append(u['id'])
-    response=jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':lesson_utc_iso(x['starts_at']),'end':lesson_utc_iso(x['ends_at']),'extendedProps':{'status':x['status'],'seriesId':x['series_id'],'courseId':x['course_id'],'startsAt':x['starts_at'],'endsAt':x['ends_at'],'editable':x['status']=='programmee' and not x['validated'] and not x['actual_minutes'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
+    if u['role'] not in ('admin','administratif') and school_planning_mode()=='private':
+        sql+=' AND l.planning_shared=1'
+    response=jsonify([{'id':x['id'],'title':x['course']+' — '+x['class_name']+' · '+(x['teacher_name'] or 'Enseignant à préciser')+' · '+(x['room'] or 'Salle à préciser'),'start':lesson_utc_iso(x['starts_at']),'end':lesson_utc_iso(x['ends_at']),'extendedProps':{'status':x['status'],'seriesId':x['series_id'],'planningShared':bool(x['planning_shared']),'courseId':x['course_id'],'startsAt':x['starts_at'],'endsAt':x['ends_at'],'editable':x['status']=='programmee' and not x['validated'] and not x['actual_minutes'],'room':x['room'],'teacher':x['teacher_name'],'classId':x['class_id'],'className':x['class_name'],'teacherId':x['teacher_id'],'actionable':(u['role'] in ('enseignant','admin','administratif') and (u['role']!='enseignant' or x['teacher_id']==u['id']))}} for x in allrows(sql,args)])
     response.headers['Cache-Control']='private, max-age=10'
     response.headers['Vary']='Cookie'
     return response
