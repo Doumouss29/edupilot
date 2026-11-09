@@ -1393,6 +1393,22 @@ def school_update(sid):
     elif action in ('activate','deactivate'):
         execute('UPDATE schools SET active=? WHERE id=?',(1 if action=='activate' else 0,sid))
         flash('Statut de l’établissement mis à jour.','success')
+    elif action=='planning_mode':
+        # Keep publication settings independent from legacy URL slugs and logos.
+        mode=request.form.get('planning_mode','')
+        if mode not in ('dynamic','private'):abort(400,'Mode de planning invalide')
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            c.execute('UPDATE schools SET planning_mode=? WHERE id=?',(mode,sid))
+            if school['planning_mode']!='private' and mode=='private':
+                c.execute("""UPDATE lessons SET planning_shared=0
+                    WHERE school_id=? AND course_id IN (
+                        SELECT co.id FROM courses co
+                        JOIN classes cl ON cl.id=co.class_id AND cl.school_id=co.school_id
+                        JOIN years y ON y.id=cl.year_id AND y.school_id=co.school_id
+                        WHERE co.school_id=? AND y.status<>'archived')""",(sid,sid))
+        audit('school.planning_mode_updated',f'{sid}:{mode}')
+        flash('Mode de diffusion du planning enregistré.','success')
     elif action=='update':
         end=request.form.get('subscription_end','').strip() or None
         if end:
@@ -1403,7 +1419,8 @@ def school_update(sid):
         if not name or len(name)>180:
             flash('Le nom de l’établissement est obligatoire (180 caractères maximum).','error')
             return redirect(url_for('schools'))
-        if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{1,79}',slug):
+        # Preserve legacy identifiers unchanged; validate only URL changes.
+        if slug!=school['slug'] and not re.fullmatch(r'[a-z0-9][a-z0-9_-]{1,79}',slug):
             flash('Identifiant URL invalide : utilisez 2 à 80 caractères (lettres minuscules, chiffres, tirets ou underscores).','error')
             return redirect(url_for('schools'))
         if one('SELECT id FROM schools WHERE slug=? AND id<>?',(slug,sid)):
