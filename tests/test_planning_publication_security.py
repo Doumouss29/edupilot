@@ -152,6 +152,35 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
         self.actor(6)
         self.assertEqual(self.client.get('/api/planning').get_json(),[])
 
+    def test_private_creation_stays_draft_and_sends_no_notifications(self):
+        self.actor(1)
+        response=self.client.post('/planning',data={
+            'csrf':'publication-csrf','course_id':'1','class_id':'1',
+            'mode':'unique','planning_timezone':'Africa/Abidjan',
+            'lesson_date':'2026-11-24','start_time':'08:00',
+            'duration_hours':'2','room':'A2'})
+        self.assertEqual(response.status_code,302)
+        added=project.one("SELECT id,planning_shared FROM lessons WHERE starts_at='2026-11-24T08:00'")
+        self.assertIsNotNone(added)
+        self.assertEqual(added['planning_shared'],0)
+        self.assertEqual(project.one('SELECT COUNT(*) n FROM notifications')['n'],0)
+
+    def test_planning_notification_only_queues_push_not_email(self):
+        self.actor(1)
+        project.notify([2,3],'Planning modifié','/planning',
+                       email_roles=('etudiant',),defer_external=True)
+        rows=project.allrows('SELECT channel FROM notification_delivery_queue')
+        self.assertEqual([row['channel'] for row in rows],['push','push'])
+
+    def test_private_draft_edit_does_not_notify_students(self):
+        self.actor(1)
+        response=self.client.post('/lessons/1/edit',data={
+            'csrf':'publication-csrf','course_id':'1',
+            'lesson_date':'2026-11-12','start_time':'08:00',
+            'duration_hours':'2','room':'A2'})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(project.one('SELECT COUNT(*) n FROM notifications')['n'],0)
+
     def test_plaintext_and_html_escape_user_content(self):
         user={'name':'Étudiant Test'}
         lesson={'starts_at':'2026-11-10T08:00','ends_at':'2026-11-10T09:00',
