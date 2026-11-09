@@ -1,5 +1,5 @@
 """EduPilot — plateforme de gestion scolaire multi-établissements."""
-import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib, csv, io, hashlib, time, hmac, base64, struct, zipfile
+import os, sqlite3, secrets, unicodedata, re, json, datetime, calendar, functools, smtplib, csv, io, hashlib, time, hmac, base64, struct, zipfile, html
 from openpyxl import load_workbook
 from flask import Response
 from contextlib import contextmanager
@@ -472,7 +472,7 @@ def audit(action,details=''):
     u=current_user()
     execute('INSERT INTO audit(school_id,user_id,action,details) VALUES (?,?,?,?)',(u['school_id'],u['id'],action,details))
 
-def send_brevo_email(address,subject,message,school_id=None,recipient_user_id=None):
+def send_brevo_email(address,subject,message,school_id=None,recipient_user_id=None,html_content=None):
     """Email transactionnel Brevo. Ne journalise ni identifiants ni liens secrets."""
     api_key=os.getenv('BREVO_API_KEY','').strip()
     sender=os.getenv('BREVO_SENDER_EMAIL','').strip()
@@ -481,8 +481,9 @@ def send_brevo_email(address,subject,message,school_id=None,recipient_user_id=No
         return False
     try:
         response=requests.post('https://api.brevo.com/v3/smtp/email',
-            json={'sender':{'email':sender,'name':os.getenv('BREVO_SENDER_NAME','EduPilot')},
+            json=dict({'sender':{'email':sender,'name':os.getenv('BREVO_SENDER_NAME','EduPilot')},
                   'to':[{'email':address}],'subject':subject,'textContent':message},
+                  **({'htmlContent':html_content} if html_content else {})),
             headers={'api-key':api_key,'Content-Type':'application/json'},timeout=8)
         response.raise_for_status()
         # Brevo HTTP 201 acknowledges acceptance, NOT delivery to the inbox.
