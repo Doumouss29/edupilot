@@ -177,8 +177,15 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
 
     def test_planning_notification_only_queues_push_not_email(self):
         self.actor(1)
-        project.notify([2,3],'Planning modifié','/planning',
-                       email_roles=('etudiant',),defer_external=True)
+        # notify() reads the authenticated school from Flask's request session.
+        # A direct Python call must explicitly provide that request context.
+        from flask import session
+        user=project.one('SELECT * FROM users WHERE id=1')
+        with project.app.test_request_context('/planning'):
+            session['uid']=1
+            session['auth_stamp']=project.session_auth_stamp(user)
+            project.notify([2,3],'Planning modifié','/planning',
+                           email_roles=('etudiant',),defer_external=True)
         rows=project.allrows('SELECT channel FROM notification_delivery_queue')
         self.assertEqual([row['channel'] for row in rows],['push','push'])
 
