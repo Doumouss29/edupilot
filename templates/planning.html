@@ -171,7 +171,10 @@ document.addEventListener('DOMContentLoaded',()=>{
 {% if not classes %}<p class="muted">Aucune classe pour l'année scolaire sélectionnée.</p>{% endif %}
 </section>
 <p class="muted">Un e-mail récapitulatif sera préparé pour chaque enseignant et étudiant concerné, avec uniquement ses propres cours. Les parents auront accès aux séances partagées dans l'application.</p>
-<button type="submit" class="btn primary" id="planning-share-submit">{{'Confirmer le partage' if planning_mode=='private' else 'Confirmer l’envoi'}}</button>
+<div style="display:flex;flex-wrap:wrap;gap:10px">
+<button type="submit" name="operation" value="share" class="btn primary" id="planning-share-submit">{{'Confirmer le partage' if planning_mode=='private' else 'Confirmer l’envoi'}}</button>
+{% if planning_mode=='private' %}<button type="submit" name="operation" value="unshare" class="btn outline" id="planning-unshare-submit">Retirer de la diffusion</button>{% endif %}
+</div>
 </form>
 </dialog>
 {% if planning_mode=='private' %}<p class="muted">Mode sur partage : seules les séances des semaines et des classes sélectionnées seront visibles après publication.</p>{% endif %}
@@ -397,15 +400,24 @@ shareForm?.addEventListener('submit',async event=>{
  const checked=classBoxes.filter(box=>box.checked);
  if(!checked.length){alert('Choisissez au moins une classe.');return;}
  const mode={{planning_mode|tojson}};
- const message=(mode==='private'?'Publier':'Envoyer')+' le planning de '+selectedWeeks.size+
-   ' semaine(s) pour '+checked.length+' classe(s) ?';
+ const operation=event.submitter?.value==='unshare'?'unshare':'share';
+ const message=(operation==='unshare'
+   ?'Retirer de la diffusion'
+   :(mode==='private'?'Publier':'Envoyer'))+' le planning de '+selectedWeeks.size+
+   ' semaine(s) pour '+checked.length+' classe(s) ?'+
+   (operation==='unshare'?' Les séances ne seront plus visibles dans les espaces des utilisateurs.':'');
  if(!confirm(message))return;
- const submit=document.getElementById('planning-share-submit');
- if(submit){submit.disabled=true;submit.textContent='Préparation des e-mails…';}
+ const submit=event.submitter||document.getElementById('planning-share-submit');
+ const originalLabel=submit?.textContent;
+ const buttons=[...shareForm.querySelectorAll('button[type="submit"]')];
+ buttons.forEach(button=>{button.disabled=true;});
+ if(submit)submit.textContent=operation==='unshare'?'Retrait en cours…':'Préparation des e-mails…';
  try{
+  const payload=new FormData(shareForm);
+  payload.set('operation',operation);
   const response=await fetch(shareForm.action,{
    method:'POST',headers:{'Accept':'application/json'},
-   credentials:'same-origin',body:new FormData(shareForm)
+   credentials:'same-origin',body:payload
   });
   const body=await response.json();
   if(!response.ok||!body.ok)throw new Error(body.error||'Le planning n’a pas pu être partagé.');
@@ -421,7 +433,8 @@ shareForm?.addEventListener('submit',async event=>{
   notice.textContent=error.message||'Erreur pendant le partage.';
   shareDialog.querySelector('.planning-dialog-header')?.after(notice);
  }finally{
-  if(submit){submit.disabled=false;submit.textContent=mode==='private'?'Confirmer le partage':'Confirmer l’envoi';}
+  buttons.forEach(button=>{button.disabled=false;});
+  if(submit)submit.textContent=originalLabel;
  }
 });
 {% endif %}
