@@ -3533,7 +3533,7 @@ def planning_email_content(recipient,lessons,monday,end,school_name,selected_wee
     return plain,markup
 
 
-def planning_mail_recipients(sid,monday,end,year_id,class_ids=None):
+def planning_mail_recipients(sid,monday,end,year_id,class_ids=None,include_unshared=False):
     """Build one lesson list per user, strictly within their own school and classes."""
     if class_ids is None:
         class_ids=[row['id'] for row in allrows(
@@ -3547,8 +3547,8 @@ def planning_mail_recipients(sid,monday,end,year_id,class_ids=None):
         WHERE l.school_id=? AND cl.year_id=? AND cl.id IN ({clause})
         AND l.hidden_from_planning=0 AND l.starts_at>=? AND l.starts_at<?
         AND l.status NOT IN ('annulee','reportee')
-        AND (l.planning_shared=1 OR (SELECT planning_mode FROM schools WHERE id=l.school_id)='dynamic')
-        ORDER BY l.starts_at,l.id""",(sid,year_id,*class_ids,monday.isoformat(),end.isoformat()))
+        AND (?=1 OR l.planning_shared=1 OR (SELECT planning_mode FROM schools WHERE id=l.school_id)='dynamic')
+        ORDER BY l.starts_at,l.id""",(sid,year_id,*class_ids,monday.isoformat(),end.isoformat(),int(include_unshared)))
     if not lessons:return {}
     eligible_classes={item['class_id'] for item in lessons}
     users=allrows("""SELECT id,name,email,role FROM users
@@ -3610,6 +3610,15 @@ def planning_share():
     # Publish and enqueue in one transaction: failure does not publish only half
     # of the chosen period. Other classes/weeks and historical archives remain untouched.
     recipient_lessons={}
+    for monday in weeks:
+        end=monday+datetime.timedelta(days=7)
+        for uid,(user,lessons) in planning_mail_recipients(
+                sid,monday,end,year['id'],class_ids,
+                include_unshared=(mode=='private')).items():
+            if uid not in recipient_lessons:
+                recipient_lessons[uid]=[user,{}]
+            for lesson in lessons:
+                recipient_lessons[uid][1][lesson['id']]=lesson
     published=0
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -3626,15 +3635,6 @@ def planning_share():
                        AND cl.id IN ({placeholders}))""",
                     (sid,monday.isoformat(),end.isoformat(),sid,year['id'],*class_ids))
                 published+=updated.rowcount
-            # Selection is constrained by school, year, classes and the exact
-            # Monday-Sunday interval. Teacher/student recipient scoping is inside
-            # planning_mail_recipients, not determined by the client.
-            for uid,(user,lessons) in planning_mail_recipients(
-                    sid,monday,end,year['id'],class_ids).items():
-                if uid not in recipient_lessons:
-                    recipient_lessons[uid]=[user,{}]
-                for lesson in lessons:
-                    recipient_lessons[uid][1][lesson['id']]=lesson
         queued=0
         first=weeks[0]
         last_end=weeks[-1]+datetime.timedelta(days=7)
