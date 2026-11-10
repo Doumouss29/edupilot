@@ -146,13 +146,37 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 </script>{% endif %}<section class="panel calendar-panel">{% if me.role=='admin' %}<div class="page-actions" style="margin-bottom:14px"><a class="btn {{'primary' if request.args.get('mine')=='1' else 'outline'}}" href="{{url_for('planning',mine=1)}}">Mes séances d’enseignement</a><a class="btn {{'outline' if request.args.get('mine')=='1' else 'primary'}}" href="{{url_for('planning')}}">Planning de l’établissement</a></div>{% endif %}<div class="live-filter-bar" id="planning-live-filters"><label>Classe<select id="calendar-filter-class"><option value="">Toutes les classes</option></select></label><label>Enseignant<select id="calendar-filter-teacher"><option value="">Tous les enseignants</option></select></label></div><div class="planning-print-tools"><button class="btn outline" type="button" id="print-planning">🖨 Imprimer le planning</button>
 {% if me.role in ('admin','administratif') %}
-<form method="post" action="{{url_for('planning_share')}}" id="planning-share-form" style="display:flex;flex-wrap:wrap;gap:10px;align-items:end">
-<input type="hidden" name="csrf" value="{{csrf}}">
-<label>Semaine à envoyer (heure d'Abidjan)<input type="date" name="week" id="planning-share-week" required></label>
-<button class="btn primary" type="submit">{{'Partager le planning' if planning_mode=='private' else 'Envoyer le planning'}}</button>
-</form>
+<button class="btn primary" type="button" id="open-planning-share">{{'Partager le planning' if planning_mode=='private' else 'Envoyer le planning'}}</button>
 {% endif %}</div>
-{% if me.role in ('admin','administratif') and planning_mode=='private' %}<p class="muted">Mode sur partage : les nouveaux cours restent invisibles aux étudiants, parents et enseignants avant le partage. Le partage rend visibles les séances de l'année scolaire et envoie par e-mail les cours de la semaine choisie.</p>{% endif %}<div id="planning-print-heading" aria-hidden="true"></div><p class="muted" id="planning-timezone-label"></p><div id="calendar"></div></section><div class="legend"><span><i style="background:#2b9769"></i> Réalisée</span><span><i style="background:#4383d5"></i> Programmée</span><span><i style="background:#d59a36"></i> À confirmer</span><span><i style="background:#d15b65"></i> Non effectuée</span></div>{% if me.role in ('admin','administratif') %}<section class="panel"><div class="panel-title"><h3>Gérer plusieurs séances</h3><span class="muted">Sélectionnez des séances sans historique pour les supprimer en masse. La modification se fait directement sur chaque séance du calendrier.</span></div>
+{% if me.role in ('admin','administratif') %}
+<dialog id="planning-share-dialog" class="planning-action-dialog" aria-labelledby="planning-share-heading">
+<div class="planning-dialog-header"><h2 id="planning-share-heading">{{'Partager le planning' if planning_mode=='private' else 'Envoyer le planning'}}</h2><button type="button" class="btn outline sm" id="planning-share-close">Fermer</button></div>
+<p class="muted">Choisissez précisément les semaines et les classes concernées. Les autres semaines et classes ne seront pas diffusées.</p>
+<form method="post" action="{{url_for('planning_share')}}" id="planning-share-form">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<section style="margin:14px 0">
+<h3>1. Semaines à partager</h3>
+<div style="display:flex;flex-wrap:wrap;align-items:end;gap:10px">
+<label>Choisir une date dans la semaine<input type="date" id="planning-share-week-choice" aria-label="Date de la semaine à ajouter"></label>
+<button type="button" class="btn outline sm" id="planning-share-add-week">+ Ajouter cette semaine</button>
+</div>
+<div id="planning-share-week-list" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0" aria-live="polite"></div>
+<p class="muted">Vous pouvez ajouter plusieurs semaines, même non consécutives (26 maximum).</p>
+</section>
+<section style="margin:14px 0">
+<div class="planning-dialog-header"><h3>2. Classes concernées</h3><button type="button" id="planning-share-select-all" class="btn outline sm">Tout sélectionner</button></div>
+<div id="planning-share-class-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;max-height:230px;overflow:auto">
+{% for cl in classes %}<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="class_ids" value="{{cl.id}}" style="width:auto"> {{cl.name}}</label>{% endfor %}
+</div>
+{% if not classes %}<p class="muted">Aucune classe pour l'année scolaire sélectionnée.</p>{% endif %}
+</section>
+<p class="muted">Un e-mail récapitulatif sera préparé pour chaque enseignant et étudiant concerné, avec uniquement ses propres cours. Les parents auront accès aux séances partagées dans l'application.</p>
+<button type="submit" class="btn primary" id="planning-share-submit">{{'Confirmer le partage' if planning_mode=='private' else 'Confirmer l’envoi'}}</button>
+</form>
+</dialog>
+{% if planning_mode=='private' %}<p class="muted">Mode sur partage : seules les séances des semaines et des classes sélectionnées seront visibles après publication.</p>{% endif %}
+{% endif %}
+<div id="planning-print-heading" aria-hidden="true"></div><p class="muted" id="planning-timezone-label"></p><div id="calendar"></div></section><div class="legend"><span><i style="background:#2b9769"></i> Réalisée</span><span><i style="background:#4383d5"></i> Programmée</span><span><i style="background:#d59a36"></i> À confirmer</span><span><i style="background:#d15b65"></i> Non effectuée</span></div>{% if me.role in ('admin','administratif') %}<section class="panel"><div class="panel-title"><h3>Gérer plusieurs séances</h3><span class="muted">Sélectionnez des séances sans historique pour les supprimer en masse. La modification se fait directement sur chaque séance du calendrier.</span></div>
 <form method="post" action="{{url_for('lessons_bulk')}}" id="bulk-lessons"><input type="hidden" name="csrf" value="{{csrf}}">
 <div class="page-actions"><input type="hidden" name="action" value="delete"><button class="btn danger" type="submit">Supprimer les séances sélectionnées sans historique</button></div>
 <div class="table-scroll"><table><thead><tr><th><input type="checkbox" id="all-lessons" aria-label="Sélectionner les séances"></th><th>Cours / classe</th><th>Début</th><th>Fin</th><th>Enseignant</th><th>Salle</th><th>Statut</th></tr></thead><tbody>{% for e in events %}<tr><td><input type="checkbox" name="lesson_ids" value="{{e.id}}" {% if e.status!='programmee' or e.actual_minutes or e.validated %}disabled{% endif %}></td><td>{{e.course_name}} — {{e.class_name}}</td><td><time data-abidjan-time="{{e.starts_at}}">{{e.starts_at|replace('T',' ')}}</time></td><td><time data-abidjan-time="{{e.ends_at}}">{{e.ends_at|replace('T',' ')}}</time></td><td>{{e.teacher_name or '—'}}</td><td>{{e.room or '—'}}</td><td><span class="tag">{{e.status}}</span></td></tr>{% else %}<tr><td colspan="7">Aucune séance à gérer.</td></tr>{% endfor %}</tbody></table></div></form></section>
@@ -214,13 +238,6 @@ async function loadPlanning(){
   calendarItems=await response.json();
   refreshChoices(calendarItems);
   return calendarItems;
-}
-const shareWeek=document.getElementById('planning-share-week');
-if(shareWeek){
- const fields=Object.fromEntries(new Intl.DateTimeFormat('fr-FR',{
-  timeZone:'Africa/Abidjan',year:'numeric',month:'2-digit',day:'2-digit'
- }).formatToParts(new Date()).filter(part=>part.type!=='literal').map(part=>[part.type,part.value]));
- shareWeek.value=fields.year+'-'+fields.month+'-'+fields.day;
 }
 const c=new FullCalendar.Calendar(el,{initialView:window.innerWidth<720?'timeGridDay':'timeGridWeek',locale:'fr',firstDay:1,nowIndicator:true,slotMinTime:'07:00:00',slotMaxTime:'21:00:00',height:'auto',headerToolbar:{left:'prev,next today',center:'title',right:'timeGridDay,timeGridWeek,dayGridMonth'},buttonText:{today:"Aujourd'hui",day:'Jour',week:'Semaine',month:'Mois'},events:function(info,success,failure){loadPlanning().then(records=>success(records.filter(item=>{
 const props=item.extendedProps||{};
@@ -314,14 +331,76 @@ eventDidMount:function(info){const status=info.event.extendedProps.status;const 
 }});for(const select of [filterClass,filterTeacher])select.addEventListener('change',()=>c.refetchEvents());c.render();
 {% if me.role in ('admin','administratif') %}
 const shareForm=document.getElementById('planning-share-form');
+const shareDialog=document.getElementById('planning-share-dialog');
+const weekChoice=document.getElementById('planning-share-week-choice');
+const weekList=document.getElementById('planning-share-week-list');
+const classBoxes=[...shareForm.querySelectorAll('input[name="class_ids"]')];
+const selectedWeeks=new Set();
+const isoWeekOf=(dateString)=>{
+ const day=new Date(dateString+'T12:00:00Z');
+ if(Number.isNaN(day.getTime()))return null;
+ const monday=new Date(day);
+ monday.setUTCDate(monday.getUTCDate()-(monday.getUTCDay()+6)%7);
+ const thursday=new Date(monday);
+ thursday.setUTCDate(thursday.getUTCDate()+3);
+ const year=thursday.getUTCFullYear();
+ const first=new Date(Date.UTC(year,0,4,12));
+ first.setUTCDate(first.getUTCDate()-(first.getUTCDay()+6)%7);
+ const week=1+Math.round((monday-first)/604800000);
+ return {key:year+'-W'+String(week).padStart(2,'0'),start:monday,
+  end:new Date(monday.getTime()+6*86400000)};
+};
+const dateLabel=(date)=>new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}).format(date);
+const renderWeeks=()=>{
+ weekList.replaceChildren();
+ [...selectedWeeks].sort().forEach(value=>{
+  const [year,week]=value.split('-W').map(Number);
+  const jan4=new Date(Date.UTC(year,0,4,12));
+  jan4.setUTCDate(jan4.getUTCDate()-(jan4.getUTCDay()+6)%7+(week-1)*7);
+  const end=new Date(jan4.getTime()+6*86400000);
+  const chip=document.createElement('span');
+  chip.style.cssText='display:inline-flex;align-items:center;gap:8px;border:1px solid #dbe4ed;border-radius:12px;padding:7px 10px';
+  chip.append(document.createTextNode(dateLabel(jan4)+' – '+dateLabel(end)));
+  const remove=document.createElement('button');
+  remove.type='button';remove.className='btn outline sm';remove.textContent='✕';
+  remove.setAttribute('aria-label','Retirer la semaine '+value);
+  remove.addEventListener('click',()=>{selectedWeeks.delete(value);renderWeeks();});
+  chip.appendChild(remove);
+  const hidden=document.createElement('input');
+  hidden.type='hidden';hidden.name='weeks';hidden.value=value;
+  weekList.append(chip,hidden);
+ });
+};
+document.getElementById('open-planning-share')?.addEventListener('click',()=>{
+ const current=c.getDate();
+ if(weekChoice){
+  const y=current.getFullYear(),m=String(current.getMonth()+1).padStart(2,'0');
+  weekChoice.value=y+'-'+m+'-'+String(current.getDate()).padStart(2,'0');
+ }
+ if(!shareDialog.open)shareDialog.showModal();
+});
+document.getElementById('planning-share-close')?.addEventListener('click',()=>shareDialog.close());
+document.getElementById('planning-share-add-week')?.addEventListener('click',()=>{
+ if(!weekChoice.value){alert('Choisissez d’abord une date.');return;}
+ const week=isoWeekOf(weekChoice.value);
+ if(!week){alert('Date invalide.');return;}
+ if(!selectedWeeks.has(week.key)&&selectedWeeks.size>=26){alert('Maximum 26 semaines.');return;}
+ selectedWeeks.add(week.key);renderWeeks();
+});
+document.getElementById('planning-share-select-all')?.addEventListener('click',()=>{
+ const check=!classBoxes.every(box=>box.checked);
+ classBoxes.forEach(box=>{box.checked=check;});
+});
 shareForm?.addEventListener('submit',async event=>{
  event.preventDefault();
+ if(!selectedWeeks.size){alert('Ajoutez au moins une semaine.');return;}
+ const checked=classBoxes.filter(box=>box.checked);
+ if(!checked.length){alert('Choisissez au moins une classe.');return;}
  const mode={{planning_mode|tojson}};
- const message=mode==='private'
-    ?'Partager le planning et le rendre visible aux enseignants, étudiants et parents ? Les e-mails porteront sur la semaine choisie.'
-    :'Envoyer le planning de la semaine choisie aux enseignants et aux étudiants concernés ?';
+ const message=(mode==='private'?'Publier':'Envoyer')+' le planning de '+selectedWeeks.size+
+   ' semaine(s) pour '+checked.length+' classe(s) ?';
  if(!confirm(message))return;
- const submit=shareForm.querySelector('button[type="submit"]');
+ const submit=document.getElementById('planning-share-submit');
  if(submit){submit.disabled=true;submit.textContent='Préparation des e-mails…';}
  try{
   const response=await fetch(shareForm.action,{
@@ -330,6 +409,7 @@ shareForm?.addEventListener('submit',async event=>{
   });
   const body=await response.json();
   if(!response.ok||!body.ok)throw new Error(body.error||'Le planning n’a pas pu être partagé.');
+  shareDialog.close();
   calendarItems=null;c.refetchEvents();
   const notice=document.createElement('div');
   notice.className='flash success';notice.setAttribute('role','status');
@@ -339,12 +419,9 @@ shareForm?.addEventListener('submit',async event=>{
   const notice=document.createElement('div');
   notice.className='flash error';notice.setAttribute('role','alert');
   notice.textContent=error.message||'Erreur pendant le partage.';
-  document.querySelector('.calendar-panel')?.prepend(notice);
+  shareDialog.querySelector('.planning-dialog-header')?.after(notice);
  }finally{
-  if(submit){
-   submit.disabled=false;
-   submit.textContent=mode==='private'?'Partager le planning':'Envoyer le planning';
-  }
+  if(submit){submit.disabled=false;submit.textContent=mode==='private'?'Confirmer le partage':'Confirmer l’envoi';}
  }
 });
 {% endif %}
