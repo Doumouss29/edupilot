@@ -3606,6 +3606,39 @@ def planning_share():
     if len(set(weeks))!=len(raw_weeks):
         abort(400,'Une semaine a été sélectionnée plusieurs fois')
     weeks.sort()
+    operation=request.form.get('operation','share')
+    if operation not in ('share','unshare'):abort(400,'Action de partage invalide')
+    if operation=='unshare':
+        if mode!='private':abort(400,'Le retrait de publication nécessite le mode sur partage')
+        retracted=[]
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            for monday in weeks:
+                end=monday+datetime.timedelta(days=7)
+                retracted.extend(c.execute(f"""SELECT l.id,l.course_id,l.teacher_id FROM lessons l
+                    JOIN courses co ON co.id=l.course_id AND co.school_id=l.school_id
+                    JOIN classes cl ON cl.id=co.class_id AND cl.school_id=co.school_id
+                    WHERE l.school_id=? AND cl.year_id=?
+                    AND cl.id IN ({placeholders}) AND l.starts_at>=? AND l.starts_at<?
+                    AND l.planning_shared=1 AND l.hidden_from_planning=0""",
+                    (sid,year['id'],*class_ids,monday.isoformat(),end.isoformat())).fetchall())
+                c.execute(f"""UPDATE lessons SET planning_shared=0
+                    WHERE school_id=? AND starts_at>=? AND starts_at<? AND course_id IN (
+                        SELECT co.id FROM courses co JOIN classes cl ON cl.id=co.class_id
+                        WHERE co.school_id=? AND cl.school_id=? AND cl.year_id=?
+                        AND cl.id IN ({placeholders}))""",
+                    (sid,monday.isoformat(),end.isoformat(),sid,sid,year['id'],*class_ids))
+        if retracted:
+            notify_event([row['course_id'] for row in retracted],
+                         f'{len(retracted)} séance(s) retirée(s) du planning partagé.',
+                         '/planning',teacher_ids=[row['teacher_id'] for row in retracted],
+                         email_roles=(),defer_external=True)
+        audit('planning.unshared',f'weeks={len(weeks)}:classes={len(class_ids)}:sessions={len(retracted)}')
+        message=f'{len(retracted)} séance(s) retirée(s) de la publication. Aucun e-mail envoyé.'
+        if request.accept_mimetypes.best=='application/json':
+            return jsonify(ok=True,message=message,unpublished=len(retracted),queued=0)
+        flash(message,'success')
+        return redirect(url_for('planning'))
     school=one('SELECT name FROM schools WHERE id=?',(sid,))
     # Publish and enqueue in one transaction: failure does not publish only half
     # of the chosen period. Other classes/weeks and historical archives remain untouched.
