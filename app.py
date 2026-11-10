@@ -3846,11 +3846,17 @@ def lesson_edit(lid):
         current=editable_lesson_row(c,lid)
         if not current or not lesson_editable(c,current):abort(400,'Séance non modifiable')
         assert_lesson_schedule_available(c,[item],{lid})
-        c.execute('UPDATE lessons SET course_id=?,teacher_id=?,starts_at=?,ends_at=?,room=? WHERE id=? AND school_id=?',
-                  (course_id,course['teacher_id'],item['start'],item['end'],room,lid,school_id()))
+        newly_shared=int(bool(current['planning_shared']))
+        if school_planning_mode()=='private' and newly_shared:
+            original_week=planning_digest_bounds(current['starts_at'][:10])[0]
+            target_week=planning_digest_bounds(item['start'][:10])[0]
+            if original_week!=target_week or current['class_id']!=course['class_id']:
+                newly_shared=0
+        c.execute('UPDATE lessons SET course_id=?,teacher_id=?,starts_at=?,ends_at=?,room=?,planning_shared=? WHERE id=? AND school_id=?',
+                  (course_id,course['teacher_id'],item['start'],item['end'],room,newly_shared,lid,school_id()))
     schedule_changed=(current['starts_at']!=item['start'] or current['ends_at']!=item['end'])
     changed=(schedule_changed or current['course_id']!=course_id or (current['room'] or '')!=room)
-    notification_required=changed and planning_lesson_visible(lesson)
+    notification_required=changed and bool(newly_shared or school_planning_mode()=='dynamic')
     notification_queued=True
     if notification_required:
         old_course=one('SELECT name FROM courses WHERE id=? AND school_id=?',(lesson['course_id'],school_id()))
