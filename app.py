@@ -3498,7 +3498,7 @@ def planning_email_content(recipient,lessons,monday,end,school_name,selected_wee
     href='/planning?week='+weeks[0].isoformat()
     url=os.getenv('PUBLIC_BASE_URL','https://edupilot.ci').rstrip('/')+href
     greeting='Bonjour '+str(recipient['name'] or '').strip()+','
-    plain='\\n'.join((greeting,'',heading,'',
+    plain='\n'.join((greeting,'',heading,'',
                       'Consultez votre planning EduPilot :',url,'',
                       'Établissement : '+str(school_name),'',
                       "L’équipe EduPilot"))
