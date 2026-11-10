@@ -157,7 +157,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 <section style="margin:14px 0">
 <h3>1. Semaines à partager</h3>
 <div style="display:flex;flex-wrap:wrap;align-items:end;gap:10px">
-<label>Choisir une date dans la semaine<input type="date" id="planning-share-week-choice" aria-label="Date de la semaine à ajouter"></label>
+<label>Date de début de semaine (lundi)<input type="date" id="planning-share-week-choice" aria-label="Lundi de la semaine à ajouter"></label>
 <button type="button" class="btn outline sm" id="planning-share-add-week">+ Ajouter cette semaine</button>
 </div>
 <div id="planning-share-week-list" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0" aria-live="polite"></div>
@@ -353,6 +353,7 @@ const isoWeekOf=(dateString)=>{
  return {key:year+'-W'+String(week).padStart(2,'0'),start:monday,
   end:new Date(monday.getTime()+6*86400000)};
 };
+const mondayInputValue=(dateString)=>isoWeekOf(dateString)?.start.toISOString().slice(0,10)||'';
 const dateLabel=(date)=>new Intl.DateTimeFormat('fr-FR',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}).format(date);
 const renderWeeks=()=>{
  weekList.replaceChildren();
@@ -378,15 +379,19 @@ document.getElementById('open-planning-share')?.addEventListener('click',()=>{
  const current=c.getDate();
  if(weekChoice){
   const y=current.getFullYear(),m=String(current.getMonth()+1).padStart(2,'0');
-  weekChoice.value=y+'-'+m+'-'+String(current.getDate()).padStart(2,'0');
+  weekChoice.value=mondayInputValue(y+'-'+m+'-'+String(current.getDate()).padStart(2,'0'));
  }
  if(!shareDialog.open)shareDialog.showModal();
+});
+weekChoice?.addEventListener('change',()=>{
+ if(weekChoice.value)weekChoice.value=mondayInputValue(weekChoice.value);
 });
 document.getElementById('planning-share-close')?.addEventListener('click',()=>shareDialog.close());
 document.getElementById('planning-share-add-week')?.addEventListener('click',()=>{
  if(!weekChoice.value){alert('Choisissez d’abord une date.');return;}
  const week=isoWeekOf(weekChoice.value);
  if(!week){alert('Date invalide.');return;}
+ weekChoice.value=mondayInputValue(weekChoice.value);
  if(!selectedWeeks.has(week.key)&&selectedWeeks.size>=26){alert('Maximum 26 semaines.');return;}
  selectedWeeks.add(week.key);renderWeeks();
 });
