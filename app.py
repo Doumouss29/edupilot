@@ -3597,7 +3597,7 @@ def planning_share():
     try:
         for value in raw_weeks:
             # ISO week strings such as 2026-W46, normalized to the Monday.
-            if not re.fullmatch(r'\\d{4}-W\\d{2}',value):
+            if not re.fullmatch(r'\d{4}-W\d{2}',value):
                 raise ValueError('Semaine invalide')
             monday=datetime.date.fromisocalendar(int(value[:4]),int(value[6:]),1)
             weeks.append(monday)
