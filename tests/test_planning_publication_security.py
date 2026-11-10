@@ -166,6 +166,53 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
         self.assertIn('17/11/2026',student['message'])
         self.assertNotIn('01/12/2026',student['message'])
 
+    def test_unshare_one_class_keeps_other_class_published(self):
+        self.actor(1)
+        self.assertEqual(self.share().status_code,302)
+        response=self.client.post('/planning/share',data={
+            'csrf':'publication-csrf','weeks':['2026-W46'],
+            'class_ids':['1'],'operation':'unshare'},
+            headers={'Accept':'application/json'})
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.get_json()['unpublished'],1)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=1')['planning_shared'],0)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=2')['planning_shared'],1)
+        self.actor(3)
+        self.assertEqual(self.client.get('/api/planning').get_json(),[])
+        self.actor(4)
+        self.assertEqual([e['id'] for e in self.client.get('/api/planning').get_json()],[2])
+
+    def test_unshare_does_not_queue_new_email(self):
+        self.actor(1)
+        self.share(classes=['1'])
+        initial=project.one("SELECT COUNT(*) n FROM notification_delivery_queue WHERE channel='email'")['n']
+        self.client.post('/planning/share',data={
+            'csrf':'publication-csrf','weeks':['2026-W46'],
+            'class_ids':['1'],'operation':'unshare'})
+        after=project.one("SELECT COUNT(*) n FROM notification_delivery_queue WHERE channel='email'")['n']
+        self.assertEqual(initial,after)
+
+    def test_dynamic_mode_cannot_unshare(self):
+        self.actor(1)
+        with project.db() as c:
+            c.execute("UPDATE schools SET planning_mode='dynamic' WHERE id=1")
+        response=self.client.post('/planning/share',data={
+            'csrf':'publication-csrf','weeks':['2026-W46'],
+            'class_ids':['1'],'operation':'unshare'})
+        self.assertEqual(response.status_code,400)
+
+    def test_moving_shared_lesson_to_unpublished_week_retracts_visibility(self):
+        self.actor(1)
+        self.share(classes=['1'])
+        response=self.client.post('/lessons/1/edit',data={
+            'csrf':'publication-csrf','course_id':'1',
+            'lesson_date':'2026-11-24','start_time':'08:00',
+            'duration_hours':'2','room':'A2'})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=1')['planning_shared'],0)
+        self.actor(3)
+        self.assertEqual(self.client.get('/api/planning').get_json(),[])
+
     def test_missing_class_is_rejected_without_publication(self):
         self.actor(1)
         response=self.client.post('/planning/share',data={
