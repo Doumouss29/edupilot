@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 </div>
 {% if not classes %}<p class="muted">Aucune classe pour l'année scolaire sélectionnée.</p>{% endif %}
 </section>
-<p class="muted">Un e-mail récapitulatif sera préparé pour chaque enseignant et étudiant concerné, avec uniquement ses propres cours. Les parents auront accès aux séances partagées dans l'application.</p>
+<p class="muted">Un seul e-mail récapitulatif des semaines choisies sera préparé par enseignant ou étudiant concerné, avec uniquement ses propres cours. Les parents auront accès aux séances publiées dans l'application.{% if planning_mode=='private' %} Le retrait de diffusion n'envoie pas d'e-mail et ne rappelle pas les e-mails déjà expédiés.{% endif %}</p>
 <div style="display:flex;flex-wrap:wrap;gap:10px">
 <button type="submit" name="operation" value="share" class="btn primary" id="planning-share-submit">{{'Confirmer le partage' if planning_mode=='private' else 'Confirmer l’envoi'}}</button>
 {% if planning_mode=='private' %}<button type="submit" name="operation" value="unshare" class="btn outline" id="planning-unshare-submit">Retirer de la diffusion</button>{% endif %}
