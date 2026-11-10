@@ -242,7 +242,9 @@ async function loadPlanning(){
   refreshChoices(calendarItems);
   return calendarItems;
 }
-const c=new FullCalendar.Calendar(el,{initialView:window.innerWidth<720?'timeGridDay':'timeGridWeek',locale:'fr',firstDay:1,nowIndicator:true,slotMinTime:'07:00:00',slotMaxTime:'21:00:00',height:'auto',headerToolbar:{left:'prev,next today',center:'title',right:'timeGridDay,timeGridWeek,dayGridMonth'},buttonText:{today:"Aujourd'hui",day:'Jour',week:'Semaine',month:'Mois'},events:function(info,success,failure){loadPlanning().then(records=>success(records.filter(item=>{
+const requestedWeek=new URLSearchParams(window.location.search).get('week');
+const initialPlanningDate=requestedWeek&&/^\\d{4}-\\d{2}-\\d{2}$/.test(requestedWeek)&&!Number.isNaN(new Date(requestedWeek+'T12:00:00Z').getTime())?requestedWeek:undefined;
+const c=new FullCalendar.Calendar(el,{initialDate:initialPlanningDate,initialView:window.innerWidth<720?'timeGridDay':'timeGridWeek',locale:'fr',firstDay:1,nowIndicator:true,slotMinTime:'07:00:00',slotMaxTime:'21:00:00',height:'auto',headerToolbar:{left:'prev,next today',center:'title',right:'timeGridDay,timeGridWeek,dayGridMonth'},buttonText:{today:"Aujourd'hui",day:'Jour',week:'Semaine',month:'Mois'},events:function(info,success,failure){loadPlanning().then(records=>success(records.filter(item=>{
 const props=item.extendedProps||{};
 return (!filterClass.value||String(props.classId)===filterClass.value)&&(!filterTeacher.value||String(props.teacherId)===filterTeacher.value);
 }))).catch(failure)},
