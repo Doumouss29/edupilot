@@ -71,9 +71,10 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
             session['auth_stamp']=project.session_auth_stamp(u)
             session['csrf']='publication-csrf'
 
-    def share(self):
+    def share(self,weeks=None,classes=None):
         return self.client.post('/planning/share',data={
-            'csrf':'publication-csrf','week':'2026-11-09'})
+            'csrf':'publication-csrf','weeks':weeks or ['2026-W46'],
+            'class_ids':classes or ['1','2']})
 
     def test_private_unshared_student_calendar_empty(self):
         self.actor(3)
@@ -112,7 +113,7 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
     def test_ajax_share_keeps_calendar_without_redirect(self):
         self.actor(1)
         response=self.client.post('/planning/share',data={
-            'csrf':'publication-csrf','week':'2026-11-09'},
+            'csrf':'publication-csrf','weeks':['2026-W46'],'class_ids':['1','2']},
             headers={'Accept':'application/json'})
         self.assertEqual(response.status_code,200)
         self.assertTrue(response.is_json)
@@ -134,6 +135,63 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
         self.assertIn('<table',mails[3]['html_content'])
         self.assertIn('\n',mails[3]['message'])
         self.assertNotIn('\\n',mails[3]['message'])
+
+    def test_only_selected_class_is_published_and_emailed(self):
+        self.actor(1)
+        response=self.share(classes=['1'])
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=1')['planning_shared'],1)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=2')['planning_shared'],0)
+        ids={row['user_id'] for row in project.allrows(
+            'SELECT user_id FROM notification_delivery_queue')}
+        self.assertEqual(ids,{2,3})
+        self.actor(4)
+        self.assertEqual(self.client.get('/api/planning').get_json(),[])
+
+    def test_selected_two_weeks_one_email_per_user(self):
+        with project.db() as c:
+            c.execute("""INSERT INTO lessons(id,school_id,course_id,teacher_id,starts_at,ends_at,
+                status,planning_shared) VALUES
+                (9,1,1,2,'2026-11-17T08:00','2026-11-17T10:00','programmee',0),
+                (10,1,1,2,'2026-12-01T08:00','2026-12-01T10:00','programmee',0)""")
+        self.actor(1)
+        response=self.share(weeks=['2026-W46','2026-W47'],classes=['1'])
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=9')['planning_shared'],1)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=10')['planning_shared'],0)
+        mails=project.allrows('SELECT user_id,message FROM notification_delivery_queue')
+        self.assertEqual(len(mails),2)
+        student=next(row for row in mails if row['user_id']==3)
+        self.assertIn('10/11/2026',student['message'])
+        self.assertIn('17/11/2026',student['message'])
+        self.assertNotIn('01/12/2026',student['message'])
+
+    def test_missing_class_is_rejected_without_publication(self):
+        self.actor(1)
+        response=self.client.post('/planning/share',data={
+            'csrf':'publication-csrf','weeks':['2026-W46']})
+        self.assertEqual(response.status_code,400)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=1')['planning_shared'],0)
+
+    def test_foreign_school_class_is_rejected(self):
+        self.actor(1)
+        response=self.share(classes=['1','3'])
+        self.assertEqual(response.status_code,403)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=1')['planning_shared'],0)
+
+    def test_unselected_week_is_not_published(self):
+        self.actor(1)
+        response=self.share(weeks=['2026-W47'],classes=['1'])
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=1')['planning_shared'],0)
+        self.assertEqual(project.one('SELECT COUNT(*) n FROM notification_delivery_queue')['n'],0)
+
+    def test_invalid_or_duplicate_weeks_rejected(self):
+        self.actor(1)
+        for weeks in (['2026-W99'],['2026-W46','2026-W46'],['invalid']):
+            response=self.share(weeks=weeks,classes=['1'])
+            self.assertEqual(response.status_code,400)
+        self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=1')['planning_shared'],0)
 
     def test_unenrolled_and_foreign_school_not_emailed(self):
         self.actor(1)
