@@ -118,21 +118,24 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code,200)
         self.assertTrue(response.is_json)
         self.assertTrue(response.get_json()['ok'])
-        self.assertEqual(response.get_json()['queued'],3)
+        self.assertEqual(response.get_json()['queued'],4)
 
     def test_share_queues_one_email_per_teacher_and_student(self):
         self.actor(1)
         self.share()
-        rows=project.allrows("SELECT user_id,message,html_content FROM notification_delivery_queue ORDER BY user_id")
-        self.assertEqual([row['user_id'] for row in rows],[2,3,4])
+        rows=project.allrows("SELECT user_id,message,html_content FROM notification_delivery_queue WHERE channel='email' ORDER BY user_id")
+        self.assertEqual([row['user_id'] for row in rows],[2,3,4,5])
         mails={row['user_id']:row for row in rows}
-        self.assertIn('Python & SIG',mails[3]['message'])
-        self.assertNotIn('Autre cours',mails[3]['message'])
-        self.assertIn('Autre cours',mails[4]['message'])
-        self.assertNotIn('Python & SIG',mails[4]['message'])
-        self.assertIn('Python & SIG',mails[2]['message'])
-        self.assertIn('Autre cours',mails[2]['message'])
-        self.assertIn('<table',mails[3]['html_content'])
+        self.assertIn('Votre planning de la semaine',mails[3]['message'])
+        self.assertIn('https://edupilot.ci/planning?week=2026-11-09',mails[3]['message'])
+        self.assertNotIn('Python & SIG',mails[3]['message'])
+        self.assertIn('Consulter mon planning',mails[3]['html_content'])
+        self.assertIn('https://edupilot.ci/planning?week=2026-11-09',mails[5]['message'])
+        notifications=project.allrows('SELECT user_id,href FROM notifications ORDER BY user_id')
+        self.assertEqual([row['user_id'] for row in notifications],[2,3,4,5])
+        self.assertTrue(all(row['href']=='/planning?week=2026-11-09' for row in notifications))
+        push=project.allrows("SELECT user_id FROM notification_delivery_queue WHERE channel='push' ORDER BY user_id")
+        self.assertEqual([row['user_id'] for row in push],[2,3,4,5])
         self.assertIn('\n',mails[3]['message'])
         self.assertNotIn('\\n',mails[3]['message'])
 
@@ -144,7 +147,7 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
         self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=2')['planning_shared'],0)
         ids={row['user_id'] for row in project.allrows(
             'SELECT user_id FROM notification_delivery_queue')}
-        self.assertEqual(ids,{2,3})
+        self.assertEqual(ids,{2,3,5})
         self.actor(4)
         self.assertEqual(self.client.get('/api/planning').get_json(),[])
 
@@ -159,12 +162,13 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
         self.assertEqual(response.status_code,302)
         self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=9')['planning_shared'],1)
         self.assertEqual(project.one('SELECT planning_shared FROM lessons WHERE id=10')['planning_shared'],0)
-        mails=project.allrows('SELECT user_id,message FROM notification_delivery_queue')
-        self.assertEqual(len(mails),2)
+        mails=project.allrows("SELECT user_id,message,href FROM notification_delivery_queue WHERE channel='email'")
+        self.assertEqual(len(mails),3)
+        self.assertTrue(all(row['href']=='/planning?week=2026-11-09' for row in mails))
         student=next(row for row in mails if row['user_id']==3)
-        self.assertIn('10/11/2026',student['message'])
-        self.assertIn('17/11/2026',student['message'])
-        self.assertNotIn('01/12/2026',student['message'])
+        self.assertIn('09/11/2026',student['message'])
+        self.assertIn('16/11/2026',student['message'])
+        self.assertNotIn('30/11/2026',student['message'])
 
     def test_unshare_one_class_keeps_other_class_published(self):
         self.actor(1)
@@ -244,7 +248,8 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
         self.actor(1)
         self.share()
         ids={r['user_id'] for r in project.allrows('SELECT user_id FROM notification_delivery_queue')}
-        self.assertFalse(ids.intersection({1,5,6,7,8}))
+        self.assertEqual(ids,{2,3,4,5})
+        self.assertFalse(ids.intersection({1,6,7,8}))
 
     def test_student_cannot_share(self):
         self.actor(3)
@@ -331,8 +336,8 @@ class PlanningPublicationSecurityTests(unittest.TestCase):
                 'course_name':'<script>alert(1)</script>','class_name':'Master 2','room':'A1'}
         start=datetime.date(2026,11,9)
         plain,markup=project.planning_email_content(user,[lesson],start,start+datetime.timedelta(days=7),'École')
-        self.assertIn('Mardi 10/11/2026',plain)
-        self.assertIn('&lt;script&gt;',markup)
+        self.assertIn('Votre planning de la semaine',plain)
+        self.assertIn('planning?week=2026-11-09',plain)
         self.assertNotIn('<script>',markup)
         self.assertIn('\n',plain)
         self.assertNotIn('\\n',plain)
