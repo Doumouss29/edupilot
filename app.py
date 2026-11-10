@@ -3907,6 +3907,18 @@ def lesson_edit(lid):
         except Exception:
             notification_queued=False
             app.logger.exception('Séance %s enregistrée mais notification non mise en file',lid)
+    elif changed and lesson['planning_shared'] and not newly_shared and school_planning_mode()=='private':
+        # Inform previously authorised users that the old published occurrence
+        # is no longer available, without exposing the new unpublished slot.
+        try:
+            notify_event([lesson['course_id']],
+                         'Une séance précédemment partagée a été retirée du planning : '+
+                         format_lesson_period(current['starts_at'],current['ends_at'])+'.',
+                         '/planning',teacher_ids=[lesson['teacher_id']],
+                         email_roles=(),defer_external=True)
+        except Exception:
+            notification_queued=False
+            app.logger.exception('Séance %s déplacée : notification de retrait non mise en file',lid)
     try:
         audit('lesson.updated',str(lid)+(':changed' if changed else ':unchanged'))
     except Exception:
