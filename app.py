@@ -3486,11 +3486,15 @@ def planning_digest_bounds(reference):
     return monday,monday+datetime.timedelta(days=7)
 
 
-def planning_email_content(recipient,lessons,monday,end,school_name):
+def planning_email_content(recipient,lessons,monday,end,school_name,selected_weeks=None):
     """Both MIME alternatives use actual line breaks, never literal \\n."""
     def text_clean(value):
         return ' '.join(str(value or '').split())
-    heading=f"Planning du {monday:%d/%m/%Y} au {(end-datetime.timedelta(days=1)):%d/%m/%Y}"
+    if selected_weeks:
+        weeks_label=', '.join(f'{week:%d/%m/%Y}' for week in selected_weeks)
+        heading=f"Planning des semaines du {weeks_label}"
+    else:
+        heading=f"Planning du {monday:%d/%m/%Y} au {(end-datetime.timedelta(days=1)):%d/%m/%Y}"
     intro=f"Bonjour {text_clean(recipient['name'])},"
     lines=[intro,'',heading,school_name,'', "Horaires : heure d’Abidjan (GMT / UTC+0)",'']
     french_weekdays=('Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche')
@@ -3529,19 +3533,24 @@ def planning_email_content(recipient,lessons,monday,end,school_name):
     return plain,markup
 
 
-def planning_mail_recipients(sid,monday,end,year_id):
+def planning_mail_recipients(sid,monday,end,year_id,class_ids=None):
     """Build one lesson list per user, strictly within their own school and classes."""
-    lessons=allrows("""SELECT l.id,l.school_id,l.teacher_id,l.starts_at,l.ends_at,l.room,
+    if class_ids is None:
+        class_ids=[row['id'] for row in allrows(
+            'SELECT id FROM classes WHERE school_id=? AND year_id=?',(sid,year_id))]
+    if not class_ids:return {}
+    clause=','.join('?' for _ in class_ids)
+    lessons=allrows(f"""SELECT l.id,l.school_id,l.teacher_id,l.starts_at,l.ends_at,l.room,
         c.name course_name,cl.id class_id,cl.name class_name
         FROM lessons l JOIN courses c ON c.id=l.course_id AND c.school_id=l.school_id
         JOIN classes cl ON cl.id=c.class_id AND cl.school_id=l.school_id
-        WHERE l.school_id=? AND cl.year_id=? AND l.hidden_from_planning=0
-        AND l.starts_at>=? AND l.starts_at<?
+        WHERE l.school_id=? AND cl.year_id=? AND cl.id IN ({clause})
+        AND l.hidden_from_planning=0 AND l.starts_at>=? AND l.starts_at<?
         AND l.status NOT IN ('annulee','reportee')
         AND (l.planning_shared=1 OR (SELECT planning_mode FROM schools WHERE id=l.school_id)='dynamic')
-        ORDER BY l.starts_at,l.id""",(sid,year_id,monday.isoformat(),end.isoformat()))
+        ORDER BY l.starts_at,l.id""",(sid,year_id,*class_ids,monday.isoformat(),end.isoformat()))
     if not lessons:return {}
-    class_ids={item['class_id'] for item in lessons}
+    eligible_classes={item['class_id'] for item in lessons}
     users=allrows("""SELECT id,name,email,role FROM users
         WHERE school_id=? AND active=1 AND role IN ('etudiant','enseignant','admin')""",(sid,))
     enrollments=allrows("""SELECT e.student_id,e.class_id FROM enrollments e
@@ -3549,7 +3558,7 @@ def planning_mail_recipients(sid,monday,end,year_id):
         WHERE e.school_id=? AND e.year_id=cl.year_id""",(sid,))
     class_students={}
     for row in enrollments:
-        if row['class_id'] in class_ids:
+        if row['class_id'] in eligible_classes:
             class_students.setdefault(row['student_id'],set()).add(row['class_id'])
     outputs={}
     for user in users:
@@ -3565,45 +3574,88 @@ def planning_mail_recipients(sid,monday,end,year_id):
 @app.post('/planning/share')
 @roles('admin','administratif')
 def planning_share():
-    """Explicit publication (private mode) and one-week email dispatch (both modes)."""
+    """Share only the selected ISO weeks and classes, never the whole school year."""
     sid=school_id()
     mode=school_planning_mode(sid)
-    try:
-        raw=request.form.get('week','').strip()
-        reference=datetime.date.fromisoformat(raw) if raw else datetime.datetime.now(ZoneInfo('Africa/Abidjan')).date()
-        monday,end=planning_digest_bounds(reference.isoformat())
-    except (ValueError,TypeError,OverflowError):abort(400,'Date de planning invalide')
+    raw_weeks=request.form.getlist('weeks')
+    raw_classes=request.form.getlist('class_ids')
+    if not raw_weeks or len(raw_weeks)>26 or not raw_classes or len(raw_classes)>300:
+        abort(400,'Sélectionnez au moins une semaine et une classe (26 semaines maximum).')
+    if any(not value.isdigit() for value in raw_classes):
+        abort(400,'Classe invalide')
+    class_ids=list(dict.fromkeys(int(value) for value in raw_classes))
+    if len(class_ids)!=len(raw_classes):
+        abort(400,'Classe sélectionnée plusieurs fois')
     year=selected_academic_year()
     if not year or year['status']=='archived':abort(403,'Année scolaire archivée')
-    if mode=='private':
-        with db() as c:
-            c.execute('BEGIN IMMEDIATE')
-            c.execute("""UPDATE lessons SET planning_shared=1 WHERE school_id=?
-                AND hidden_from_planning=0 AND status NOT IN ('annulee','reportee')
-                AND course_id IN (
-                   SELECT c.id FROM courses c JOIN classes cl ON cl.id=c.class_id
-                   WHERE c.school_id=? AND cl.year_id=?)""",
-                (sid,sid,year['id']))
+    placeholders=','.join('?' for _ in class_ids)
+    valid_classes=allrows(f"""SELECT id FROM classes WHERE school_id=?
+        AND year_id=? AND id IN ({placeholders})""",(sid,year['id'],*class_ids))
+    if len(valid_classes)!=len(class_ids):
+        abort(403,'Classe non autorisée pour cet établissement et cette année')
+    weeks=[]
+    try:
+        for value in raw_weeks:
+            # ISO week strings such as 2026-W46, normalized to the Monday.
+            if not re.fullmatch(r'\\d{4}-W\\d{2}',value):
+                raise ValueError('Semaine invalide')
+            monday=datetime.date.fromisocalendar(int(value[:4]),int(value[6:]),1)
+            weeks.append(monday)
+    except (ValueError,OverflowError):
+        abort(400,'Semaine ISO invalide')
+    if len(set(weeks))!=len(raw_weeks):
+        abort(400,'Une semaine a été sélectionnée plusieurs fois')
+    weeks.sort()
     school=one('SELECT name FROM schools WHERE id=?',(sid,))
-    recipients=planning_mail_recipients(sid,monday,end,year['id'])
-    queued=0
+    # Publish and enqueue in one transaction: failure does not publish only half
+    # of the chosen period. Other classes/weeks and historical archives remain untouched.
+    recipient_lessons={}
+    published=0
     with db() as c:
-        for uid,(user,lessons) in recipients.items():
-            plain,markup=planning_email_content(user,lessons,monday,end,school['name'])
-            address=(user['email'] or '').strip().lower()
-            if not address:continue
-            subject='EduPilot — '+f'Planning du {monday:%d/%m/%Y} au {(end-datetime.timedelta(days=1)):%d/%m/%Y}'
+        c.execute('BEGIN IMMEDIATE')
+        for monday in weeks:
+            end=monday+datetime.timedelta(days=7)
+            if mode=='private':
+                updated=c.execute(f"""UPDATE lessons SET planning_shared=1
+                    WHERE school_id=? AND starts_at>=? AND starts_at<?
+                    AND hidden_from_planning=0 AND status NOT IN ('annulee','reportee')
+                    AND course_id IN (
+                       SELECT co.id FROM courses co
+                       JOIN classes cl ON cl.id=co.class_id AND cl.school_id=co.school_id
+                       WHERE co.school_id=? AND cl.year_id=?
+                       AND cl.id IN ({placeholders}))""",
+                    (sid,monday.isoformat(),end.isoformat(),sid,year['id'],*class_ids))
+                published+=updated.rowcount
+            # Selection is constrained by school, year, classes and the exact
+            # Monday-Sunday interval. Teacher/student recipient scoping is inside
+            # planning_mail_recipients, not determined by the client.
+            for uid,(user,lessons) in planning_mail_recipients(
+                    sid,monday,end,year['id'],class_ids).items():
+                if uid not in recipient_lessons:
+                    recipient_lessons[uid]=[user,{}]
+                for lesson in lessons:
+                    recipient_lessons[uid][1][lesson['id']]=lesson
+        queued=0
+        first=weeks[0]
+        last_end=weeks[-1]+datetime.timedelta(days=7)
+        subject=('EduPilot — Planning des semaines du '+
+                 ', '.join(f'{day:%d/%m/%Y}' for day in weeks))
+        for uid,(user,lessons_by_id) in recipient_lessons.items():
+            lessons=sorted(lessons_by_id.values(),key=lambda row:(row['starts_at'],row['id']))
+            if not lessons:continue
+            plain,markup=planning_email_content(
+                user,lessons,first,last_end,school['name'],selected_weeks=weeks)
             c.execute("""INSERT INTO notification_delivery_queue
                 (school_id,user_id,channel,address,subject,message,href,html_content)
                 VALUES (?,?,'email',?,?,?,'/planning',?)""",
-                (sid,uid,address,subject,plain,markup))
+                (sid,uid,(user['email'] or '').strip().lower(),subject,plain,markup))
             queued+=1
-    audit('planning.shared',f'{mode}:{monday.isoformat()}:emails_queued={queued}')
-    message=(f'Planning '+('partagé' if mode=='private' else 'envoyé')+
-             f'. {queued} e-mail(s) mis en file pour les destinataires concernés.'+
-             (' Aucun cours prévu pour cette semaine.' if not recipients else ''))
+    audit('planning.shared',f'{mode}:weeks={len(weeks)}:classes={len(class_ids)}:sessions={published}:queued={queued}')
+    message=(f'{len(weeks)} semaine(s), {len(class_ids)} classe(s) sélectionnées. '+
+             (f'{published} séance(s) publiée(s). ' if mode=='private' else '')+
+             f'{queued} e-mail(s) mis en file pour les destinataires concernés.')
     if request.accept_mimetypes.best=='application/json':
-        return jsonify(ok=True,message=message,queued=queued)
+        return jsonify(ok=True,message=message,queued=queued,published=published)
     flash(message,'success')
     return redirect(url_for('planning'))
 
