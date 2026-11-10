@@ -3487,51 +3487,33 @@ def planning_digest_bounds(reference):
 
 
 def planning_email_content(recipient,lessons,monday,end,school_name,selected_weeks=None):
-    """Both MIME alternatives use actual line breaks, never literal \\n."""
-    def text_clean(value):
-        return ' '.join(str(value or '').split())
-    if selected_weeks:
-        weeks_label=', '.join(f'{week:%d/%m/%Y}' for week in selected_weeks)
-        heading=f"Planning des semaines du {weeks_label}"
-    else:
-        heading=f"Planning du {monday:%d/%m/%Y} au {(end-datetime.timedelta(days=1)):%d/%m/%Y}"
-    intro=f"Bonjour {text_clean(recipient['name'])},"
-    lines=[intro,'',heading,school_name,'', "Horaires : heure d’Abidjan (GMT / UTC+0)",'']
-    french_weekdays=('Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche')
-    for lesson in lessons:
-        start=datetime.datetime.fromisoformat(lesson['starts_at'])
-        finish=datetime.datetime.fromisoformat(lesson['ends_at'])
-        lines.append(f"{french_weekdays[start.weekday()]} {start:%d/%m/%Y} | {start:%H:%M} – {finish:%H:%M} | "
-                     +text_clean(lesson['course_name'])+' | '+text_clean(lesson['class_name'])
-                     +(f" | Salle : {text_clean(lesson['room'])}" if lesson['room'] else ''))
-    lines+=['','Retrouvez les éventuels changements dans votre espace EduPilot.',
-            os.getenv('PUBLIC_BASE_URL','https://edupilot.ci').rstrip('/')+'/planning','',
-            'L’équipe EduPilot']
-    plain='\n'.join(lines)
-    items=[]
-    for lesson in lessons:
-        start=datetime.datetime.fromisoformat(lesson['starts_at'])
-        finish=datetime.datetime.fromisoformat(lesson['ends_at'])
-        items.append('<tr><td>'+html.escape(start.strftime('%d/%m/%Y'))+
-            '</td><td>'+html.escape(start.strftime('%H:%M')+' – '+finish.strftime('%H:%M'))+
-            '</td><td>'+html.escape(text_clean(lesson['course_name']))+
-            '</td><td>'+html.escape(text_clean(lesson['class_name']))+
-            '</td><td>'+html.escape(text_clean(lesson['room']) or '—')+'</td></tr>')
-    base=os.getenv('PUBLIC_BASE_URL','https://edupilot.ci').rstrip('/')
+    """Short publication announcement with a link to the first selected week."""
+    weeks=sorted(selected_weeks or [monday])
+    def week_range(day):
+        sunday=day+datetime.timedelta(days=6)
+        return f"du {day:%d/%m/%Y} au {sunday:%d/%m/%Y}"
+    periods=', '.join(week_range(day) for day in weeks)
+    heading=("Votre planning de la semaine " if len(weeks)==1
+             else "Votre planning des semaines ")+periods+" est disponible."
+    href='/planning?week='+weeks[0].isoformat()
+    url=os.getenv('PUBLIC_BASE_URL','https://edupilot.ci').rstrip('/')+href
+    greeting='Bonjour '+str(recipient['name'] or '').strip()+','
+    plain='\\n'.join((greeting,'',heading,'',
+                      'Consultez votre planning EduPilot :',url,'',
+                      'Établissement : '+str(school_name),'',
+                      "L’équipe EduPilot"))
     markup=('<!doctype html><html lang="fr"><head><meta charset="utf-8"></head>'
-       '<body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#223a50">'
-       '<div style="max-width:680px;margin:20px auto;padding:26px;background:white;border-radius:12px">'
-       '<h1 style="color:#d97720;font-size:24px">EduPilot</h1><p>'+html.escape(intro)+'</p>'
-       '<h2 style="font-size:19px">'+html.escape(heading)+'</h2>'
-       '<p><strong>'+html.escape(school_name)+'</strong><br>Horaires en heure d’Abidjan (GMT / UTC+0)</p>'
-       '<table style="width:100%;border-collapse:collapse;font-size:13px">'
-       '<thead><tr style="background:#edf3f8"><th>Date</th><th>Heure</th><th>Cours</th><th>Classe</th><th>Salle</th></tr></thead><tbody>'
-       +''.join(items)+'</tbody></table><p style="margin-top:24px">'
-       'Les changements ultérieurs sont signalés dans EduPilot, sans nouvel e-mail.</p>'
-       '<p><a href="'+html.escape(base+'/planning',quote=True)+'">Consulter mon planning</a></p>'
-       '<p style="color:#60758a">L’équipe EduPilot</p></div></body></html>')
+            '<body style="font-family:Arial,sans-serif;background:#f4f7fb;color:#223a50;padding:24px">'
+            '<div style="max-width:640px;margin:auto;background:#fff;padding:28px;border-radius:14px">'
+            '<h1 style="color:#d97720">EduPilot</h1><p>'+html.escape(greeting)+'</p>'
+            '<p>'+html.escape(heading)+'</p>'
+            '<p><a href="'+html.escape(url,quote=True)+'" '
+            'style="display:inline-block;background:#db8232;color:white;padding:12px 20px;'
+            'text-decoration:none;border-radius:8px">Consulter mon planning</a></p>'
+            '<p>'+html.escape(url)+'</p>'
+            '<p>'+html.escape(str(school_name))+'</p>'
+            '<p>L’équipe EduPilot</p></div></body></html>')
     return plain,markup
-
 
 def planning_mail_recipients(sid,monday,end,year_id,class_ids=None,include_unshared=False):
     """Build one lesson list per user, strictly within their own school and classes."""
@@ -3552,7 +3534,7 @@ def planning_mail_recipients(sid,monday,end,year_id,class_ids=None,include_unsha
     if not lessons:return {}
     eligible_classes={item['class_id'] for item in lessons}
     users=allrows("""SELECT id,name,email,role FROM users
-        WHERE school_id=? AND active=1 AND role IN ('etudiant','enseignant','admin')""",(sid,))
+        WHERE school_id=? AND active=1 AND role IN ('etudiant','enseignant','parent')""",(sid,))
     enrollments=allrows("""SELECT e.student_id,e.class_id FROM enrollments e
         JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id
         WHERE e.school_id=? AND e.year_id=cl.year_id""",(sid,))
@@ -3560,11 +3542,21 @@ def planning_mail_recipients(sid,monday,end,year_id,class_ids=None,include_unsha
     for row in enrollments:
         if row['class_id'] in eligible_classes:
             class_students.setdefault(row['student_id'],set()).add(row['class_id'])
+    parent_rows=allrows("""SELECT p.parent_id,e.class_id FROM parent_links p
+        JOIN enrollments e ON e.student_id=p.student_id AND e.school_id=p.school_id
+        JOIN classes cl ON cl.id=e.class_id AND cl.school_id=e.school_id
+        WHERE p.school_id=? AND p.active=1 AND cl.parents_enabled=1
+        AND e.year_id=cl.year_id AND cl.year_id=?""",(sid,year_id))
+    parent_classes={}
+    for row in parent_rows:
+        if row['class_id'] in eligible_classes:
+            parent_classes.setdefault(row['parent_id'],set()).add(row['class_id'])
     outputs={}
     for user in users:
-        if not user['email'] or is_pending_teacher_email(user['email']):continue
         if user['role']=='etudiant':
             mine=[lesson for lesson in lessons if lesson['class_id'] in class_students.get(user['id'],set())]
+        elif user['role']=='parent':
+            mine=[lesson for lesson in lessons if lesson['class_id'] in parent_classes.get(user['id'],set())]
         else:
             mine=[lesson for lesson in lessons if lesson['teacher_id']==user['id']]
         if mine:outputs[user['id']]=(user,mine)
@@ -3671,17 +3663,29 @@ def planning_share():
         queued=0
         first=weeks[0]
         last_end=weeks[-1]+datetime.timedelta(days=7)
-        subject=('EduPilot — Planning des semaines du '+
-                 ', '.join(f'{day:%d/%m/%Y}' for day in weeks))
+        subject=('EduPilot — Votre planning de la semaine est disponible' if len(weeks)==1
+                 else 'EduPilot — Votre planning des semaines est disponible')
+        href='/planning?week='+first.isoformat()
+        notification_message=('Votre planning de la semaine est disponible.' if len(weeks)==1
+                              else 'Votre planning des semaines sélectionnées est disponible.')
         for uid,(user,lessons_by_id) in recipient_lessons.items():
             lessons=sorted(lessons_by_id.values(),key=lambda row:(row['starts_at'],row['id']))
             if not lessons:continue
+            # In-app and push notifications do not depend on email configuration.
+            c.execute('INSERT INTO notifications(school_id,user_id,message,href) VALUES (?,?,?,?)',
+                      (sid,uid,notification_message,href))
+            c.execute("""INSERT INTO notification_delivery_queue
+                (school_id,user_id,channel,address,subject,message,href)
+                VALUES (?,?,'push',NULL,NULL,?,?)""",
+                (sid,uid,notification_message,href))
+            address=(user['email'] or '').strip().lower()
+            if not address or is_pending_teacher_email(address):continue
             plain,markup=planning_email_content(
                 user,lessons,first,last_end,school['name'],selected_weeks=weeks)
             c.execute("""INSERT INTO notification_delivery_queue
                 (school_id,user_id,channel,address,subject,message,href,html_content)
-                VALUES (?,?,'email',?,?,?,'/planning',?)""",
-                (sid,uid,(user['email'] or '').strip().lower(),subject,plain,markup))
+                VALUES (?,?,'email',?,?,?,?,?)""",
+                (sid,uid,address,subject,plain,href,markup))
             queued+=1
     audit('planning.shared',f'{mode}:weeks={len(weeks)}:classes={len(class_ids)}:sessions={published}:queued={queued}')
     message=(f'{len(weeks)} semaine(s), {len(class_ids)} classe(s) sélectionnées. '+
