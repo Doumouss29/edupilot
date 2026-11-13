@@ -1,46 +1,149 @@
-{% extends 'base.html' %}{% block heading %}Évaluations & devoirs{% endblock %}{% block content %}
-<div class="section-intro"><span class="eyebrow">ÉVALUATION DES APPRENTISSAGES</span><h2>Évaluations & devoirs</h2><p>Contrôles, consignes détaillées, documents et coefficients propres à chaque évaluation.</p></div>
-{% if me.role in ('enseignant','admin','administratif') %}<section class="panel"><div class="panel-title"><h3>Nouvelle évaluation</h3></div><form method="post" enctype="multipart/form-data" class="modern-form"><input type="hidden" name="csrf" value="{{csrf}}">
-<label>Cours<select name="course_id" required>{% for c in courses %}<option value="{{c.id}}">{{c.name}}</option>{% endfor %}</select></label><label>Titre<input name="title" placeholder="Devoir n°2" required></label>
-<label>Type<select name="kind"><option>Devoir</option><option>Contrôle continu</option><option>Examen</option><option>Projet</option></select></label><label>Date limite<input type="date" name="due_date"></label>
+{% extends 'base.html' %}
+{% block heading %}Évaluations & devoirs{% endblock %}
+{% block head %}
+<style>
+.assess-page{min-width:0}
+.assess-toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin:0 0 16px}
+.assess-toolbar label{display:grid;gap:5px;flex:1 1 190px;max-width:330px;font-size:12px;font-weight:700;color:#5f7084}
+.assess-toolbar select{width:100%;max-width:100%;min-width:0}
+.assess-count{font-size:12px;color:#718096;margin-left:auto;padding-bottom:10px}
+.assess-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start}
+.assess-card{min-width:0;max-width:100%;border:1px solid #e2e9f0;border-radius:13px;background:white;padding:15px;display:flex;flex-direction:column;gap:9px;overflow:hidden}
+.assess-card[hidden]{display:none!important}
+.assess-card-top{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0}
+.assess-card-top time{font-size:11px;color:#8190a2;text-align:right}
+.assess-card h3{font-size:15px;line-height:1.35;margin:0;overflow-wrap:anywhere}
+.assess-context{color:#75859a;font-size:11px;line-height:1.5;overflow-wrap:anywhere;margin:0}
+.assess-instruction{font-size:12px;color:#52677d;line-height:1.5;margin:0;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.assess-actions{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.assess-actions .btn{white-space:normal;text-align:center;font-size:11px;padding:7px 9px;max-width:100%;overflow-wrap:anywhere}
+.assess-details{border-top:1px solid #edf1f5;padding-top:9px;min-width:0}
+.assess-details summary{cursor:pointer;list-style:none;font-size:12px;font-weight:700;color:#315b81;display:flex;align-items:center;gap:6px;overflow-wrap:anywhere}
+.assess-details summary::-webkit-details-marker{display:none}
+.assess-details summary:before{content:'+';border:1px solid #d6e3ed;border-radius:5px;width:17px;height:17px;display:inline-grid;place-items:center;flex:none}
+.assess-details[open] summary:before{content:'−'}
+.assess-details-body{padding:11px 0 3px;min-width:0}
+.assess-files{display:grid;gap:6px;min-width:0}
+.assess-files a,.assess-submission a{overflow-wrap:anywhere;word-break:break-word}
+.assess-submissions{display:grid;gap:7px;margin-top:10px;min-width:0}
+.assess-submission{display:grid;gap:5px;border:1px solid #ecf0f4;background:#f8fafc;border-radius:8px;padding:9px;font-size:11px;min-width:0}
+.assess-submission strong{overflow-wrap:anywhere}
+.assess-submission time{color:#7b8ba0;overflow-wrap:anywhere}
+.assess-empty{padding:17px;border:1px dashed #d6e1ed;border-radius:12px;color:#728297;background:#fff}
+.assess-card .modern-form{min-width:0;display:grid;gap:8px}
+.assess-card input[type=file]{max-width:100%;width:100%;min-width:0}
+.assess-card .modern-form .form-actions{margin:0}
+.assess-card .assessment-description{font-size:12px;line-height:1.55;margin:8px 0}
+.assess-create summary{cursor:pointer;font-weight:700}
+.assess-create[open] summary{margin-bottom:15px}
+@media(max-width:1250px){.assess-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.assess-grid{grid-template-columns:minmax(0,1fr)}.assess-toolbar label{max-width:none}.assess-count{margin-left:0;width:100%;padding:0}.assess-card{padding:13px}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="assess-page">
+<div class="section-intro"><span class="eyebrow">ÉVALUATION DES APPRENTISSAGES</span><h2>Évaluations & devoirs</h2><p>Consultez les consignes, les notes, les corrections et les travaux remis.</p></div>
+{% if me.role in ('enseignant','admin','administratif') %}
+<details class="panel assess-create" id="assess-create"><summary>+ Créer une évaluation</summary>
+<form method="post" enctype="multipart/form-data" class="modern-form"><input type="hidden" name="csrf" value="{{csrf}}">
+<label>Cours<select name="course_id" required>{% for c in courses %}<option value="{{c.id}}">{{c.name}}</option>{% endfor %}</select></label>
+<label>Titre<input name="title" placeholder="Devoir n°2" required></label>
+<label>Type<select name="kind"><option>Devoir</option><option>Contrôle continu</option><option>Examen</option><option>Projet</option></select></label>
+<label>Date limite<input type="date" name="due_date"></label>
 <label>Coefficient de l'évaluation<input type="number" min="0.1" max="100" step="0.1" name="coefficient" value="1" required></label>
-<label>Documents joints (jusqu’à 5 fichiers, 3 Mo chacun, 10 Mo au total)<input type="file" name="documents" multiple accept=".pdf,.docx,.png,.jpg,.jpeg"></label>
-<label class="full-row">Consignes détaillées<textarea name="description" rows="6" maxlength="10000" placeholder="Précisez les objectifs, les consignes et les modalités…"></textarea></label>
-<div class="form-actions"><button class="btn primary">Publier l'évaluation</button></div></form></section>{% endif %}
-<div class="card-grid">{% for a in assessments %}<div class="course-card"><div class="course-card-top"><span class="tag">{{a.kind}}</span><span class="muted">{{a.due_date or 'Sans échéance'}}</span></div><h3>{{a.title}}</h3>{% if me.role=='etudiant' and scores.get(a.id) is not none %}<span class="tag success">✓ Note : {{scores[a.id]}} /20</span>{% endif %}<p>{{a.course_name}} · {{a.class_name}} · Coeff. {{a.coefficient}}</p><div class="divider"></div><p class="assessment-description">{{a.description or 'Aucune consigne supplémentaire.'}}</p>{% if me.role in ('admin','administratif') or (me.role=='enseignant' and a.teacher_id==me.id) %}<div class="page-actions"><a class="btn outline sm" href="{{url_for('assessment_edit',aid=a.id)}}">Modifier l'évaluation</a><a class="btn outline sm" href="{{url_for('grade_entry',aid=a.id)}}">Saisir / corriger les notes</a>{% if me.role in ('enseignant','admin') %}<a class="btn outline sm" href="{{url_for('assessment_correction_edit',aid=a.id)}}">Correction {{'✓ Publiée' if a.correction_published else 'à ajouter'}}</a>{% endif %}</div>{% endif %}{% for file in attachments.get(a.id,[]) %}<a href="{{url_for('assessment_file',fid=file.id)}}" class="btn outline sm">↧ {{file.filename}}</a>{% endfor %}{% if a.attachment_name %}<a href="{{url_for('assessment_attachment',aid=a.id)}}" class="btn outline sm">↧ {{a.attachment_name}}</a>{% endif %}
+<label>Documents joints (5 fichiers maximum, 3 Mo chacun)<input type="file" name="documents" multiple accept=".pdf,.docx,.png,.jpg,.jpeg"></label>
+<label class="full-row">Consignes détaillées<textarea name="description" rows="5" maxlength="10000" placeholder="Précisez les objectifs, les consignes et les modalités…"></textarea></label>
+<div class="form-actions"><button class="btn primary">Publier l'évaluation</button></div>
+</form></details>
+{% endif %}
+<div class="assess-toolbar" aria-label="Filtres des évaluations">
+<label>Classe<select id="assess-filter-class"><option value="">Toutes les classes</option></select></label>
+<label>Cours<select id="assess-filter-course"><option value="">Tous les cours</option></select></label>
+<span class="assess-count" id="assess-count" role="status" aria-live="polite"></span>
+</div>
+<div class="assess-grid" id="assess-grid">
+{% for a in assessments %}
+<article class="assess-card" data-class-id="{{a.class_id}}" data-class-name="{{a.class_name}}" data-course-id="{{a.course_id}}" data-course-name="{{a.course_name}}">
+<div class="assess-card-top"><span class="tag">{{a.kind}}</span><time>{{a.due_date or 'Sans échéance'}}</time></div>
+<h3>{{a.title}}</h3>
+<p class="assess-context">{{a.class_name}} · {{a.course_name}} · Coeff. {{a.coefficient}}</p>
+{% if me.role=='etudiant' and scores.get(a.id) is not none %}<span class="tag success">✓ Note : {{scores[a.id]}} /20</span>{% endif %}
+{% if a.description %}<p class="assess-instruction" title="{{a.description}}">{{a.description}}</p>{% endif %}
+{% if me.role in ('admin','administratif') or (me.role=='enseignant' and a.teacher_id==me.id) %}
+<div class="assess-actions"><a class="btn outline sm" href="{{url_for('assessment_edit',aid=a.id)}}">Modifier</a><a class="btn outline sm" href="{{url_for('grade_entry',aid=a.id)}}">Notes</a>{% if me.role in ('enseignant','admin') %}<a class="btn outline sm" href="{{url_for('assessment_correction_edit',aid=a.id)}}">Correction {{'✓' if a.correction_published else '+'}}</a>{% endif %}</div>
+{% endif %}
+<details class="assess-details"><summary>Consignes et documents</summary>
+<div class="assess-details-body">
+<p class="assessment-description">{{a.description or 'Aucune consigne supplémentaire.'}}</p>
+<div class="assess-files">{% for file in attachments.get(a.id,[]) %}<a href="{{url_for('assessment_file',fid=file.id)}}">↧ {{file.filename}}</a>{% endfor %}
+{% if a.attachment_name %}<a href="{{url_for('assessment_attachment',aid=a.id)}}">↧ {{a.attachment_name}}</a>{% endif %}</div>
+</div></details>
 {% if (me.role=='etudiant' and a.correction_published) or (me.role in ('enseignant','admin','administratif') and a.correction_body is not none) %}
-<div style="margin-top:15px;padding:14px 16px;background:#f1f7fb;border:1px solid #dce8f1;border-radius:12px">
-<strong>Correction de l'évaluation</strong>
-{% if a.correction_published %}<span class="tag success">Publiée</span>{% else %}<span class="tag">Brouillon — réservé à l'équipe pédagogique</span>{% endif %}
+<details class="assess-details"><summary>Correction {{'publiée' if a.correction_published else '(brouillon)'}}</summary><div class="assess-details-body">
 {% if a.correction_body %}<p class="assessment-description" style="white-space:pre-wrap">{{a.correction_body}}</p>{% endif %}
-{% if a.correction_filename %}<div class="page-actions"><a class="btn outline sm" href="{{url_for('assessment_correction_file',aid=a.id)}}">↧ Télécharger la correction — {{a.correction_filename}}</a></div>{% endif %}
-</div>
-{% endif %}
+{% if a.correction_filename %}<a href="{{url_for('assessment_correction_file',aid=a.id)}}">↧ Télécharger la correction — {{a.correction_filename}}</a>{% endif %}
+</div></details>{% endif %}
 {% if me.role=='etudiant' %}
-<div style="margin-top:16px;padding:16px;border:1px solid #dce8f1;border-radius:12px">
-<strong>Remettre mon travail</strong>
 {% set mine=submissions.get(a.id,[]) %}
-{% if mine %}<p class="muted">Travail remis le {{mine[0].created_at}} : <a href="{{url_for('assessment_submission_download',aid=a.id,student_id=me.id)}}">{{mine[0].filename}}</a></p>{% endif %}
-{% if a.due_date and a.due_date < today_ci %}
-<p class="muted">Date limite dépassée : la remise est clôturée.</p>
-{% else %}
-<form action="{{url_for('assessment_submit',aid=a.id)}}" method="post" enctype="multipart/form-data" class="modern-form">
+<details class="assess-details"><summary>{{'Travail remis ✓' if mine else 'Déposer mon travail'}}</summary>
+<div class="assess-details-body">
+{% if mine %}<p class="assess-context">Remis le {{mine[0].created_at}} · <a href="{{url_for('assessment_submission_download',aid=a.id,student_id=me.id)}}">{{mine[0].filename}}</a></p>{% endif %}
+{% if a.due_date and a.due_date < today_ci %}<p class="assess-context">Date limite dépassée : remise clôturée.</p>
+{% else %}<form action="{{url_for('assessment_submit',aid=a.id)}}" method="post" enctype="multipart/form-data" class="modern-form">
 <input type="hidden" name="csrf" value="{{csrf}}">
-<label>Fichier de réponse (15 Mo maximum)<input type="file" name="submission_file" required accept=".pdf,.docx,.doc,.odt,.txt,.html,.htm,.css,.py,.js,.json,.csv,.sql,.zip,.png,.jpg,.jpeg,.xlsx"></label>
+<label>Fichier (15 Mo maximum)<input type="file" name="submission_file" required accept=".pdf,.docx,.doc,.odt,.txt,.html,.htm,.css,.py,.js,.json,.csv,.sql,.zip,.png,.jpg,.jpeg,.xlsx"></label>
 <div class="form-actions"><button class="btn primary sm" type="submit">{{'Remplacer mon travail' if mine else 'Déposer mon travail'}}</button></div>
-</form>
-<p class="muted">Formats acceptés : Word, PDF, HTML, CSS, Python, ZIP et autres formats affichés. Un dépôt remplace le précédent avant l’échéance.</p>
-{% endif %}
-</div>
+</form><p class="assess-context">Un nouveau dépôt remplace le précédent avant l'échéance.</p>{% endif %}
+</div></details>
 {% elif me.role in ('enseignant','admin','administratif') %}
 {% set rendus=submissions.get(a.id,[]) %}
-<div style="margin-top:16px;padding:16px;border:1px solid #dce8f1;border-radius:12px">
-<strong>Travaux rendus : {{rendus|length}}</strong>
-{% if rendus %}
-<div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Étudiant</th><th>Remis le</th><th>Document</th></tr></thead><tbody>
-{% for rendu in rendus %}<tr><td>{{rendu.student_name}}</td><td>{{rendu.created_at}}</td><td><a href="{{url_for('assessment_submission_download',aid=a.id,student_id=rendu.student_id)}}">Télécharger — {{rendu.filename}}</a></td></tr>{% endfor %}
-</tbody></table></div>
-{% else %}<p class="muted">Aucun travail déposé pour cette évaluation.</p>{% endif %}
-</div>
+<details class="assess-details"><summary>Travaux rendus ({{rendus|length}})</summary>
+<div class="assess-details-body">{% if rendus %}<div class="assess-submissions">
+{% for rendu in rendus %}<div class="assess-submission"><strong>{{rendu.student_name}}</strong>
+<time>Remis le {{rendu.created_at}}</time>
+<a href="{{url_for('assessment_submission_download',aid=a.id,student_id=rendu.student_id)}}">↧ {{rendu.filename}}</a>
+</div>{% endfor %}</div>{% else %}<p class="assess-context">Aucun travail déposé.</p>{% endif %}</div></details>
 {% endif %}
-</div>{% else %}<div class="panel">Aucune évaluation publiée.</div>{% endfor %}</div>{% endblock %}
+</article>
+{% endfor %}
+</div>
+<p class="assess-empty" id="assess-no-results" hidden>Aucune évaluation ne correspond à ces filtres.</p>
+</div>
+<script>
+(()=>{
+const cards=[...document.querySelectorAll('.assess-card')];
+const classFilter=document.getElementById('assess-filter-class');
+const courseFilter=document.getElementById('assess-filter-course');
+const count=document.getElementById('assess-count');
+const empty=document.getElementById('assess-no-results');
+const classes=new Map(),courses=new Map();
+cards.forEach(card=>{
+ classes.set(card.dataset.classId,card.dataset.className);
+ courses.set(card.dataset.courseId,{name:card.dataset.courseName,classId:card.dataset.classId});
+});
+const append=(select,value,label)=>{const opt=document.createElement('option');opt.value=value;opt.textContent=label;select.append(opt);};
+[...classes].sort((a,b)=>a[1].localeCompare(b[1],'fr')).forEach(([id,name])=>append(classFilter,id,name));
+function updateCourses(){
+ const previous=courseFilter.value;
+ courseFilter.replaceChildren();append(courseFilter,'','Tous les cours');
+ [...courses].filter(([,course])=>!classFilter.value||course.classId===classFilter.value)
+  .sort((a,b)=>a[1].name.localeCompare(b[1].name,'fr'))
+  .forEach(([id,course])=>append(courseFilter,id,course.name));
+ if([...courseFilter.options].some(option=>option.value===previous))courseFilter.value=previous;
+}
+function filter(){
+ let visible=0;
+ for(const card of cards){
+  const match=(!classFilter.value||card.dataset.classId===classFilter.value)&&
+   (!courseFilter.value||card.dataset.courseId===courseFilter.value);
+  card.hidden=!match;if(match)visible++;
+ }
+ count.textContent=visible+' évaluation'+(visible>1?'s':'');
+ empty.hidden=visible!==0;
+}
+classFilter.addEventListener('change',()=>{updateCourses();filter();});
+courseFilter.addEventListener('change',filter);
+updateCourses();filter();
+})();
+</script>
+{% endblock %}
