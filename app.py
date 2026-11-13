@@ -3700,9 +3700,13 @@ def planning_share():
                 (sid,uid,address,subject,plain,href,markup))
             queued+=1
     audit('planning.shared',f'{mode}:weeks={len(weeks)}:classes={len(class_ids)}:sessions={published}:queued={queued}')
-    message=(f'{len(weeks)} semaine(s), {len(class_ids)} classe(s) sélectionnées. '+
-             (f'{published} séance(s) publiée(s). ' if mode=='private' else '')+
-             f'{queued} e-mail(s) mis en file pour les destinataires concernés.')
+    if queued:
+        email_summary=(f'{queued} personne sera informée par e-mail.' if queued==1
+                       else f'{queued} personnes seront informées par e-mail.')
+    else:
+        email_summary='Aucun e-mail à envoyer pour cette sélection.'
+    message=(('Planning partagé avec succès. ' if mode=='private'
+              else 'Envoi du planning lancé. ')+email_summary)
     if request.accept_mimetypes.best=='application/json':
         return jsonify(ok=True,message=message,queued=queued,published=published)
     flash(message,'success')
