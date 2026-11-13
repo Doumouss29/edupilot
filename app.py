@@ -1806,7 +1806,11 @@ def people_bulk():
                     ('unlocks WHERE teacher_id=?','déverrouillages'),
                     ('bulletin_publications WHERE student_id=?','bulletins publiés'),
                     ('teacher_memos WHERE teacher_id=?','mémos enseignant'),
-                    ('teacher_memos WHERE created_by=?','mémos générés')]
+                    ('teacher_memos WHERE created_by=?','mémos générés'),
+                    ('academic_year_promotions WHERE student_id=?','historique de promotion'),
+                    ('academic_year_promotions WHERE actor_id=?','décisions de promotion'),
+                    ('course_documents WHERE uploader_id=?','documents pédagogiques'),
+                    ('assessment_corrections WHERE author_id=?','corrections d’évaluations')]
                 blocked=[]
                 for user in users:
                     reasons=[label for clause,label in checks
