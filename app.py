@@ -1843,8 +1843,9 @@ def people_bulk():
                     c.execute('DELETE FROM users WHERE id=? AND school_id=?',(uid,school_id()))
             else:
                 c.execute('UPDATE users SET active=? WHERE school_id=? AND id IN ('+','.join('?' for _ in selected)+')',(1 if action=='activate' else 0,school_id(),*selected))
-    except DBIntegrityError:
-        app.logger.warning('Suppression/modification utilisateur bloquée par une dépendance SQL (school_id=%s)',school_id())
+    except DBIntegrityError as exc:
+        constraint=getattr(getattr(exc,'diag',None),'constraint_name',None)
+        app.logger.warning('Suppression/modification utilisateur bloquée (school_id=%s, contrainte=%s)',school_id(),constraint or type(exc).__name__)
         flash('Impossible de supprimer ce compte : des données liées sont encore présentes. Suspendez-le ou contactez le support. Aucune suppression partielle effectuée.','error')
         return redirect(url_for('people'))
     audit('users.'+action,','.join(str(x) for x in selected))
