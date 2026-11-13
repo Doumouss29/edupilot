@@ -1784,58 +1784,65 @@ def people_bulk():
         successes=sum(1 for person in matches if create_invite(person['id']))
         flash(f'{successes} invitation(s) envoyée(s) sur {len(matches)}.','success' if successes==len(matches) else 'error')
         return redirect(url_for('people'))
-    with db() as c:
-        c.execute('BEGIN IMMEDIATE')
-        users=c.execute('SELECT id,role,name FROM users WHERE school_id=? AND id IN ('+','.join('?' for _ in selected)+')',(school_id(),*selected)).fetchall()
-        if (len(users)!=len(selected) or
-                any(x['role'] in ('admin','superadmin') or
-                    (x['role']=='administratif' and current_user()['role']!='admin') for x in users)):
-            flash('Sélection invalide : certains comptes ne sont pas gérables dans cet établissement.','error')
-            return redirect(url_for('people'))
-        if action=='delete':
-            # Explain every blocker before changing anything: deletion remains all-or-nothing.
-            checks=[
-                ('grades WHERE student_id=?','notes'),
-                ('attendance WHERE student_id=?','présences'),
-                ('submissions WHERE student_id=?','travaux remis'),
-                ('courses WHERE teacher_id=?','cours affectés'),
-                ('lessons WHERE teacher_id=?','séances'),
-                ('teacher_history WHERE teacher_id=?','historique enseignant'),
-                ('grade_history WHERE actor_id=?','historique des notes'),
-                ('unlocks WHERE teacher_id=?','déverrouillages'),
-                ('bulletin_publications WHERE student_id=?','bulletins publiés'),
-                ('teacher_memos WHERE teacher_id=?','mémos enseignant'),
-                ('teacher_memos WHERE created_by=?','mémos générés')]
-            blocked=[]
-            for user in users:
-                reasons=[label for clause,label in checks
-                         if c.execute('SELECT 1 FROM '+clause+' LIMIT 1',(user['id'],)).fetchone()]
-                if reasons:
-                    blocked.append((user['name'],user['id'],reasons))
-            if blocked:
-                details=[]
-                for name,uid,reasons in blocked[:20]:
-                    details.append(str(name)+' (ID '+str(uid)+') : '+', '.join(reasons))
-                suffix=(' ; et '+str(len(blocked)-20)+' autre(s) compte(s).' if len(blocked)>20 else '.')
-                flash('Suppression refusée pour '+str(len(blocked))+' compte(s) : '+' ; '.join(details)+suffix+
-                      ' Suspendez les comptes possédant un historique.','error')
+    try:
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            users=c.execute('SELECT id,role,name FROM users WHERE school_id=? AND id IN ('+','.join('?' for _ in selected)+')',(school_id(),*selected)).fetchall()
+            if (len(users)!=len(selected) or
+                    any(x['role'] in ('admin','superadmin') or
+                        (x['role']=='administratif' and current_user()['role']!='admin') for x in users)):
+                flash('Sélection invalide : certains comptes ne sont pas gérables dans cet établissement.','error')
                 return redirect(url_for('people'))
-            for user in users:
-                uid=user['id']
-                c.execute('DELETE FROM parent_links WHERE student_id=? OR parent_id=?',(uid,uid))
-                c.execute('DELETE FROM enrollments WHERE student_id=?',(uid,))
-                c.execute('DELETE FROM notifications WHERE user_id=?',(uid,))
-                c.execute('DELETE FROM invites WHERE user_id=?',(uid,))
-                # Clear non-academic auxiliary records that reference the account.
-                c.execute('DELETE FROM email_delivery_log WHERE recipient_user_id=?',(uid,))
-                c.execute('DELETE FROM push_subscriptions WHERE user_id=?',(uid,))
-                c.execute('DELETE FROM mfa_recovery_codes WHERE user_id=?',(uid,))
-                c.execute('DELETE FROM mfa_trusted_devices WHERE user_id=?',(uid,))
-                c.execute('DELETE FROM mfa_settings WHERE user_id=?',(uid,))
-                c.execute('UPDATE audit SET user_id=NULL WHERE user_id=?',(uid,))
-                c.execute('DELETE FROM users WHERE id=? AND school_id=?',(uid,school_id()))
-        else:
-            c.execute('UPDATE users SET active=? WHERE school_id=? AND id IN ('+','.join('?' for _ in selected)+')',(1 if action=='activate' else 0,school_id(),*selected))
+            if action=='delete':
+                # Explain every blocker before changing anything: deletion remains all-or-nothing.
+                checks=[
+                    ('grades WHERE student_id=?','notes'),
+                    ('attendance WHERE student_id=?','présences'),
+                    ('submissions WHERE student_id=?','travaux remis'),
+                    ('courses WHERE teacher_id=?','cours affectés'),
+                    ('lessons WHERE teacher_id=?','séances'),
+                    ('teacher_history WHERE teacher_id=?','historique enseignant'),
+                    ('grade_history WHERE actor_id=?','historique des notes'),
+                    ('unlocks WHERE teacher_id=?','déverrouillages'),
+                    ('bulletin_publications WHERE student_id=?','bulletins publiés'),
+                    ('teacher_memos WHERE teacher_id=?','mémos enseignant'),
+                    ('teacher_memos WHERE created_by=?','mémos générés')]
+                blocked=[]
+                for user in users:
+                    reasons=[label for clause,label in checks
+                             if c.execute('SELECT 1 FROM '+clause+' LIMIT 1',(user['id'],)).fetchone()]
+                    if reasons:
+                        blocked.append((user['name'],user['id'],reasons))
+                if blocked:
+                    details=[]
+                    for name,uid,reasons in blocked[:20]:
+                        details.append(str(name)+' (ID '+str(uid)+') : '+', '.join(reasons))
+                    suffix=(' ; et '+str(len(blocked)-20)+' autre(s) compte(s).' if len(blocked)>20 else '.')
+                    flash('Suppression refusée pour '+str(len(blocked))+' compte(s) : '+' ; '.join(details)+suffix+
+                          ' Suspendez les comptes possédant un historique.','error')
+                    return redirect(url_for('people'))
+                for user in users:
+                    uid=user['id']
+                    c.execute('DELETE FROM parent_links WHERE student_id=? OR parent_id=?',(uid,uid))
+                    c.execute('DELETE FROM enrollments WHERE student_id=?',(uid,))
+                    c.execute('DELETE FROM notifications WHERE user_id=?',(uid,))
+                    # Delivery jobs also hold a foreign key to users; remove only this account's jobs.
+                    c.execute('DELETE FROM notification_delivery_queue WHERE user_id=? AND school_id=?',(uid,school_id()))
+                    c.execute('DELETE FROM invites WHERE user_id=?',(uid,))
+                    # Clear non-academic auxiliary records that reference the account.
+                    c.execute('DELETE FROM email_delivery_log WHERE recipient_user_id=?',(uid,))
+                    c.execute('DELETE FROM push_subscriptions WHERE user_id=?',(uid,))
+                    c.execute('DELETE FROM mfa_recovery_codes WHERE user_id=?',(uid,))
+                    c.execute('DELETE FROM mfa_trusted_devices WHERE user_id=?',(uid,))
+                    c.execute('DELETE FROM mfa_settings WHERE user_id=?',(uid,))
+                    c.execute('UPDATE audit SET user_id=NULL WHERE user_id=?',(uid,))
+                    c.execute('DELETE FROM users WHERE id=? AND school_id=?',(uid,school_id()))
+            else:
+                c.execute('UPDATE users SET active=? WHERE school_id=? AND id IN ('+','.join('?' for _ in selected)+')',(1 if action=='activate' else 0,school_id(),*selected))
+    except DBIntegrityError:
+        app.logger.warning('Suppression/modification utilisateur bloquée par une dépendance SQL (school_id=%s)',school_id())
+        flash('Impossible de supprimer ce compte : des données liées sont encore présentes. Suspendez-le ou contactez le support. Aucune suppression partielle effectuée.','error')
+        return redirect(url_for('people'))
     audit('users.'+action,','.join(str(x) for x in selected))
     flash(f'{len(selected)} utilisateur(s) : action « {action} » appliquée.','success')
     return redirect(url_for('people'))
