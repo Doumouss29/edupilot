@@ -4506,7 +4506,7 @@ def assessments():
         notify_event([course_id],'Nouvelle évaluation : '+title+' ('+course['name']+').','/assessments',teacher_ids=[course['teacher_id']])
         audit('assessment.created',title);flash('Évaluation créée.','success')
         return redirect(url_for('assessments'))
-    sql='''SELECT a.id,a.school_id,a.course_id,a.title,a.kind,a.due_date,a.coefficient,a.description,a.attachment_name,c.name course_name,cl.name class_name,c.teacher_id,
+    sql='''SELECT a.id,a.school_id,a.course_id,a.title,a.kind,a.due_date,a.coefficient,a.description,a.attachment_name,c.name course_name,cl.id class_id,cl.name class_name,c.teacher_id,
            (SELECT ac.body FROM assessment_corrections ac WHERE ac.assessment_id=a.id AND ac.school_id=a.school_id) correction_body,
            (SELECT ac.filename FROM assessment_corrections ac WHERE ac.assessment_id=a.id AND ac.school_id=a.school_id) correction_filename,
            (SELECT ac.published FROM assessment_corrections ac WHERE ac.assessment_id=a.id AND ac.school_id=a.school_id) correction_published
