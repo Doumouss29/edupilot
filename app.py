@@ -4696,7 +4696,6 @@ def grades():
         else:
             gid=execute('INSERT INTO grades(assessment_id,student_id,value,comment) VALUES (?,?,?,?)',(aid,student,value,request.form.get('comment','')[:2000]));old=None
         execute('INSERT INTO grade_history(grade_id,old_value,new_value,actor_id) VALUES (?,?,?,?)',(gid,old,value,u['id']))
-        notify([int(student)],'Une note est disponible pour '+a['title']+'.','/grades')
         audit('grade.saved',str(gid));flash('Note enregistrée.','success');return redirect(url_for('grades'))
     if u['role'] in ('etudiant','parent'):
         student_id=u['id']
@@ -4781,8 +4780,6 @@ def grade_entry(aid):
                     gid=c.execute('INSERT INTO grades(assessment_id,student_id,value,comment) VALUES (?,?,?,?)',(aid,student_id,value,comment)).lastrowid
                 if old!=value:
                     c.execute('INSERT INTO grade_history(grade_id,old_value,new_value,actor_id) VALUES (?,?,?,?)',(gid,old,value,u['id']))
-        if changes and a:
-            notify([x[0] for x in changes],'Une note a été enregistrée pour '+a['title']+'. Consultez Notes et résultats.','/grades')
         audit('grades.batch.updated',f'{aid}:{len(changes)}')
         flash(f'{len(changes)} note(s) enregistrée(s).','success')
         return redirect(url_for('grade_entry',aid=aid))
