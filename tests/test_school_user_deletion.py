@@ -26,6 +26,16 @@ class SchoolUserDeletionTests(unittest.TestCase):
                 id INTEGER PRIMARY KEY,
                 teacher_id INTEGER NOT NULL REFERENCES users(id),
                 created_by INTEGER NOT NULL REFERENCES users(id))""")
+            c.execute("""CREATE TABLE IF NOT EXISTS academic_year_promotions (
+                id INTEGER PRIMARY KEY,
+                student_id INTEGER NOT NULL REFERENCES users(id),
+                actor_id INTEGER NOT NULL REFERENCES users(id))""")
+            c.execute("""CREATE TABLE IF NOT EXISTS course_documents (
+                id INTEGER PRIMARY KEY,
+                uploader_id INTEGER NOT NULL REFERENCES users(id))""")
+            c.execute("""CREATE TABLE IF NOT EXISTS assessment_corrections (
+                id INTEGER PRIMARY KEY,
+                author_id INTEGER NOT NULL REFERENCES users(id))""")
             c.execute("INSERT INTO schools(id,name,slug) VALUES (1,'École Alpha','alpha')")
             for uid,role in ((1,'admin'),(2,'etudiant')):
                 c.execute("""INSERT INTO users(id,school_id,name,email,password_hash,role)
