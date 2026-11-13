@@ -430,14 +430,26 @@ shareForm?.addEventListener('submit',async event=>{
   if(!response.ok||!body.ok)throw new Error(body.error||'Le planning n’a pas pu être partagé.');
   shareDialog.close();
   calendarItems=null;c.refetchEvents();
+  const panel=document.querySelector('.calendar-panel');
+  panel?.querySelectorAll('.planning-share-feedback').forEach(item=>item.remove());
   const notice=document.createElement('div');
-  notice.className='flash success';notice.setAttribute('role','status');
-  notice.textContent=body.message;
-  document.querySelector('.calendar-panel')?.prepend(notice);
+  notice.className='flash success planning-share-feedback edupilot-feedback';
+  notice.setAttribute('role','status');
+  const content=document.createElement('span');
+  content.textContent=body.message;
+  const close=document.createElement('button');
+  close.type='button';close.className='edupilot-feedback-close';
+  close.setAttribute('aria-label','Fermer ce message');close.textContent='×';
+  close.addEventListener('click',()=>notice.remove());
+  notice.append(content,close);
+  panel?.prepend(notice);
+  window.setTimeout(()=>{if(notice.isConnected)notice.remove();},6500);
  }catch(error){
+  shareDialog.querySelectorAll('.planning-share-feedback').forEach(item=>item.remove());
   const notice=document.createElement('div');
-  notice.className='flash error';notice.setAttribute('role','alert');
-  notice.textContent=error.message||'Erreur pendant le partage.';
+  notice.className='flash error planning-share-feedback edupilot-feedback';
+  notice.setAttribute('role','alert');
+  notice.textContent=error.message||'Le partage n’a pas pu être effectué.';
   shareDialog.querySelector('.planning-dialog-header')?.after(notice);
  }finally{
   buttons.forEach(button=>{button.disabled=false;});
