@@ -20,6 +20,12 @@ class SchoolUserDeletionTests(unittest.TestCase):
         project.DB=str(Path(TEMP.name)/(self._testMethodName+'.db'))
         with project.db() as c:
             c.executescript(project.SCHEMA)
+            # SCHEMA contains the portable core; production creates teacher_memos
+            # in an additive startup migration before handling requests.
+            c.execute("""CREATE TABLE IF NOT EXISTS teacher_memos (
+                id INTEGER PRIMARY KEY,
+                teacher_id INTEGER NOT NULL REFERENCES users(id),
+                created_by INTEGER NOT NULL REFERENCES users(id))""")
             c.execute("INSERT INTO schools(id,name,slug) VALUES (1,'École Alpha','alpha')")
             for uid,role in ((1,'admin'),(2,'etudiant')):
                 c.execute("""INSERT INTO users(id,school_id,name,email,password_hash,role)
