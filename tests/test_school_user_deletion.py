@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from werkzeug.security import generate_password_hash
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -80,6 +81,66 @@ class SchoolUserDeletionTests(unittest.TestCase):
         self.assertEqual(response.status_code,302)
         self.assertIsNotNone(project.one('SELECT id FROM users WHERE id=2'))
         self.assertEqual(project.one('SELECT COUNT(*) n FROM notification_delivery_queue WHERE user_id=2')['n'],1)
+
+
+    def test_bulk_invite_active_student_never_connected(self):
+        with patch.object(project,'create_invite',return_value=True) as sender:
+            response=self.client.post('/people/bulk',data={
+                'csrf':'delete-user-csrf','action':'invite','user_ids':['2']})
+        self.assertEqual(response.status_code,302)
+        sender.assert_called_once_with(2)
+        self.assertIsNotNone(project.one('SELECT id FROM users WHERE id=2'))
+
+    def test_bulk_invite_skips_suspended_without_forbidden(self):
+        with project.db() as c:
+            c.execute("UPDATE users SET active=0 WHERE id=2")
+            c.execute("""INSERT INTO users(id,school_id,name,email,password_hash,role)
+                      VALUES (3,1,'Étudiant actif','actif@example.test',?,'etudiant')""",
+                      (generate_password_hash('Password1234'),))
+        with patch.object(project,'create_invite',return_value=True) as sender:
+            response=self.client.post('/people/bulk',data={
+                'csrf':'delete-user-csrf','action':'invite','user_ids':['2','3']})
+        self.assertEqual(response.status_code,302)
+        sender.assert_called_once_with(3)
+
+    def test_bulk_invite_rejects_admin_without_sending(self):
+        with project.db() as c:
+            c.execute("""INSERT INTO users(id,school_id,name,email,password_hash,role)
+                      VALUES (3,1,'Autre administrateur','admin2@example.test',?,'admin')""",
+                      (generate_password_hash('Password1234'),))
+        with patch.object(project,'create_invite') as sender:
+            response=self.client.post('/people/bulk',data={
+                'csrf':'delete-user-csrf','action':'invite','user_ids':['2','3']})
+        self.assertEqual(response.status_code,302)
+        sender.assert_not_called()
+
+    def test_bulk_invite_rejects_foreign_school_selection(self):
+        with project.db() as c:
+            c.execute("INSERT INTO schools(id,name,slug) VALUES (2,'Autre école','beta')")
+            c.execute("""INSERT INTO users(id,school_id,name,email,password_hash,role)
+                      VALUES (3,2,'Autre étudiant','autre@example.test',?,'etudiant')""",
+                      (generate_password_hash('Password1234'),))
+        with patch.object(project,'create_invite') as sender:
+            response=self.client.post('/people/bulk',data={
+                'csrf':'delete-user-csrf','action':'invite','user_ids':['2','3']})
+        self.assertEqual(response.status_code,302)
+        sender.assert_not_called()
+
+    def test_bulk_suspend_and_activate(self):
+        response=self.client.post('/people/bulk',data={
+            'csrf':'delete-user-csrf','action':'suspend','user_ids':['2']})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(project.one('SELECT active FROM users WHERE id=2')['active'],0)
+        response=self.client.post('/people/bulk',data={
+            'csrf':'delete-user-csrf','action':'activate','user_ids':['2']})
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(project.one('SELECT active FROM users WHERE id=2')['active'],1)
+
+    def test_bulk_delete_protects_own_account(self):
+        response=self.client.post('/people/bulk',data={
+            'csrf':'delete-user-csrf','action':'delete','user_ids':['1']})
+        self.assertEqual(response.status_code,302)
+        self.assertIsNotNone(project.one('SELECT id FROM users WHERE id=1'))
 
 
 if __name__=='__main__':
