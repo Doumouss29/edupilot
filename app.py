@@ -1776,13 +1776,27 @@ def people_bulk():
         flash('Limitez les envois d’invitation à 30 utilisateurs par opération.','error')
         return redirect(url_for('people'))
     if action=='invite':
-        matches=allrows('SELECT id,role FROM users WHERE school_id=? AND active=1 AND id IN ('+','.join('?' for _ in selected)+')',(school_id(),*selected))
-        if (len(matches)!=len(selected) or current_user()['id'] in selected or
-                any(x['role'] in ('admin','superadmin') or
-                    (x['role']=='administratif' and current_user()['role']!='admin') for x in matches)):
-            abort(403)
-        successes=sum(1 for person in matches if create_invite(person['id']))
-        flash(f'{successes} invitation(s) envoyée(s) sur {len(matches)}.','success' if successes==len(matches) else 'error')
+        matches=allrows('SELECT id,role,email,active FROM users WHERE school_id=? AND id IN ('+
+                        ','.join('?' for _ in selected)+')',(school_id(),*selected))
+        if len(matches)!=len(selected):
+            flash('Certains comptes sélectionnés ne sont pas accessibles dans cet établissement. Aucune invitation envoyée.','error')
+            return redirect(url_for('people'))
+        if any(x['role'] in ('admin','superadmin') or
+               (x['role']=='administratif' and current_user()['role']!='admin') for x in matches):
+            flash('Sélection non autorisée : retirez les comptes administrateurs ou les profils non gérables.','error')
+            return redirect(url_for('people'))
+        eligible=[person for person in matches if person['active'] and
+                  person['email'] and not is_pending_teacher_email(person['email'])]
+        if not eligible:
+            flash('Aucun compte actif avec une adresse e-mail valide dans la sélection.','error')
+            return redirect(url_for('people'))
+        successes=sum(1 for person in eligible if create_invite(person['id']))
+        skipped=len(selected)-len(eligible)
+        summary=(f'{successes} invitation(s) acceptée(s) pour envoi.'+
+                 (f' {skipped} compte(s) ignoré(s) (suspendus ou sans e-mail).' if skipped else '')+
+                 (f' {len(eligible)-successes} envoi(s) non accepté(s).' if successes<len(eligible) else ''))
+        audit('users.invite',f'accepted={successes}:eligible={len(eligible)}:skipped={skipped}')
+        flash(summary,'success' if successes==len(eligible) else 'error')
         return redirect(url_for('people'))
     try:
         with db() as c:
@@ -1791,7 +1805,7 @@ def people_bulk():
             if (len(users)!=len(selected) or
                     any(x['role'] in ('admin','superadmin') or
                         (x['role']=='administratif' and current_user()['role']!='admin') for x in users)):
-                flash('Sélection invalide : certains comptes ne sont pas gérables dans cet établissement.','error')
+                flash('Sélection invalide : retirez les comptes administrateurs, les profils non autorisés ou ceux d’un autre établissement.','error')
                 return redirect(url_for('people'))
             if action=='delete':
                 # Explain every blocker before changing anything: deletion remains all-or-nothing.
